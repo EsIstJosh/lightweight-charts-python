@@ -422,6 +422,29 @@ class SeriesCommon(Pane):
             end_time = self._single_datetime_format(end_time) if end_time else None
         return VerticalSpan(self, start_time, end_time, color)
 
+    def tooltip(self, line_color: str = 'rgba(0, 0, 0, 0.2)', follow_mode: str = 'top'):
+        """
+        Attach a tooltip primitive to the series.
+        """
+        if not self._chart.primitives.get('ToolTip'):
+            js_code = f"""
+            {self._chart.id}.attachTooltip('{self.name}', '{line_color}');
+            """
+            self._chart.run_script(js_code)
+            self._chart.primitives['ToolTip'] = True  # Mark tooltip as attached
+        else:
+            self._update_tooltip_follow_mode(follow_mode)
+
+    def detach_tooltip(self):
+        """
+        Detach the tooltip primitive from the series.
+        """
+        if self._chart.primitives.get('ToolTip'):
+            js_code = f"""
+            {self._chart.id}.detachTooltip('{self.name}');
+            """
+            self._chart.run_script(js_code)
+            self._chart.primitives['ToolTip'] = False  # Mark tooltip as detached
 
 class Line(SeriesCommon):
     def __init__(
