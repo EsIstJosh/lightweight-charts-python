@@ -319,6 +319,52 @@ export class Handler {
         return { name, series: bar };
     }
     
+        // Method to attach a TooltipPrimitive to a specified series
+        attachTooltip(seriesName: string, lineColor: string): void {
+            try {
+                if (!seriesName) {
+                    console.warn(`Series name is not provided.`);
+                    return;
+                }
+
+                // Detach any existing tooltips from the chart
+                this.clearAllTooltips();
+
+                // Create a new TooltipPrimitive instance
+                const tooltipPrimitive = new TooltipPrimitive({ lineColor });
+
+                // Find the series by name in legend._lines
+                const line = this.legend._lines.find(s => s.name === seriesName);
+                if (!line || !line.series) {
+                    console.warn(`Series with the name "${seriesName}" not found.`);
+                    return;
+                }
+
+                // Attach the new tooltip primitive to the series
+                line.series.attachPrimitive(tooltipPrimitive);
+                this.tooltipPrimitives.set(seriesName, tooltipPrimitive); // Store the instance in the map
+                console.log("Tooltip primitive attached to", seriesName);
+            } catch (error) {
+                console.error("Failed to attach TooltipPrimitive:", error);
+            }
+        }
+
+        // Method to detach the TooltipPrimitive from a specified series
+        detachTooltip(seriesName: string): void {
+            const tooltipPrimitive = this.tooltipPrimitives.get(seriesName);
+
+            if (tooltipPrimitive) {
+                try {
+                    tooltipPrimitive.detached(); // Call `detached` on TooltipPrimitive
+                    this.tooltipPrimitives.delete(seriesName); // Remove from the map
+                    console.log(`Tooltip primitive detached from ${seriesName}.`);
+                } catch (error) {
+                    console.error(`Failed to detach TooltipPrimitive from ${seriesName}:`, error);
+                }
+            } else {
+                console.warn(`No TooltipPrimitive found for series "${seriesName}" to detach.`);
+            }
+        }
     
     
     createToolBox() {
@@ -326,6 +372,7 @@ export class Handler {
         this.div.appendChild(this.toolBox.div);
     }
 
+    
     createTopBar() {
         this._topBar = new TopBar(this);
         this.wrapper.prepend(this._topBar._div)
