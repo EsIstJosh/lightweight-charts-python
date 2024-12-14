@@ -12,7 +12,7 @@ from .drawings import Box, HorizontalLine, RayLine, TrendLine, TwoPointDrawing, 
 from .topbar import TopBar
 from .util import (
     BulkRunScript, Pane, Events, IDGen, as_enum, jbool, js_json, TIME, NUM, FLOAT,
-    LINE_STYLE, MARKER_POSITION, MARKER_SHAPE, CROSSHAIR_MODE,
+    LINE_STYLE, MARKER_POSITION, MARKER_SHAPE, CANDLE_SHAPE CROSSHAIR_MODE,
     PRICE_SCALE_MODE, marker_position, marker_shape, js_data,
 )
 
@@ -665,6 +665,92 @@ class Bar(SeriesCommon):
             delete {self.id}
         ''')
         
+class CustomCandle(SeriesCommon):
+    def __init__(
+            self,
+            chart,
+            name: str,
+            up_color: str ,
+            down_color: str ,
+            border_up_color: str,
+            border_down_color: str ,
+            wick_up_color: str ,
+            wick_down_color: str ,
+            wick_visible: bool = True,
+            border_visible: bool= True,
+            bar_width: float = 0.8,
+            radius: Optional[str] = 100,
+            shape: str = 'Rectangle',
+            combineCandles: int = 1,
+            line_width: int = 1,
+            line_style: LINE_STYLE = 'solid',
+            price_line: bool = True,
+            price_label: bool = True,
+            group: str = '',
+            legend_symbol: Union[str, List[str]] = ['⬤', '⬤'],
+            price_scale_id: Optional[str] = None,
+
+        ):
+        super().__init__(chart, name)
+        self.up_color = up_color
+        self.down_color = down_color
+        self.group = group  # Store group for legend grouping
+        self.legend_symbol = legend_symbol if isinstance(legend_symbol, list) else [legend_symbol, legend_symbol]
+        radius_value = radius if radius is not None else 3
+
+        # Define the radius function as a JavaScript function string if none provided
+        radius_func = f"function(barSpacing) {{ return barSpacing < {radius_value} ? 0 : barSpacing / {radius_value}; }}"
+
+        # Run the JavaScript to initialize the series with the provided options
+        self.run_script(f'''
+            {self.id} = {chart.id}.createCustomOHLCSeries(
+                "{name}",
+                {{
+                    group: '{group}',
+                    upColor: '{up_color}',
+                    downColor: '{down_color}',
+                    borderUpColor: '{border_up_color}',
+                    borderDownColor: '{border_down_color}',
+                    wickUpColor: '{wick_up_color or border_up_color}',
+                    wickDownColor: '{wick_down_color or border_down_color}',
+                    wickVisible: {jbool(wick_visible)},
+                    borderVisible: {jbool(border_visible)},
+                    barSpacing: {bar_width},
+                    radius: {radius_func},
+                    shape: '{shape}',
+                    lastValueVisible: {jbool(price_label)},
+                    priceLineVisible: {jbool(price_line)},
+                    legendSymbol: {json.dumps(self.legend_symbol)},
+                    priceScaleId: {f'"{price_scale_id}"' if price_scale_id else 'undefined'},
+                    seriesType: "customCandle",
+                    chandelierSize: {combineCandles},
+                    lineStyle: {as_enum(line_style, LINE_STYLE)},
+                    lineWidth: {line_width},
+
+                }}
+            )
+        null''')
+
+    def set(self, df: Optional[pd.DataFrame] = None):
+        if df is None or df.empty:
+            self.run_script(f'{self.id}.series.setData([])')
+            self.data = pd.DataFrame()
+            return
+        df = self._df_datetime_format(df)
+        self.data = df.copy()
+        self._last_bar = df.iloc[-1]
+        self.run_script(f'{self.id}.series.setData({js_data(df)})')
+
+    def update(self, series: pd.Series):
+        series = self._series_datetime_format(series)
+        if series['time'] != self._last_bar['time']:
+            self.data.loc[self.data.index[-1]] = self._last_bar
+            self.data = pd.concat([self.data, series.to_frame().T], ignore_index=True)
+            self._chart.events.new_bar._emit(self)
+
+        self._last_bar = series
+        self.run_script(f'{self.id}.series.update({js_data(series)})')
+
 
 class Candlestick(SeriesCommon):
     def __init__(self, chart: 'AbstractChart'):
@@ -966,7 +1052,61 @@ class AbstractChart(Candlestick, Pane):
             price_line, price_label, group, legend_symbol, price_scale_id
         )
 
-    
+    def create_custom_candle(
+            self,
+            name: str = '',
+            up_color: str = None,
+            down_color: str = None,
+            border_up_color='rgba(0,255,0,1)',
+            border_down_color='rgba(255,0,0,1)',
+            wick_up_color='rgba(0,255,0,1)',
+            wick_down_color='rgba(255,0,0,1)',
+            wick_visible: bool = True,
+            border_visible: bool = True,
+            bar_width: float = 0.8,
+            rounded_radius: Union[float, int] = 100,
+            shape: Literal[CANDLE_SHAPE] = "Rectangle",
+            combineCandles: int = 1,
+            line_width: int = 1,
+            line_style: LINE_STYLE = 'solid', 
+            price_line: bool = True,
+            price_label: bool = True,
+            group: str = '',
+            legend_symbol: Union[str, List[str]] = ['⑃', '⑂'],
+            price_scale_id: Optional[str] = None,
+        ) -> CustomCandle:
+        """
+        Creates and returns a CustomCandle object.
+        """
+        # Validate that legend_symbol is either a string or a list of two strings
+        if not isinstance(legend_symbol, (str, list)):
+            raise TypeError("legend_symbol must be a string or list of strings for CustomCandle series.")
+        if isinstance(legend_symbol, list) and len(legend_symbol) != 2:
+            raise ValueError("legend_symbol list must contain exactly two symbols for CustomCandle series.")
+
+        return CustomCandle(
+            self,
+            name=name,
+            up_color=up_color or border_up_color,
+            down_color=down_color or border_down_color,
+            border_up_color=border_up_color or up_color,
+            border_down_color=border_down_color or down_color,
+            wick_up_color=wick_up_color or border_up_color or border_up_color,
+            wick_down_color=wick_down_color or border_down_color or border_down_color,
+            wick_visible=wick_visible,
+            border_visible=border_visible,
+            bar_width=bar_width,
+            radius=rounded_radius,
+            shape=shape,
+            combineCandles=combineCandles,
+            line_style= line_style,
+            line_width= line_width,
+            price_line=price_line,
+            price_label=price_label,
+            group=group,
+            legend_symbol=legend_symbol,
+            price_scale_id=price_scale_id,
+        )
         
        
     def lines(self) -> List[Line]:

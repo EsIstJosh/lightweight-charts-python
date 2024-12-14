@@ -2,13 +2,13 @@ import { DrawingTool } from "../drawing/drawing-tool";
 import { TrendLine } from "../trend-line/trend-line";
 import { Box } from "../box/box";
 import { Drawing } from "../drawing/drawing";
-import { ContextMenu } from "../context-menu/context-menu";
 import { GlobalParams } from "./global-params";
 import { IChartApi, ISeriesApi, SeriesType } from "lightweight-charts";
 import { HorizontalLine } from "../horizontal-line/horizontal-line";
 import { RayLine } from "../horizontal-line/ray-line";
 import { VerticalLine } from "../vertical-line/vertical-line";
-
+import { Handler } from "./handler";
+// Fix inconsistent imports of DrawingOptions
 
 interface Icon {
     div: HTMLDivElement,
@@ -32,15 +32,15 @@ export class ToolBox {
 
     private _commandFunctions: Function[];
     private _handlerID: string;
-
     private _drawingTool: DrawingTool;
-
-    constructor(handlerID: string, chart: IChartApi, series: ISeriesApi<SeriesType>, commandFunctions: Function[]) {
+    private handler: Handler 
+    constructor(handler: Handler, handlerID: string, chart: IChartApi, series: ISeriesApi<SeriesType>, commandFunctions: Function[]) {
         this._handlerID = handlerID;
         this._commandFunctions = commandFunctions;
         this._drawingTool = new DrawingTool(chart, series, () => this.removeActiveAndSave());
         this.div = this._makeToolBox()
-        new ContextMenu(this.saveDrawings, this._drawingTool);
+        this.handler = handler 
+        this.handler.ContextMenu.setupDrawingTools(this.saveDrawings, this._drawingTool)
 
         commandFunctions.push((event: KeyboardEvent) => {
             if ((event.metaKey || event.ctrlKey) && event.code === 'KeyZ') {
