@@ -6,16 +6,23 @@
     "build": "./build.sh"
   },
   "devDependencies": {
+    "@rollup/plugin-alias": "^5.1.1",
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^11.1.6",
+    "@types/node": "^22.13.1",
     "rollup": "^4.27.2",
+    "rollup-plugin-node-polyfills": "^0.2.1",
     "typescript": "^5.6.3",
-    "vite": "^4.5.5"
+    "vite": "^4.5.6"
   },
   "dependencies": {
+    "@codemirror/basic-setup": "^0.20.0",
+    "@codemirror/lang-json": "^6.0.1",
+    "codemirror": "^6.0.1",
     "dts-bundle-generator": "^8.1.2",
     "fancy-canvas": "^2.1.0",
-    "lightweight-charts": "^4.2.1",
+    "lightweight-charts": "^5.0.1",
+    "node-gyp": "^11.0.0",
     "tslib": "^2.8.1"
   }
 }
