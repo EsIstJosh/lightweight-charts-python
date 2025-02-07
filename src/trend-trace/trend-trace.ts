@@ -73,7 +73,7 @@ import {
   TRENDTRACE PLUGIN CLASS
 ============================================================================ */
 export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
-  static type = "TrendTrace";
+  public _type = "TrendTrace";
 
   _paneViews: TrendTracePaneView[];
   _sequence: Sequence;
@@ -87,7 +87,7 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
   p2: LogicalPoint | null  = null ;
   protected _points: (Point | null)[] = [];
   public title: string = "";
-
+  static _type: string = "Trend-Trace"
   protected _startDragPoint: LogicalPoint | null = null;
   protected _latestHoverPoint: any | null = null;
 
@@ -163,20 +163,43 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
         };
     }
 
-    /**
-     * Deserializes a JSON object to create a new Sequence instance.
-     *
-     * @param json - The JSON object containing Sequence data and options.
-     * @param handler - The handler instance required by the Sequence constructor.
-     * @param source - The ISeriesApiExtended instance required by the Sequence constructor.
-     * @returns A new Sequence instance populated with the provided data.
-     */
-    public  fromJSON(
-        json: { data: DataPoint[]; p1: LogicalPoint; p2: LogicalPoint, options: SequenceOptions}):void  { 
-         this._sequence.setData(json.data)
-         this.applyOptions(json.options)
-    }
+/**
+ * Deserializes a JSON object to update the current Sequence instance.
+ *
+ * @param json - The JSON object containing optional Sequence data and options.
+ */
+public fromJSON(json: {
+  data?: DataPoint[];
+  p1?: LogicalPoint;
+  p2?: LogicalPoint;
+  options?: SequenceOptions;
+}): void {
+  // If data is provided, update the sequence's data.
+  if (json.data) {
+    this._sequence.setData(json.data);
+  }
 
+  if (json.options) {
+    // Cast json.options as a generic record to satisfy the index signature.
+    const options = json.options as Record<string, any>;
+    for (const key in options) {
+      if (Object.prototype.hasOwnProperty.call(options, key)) {
+        // Cast key to keyof SequenceOptions.
+        const typedKey = key as keyof SequenceOptions;
+        this.applyOptions({ [typedKey]: options[typedKey] });
+      }
+    }
+  }
+  
+
+  // Optionally update the logical points if provided.
+  if (json.p1) {
+    this.p1 = json.p1;
+  }
+  if (json.p2) {
+    this.p2 = json.p2;
+  }
+}
 
     // ...existing code...
     attached(params: SeriesAttachedParameter): SeriesAttachedParameter<Time> {

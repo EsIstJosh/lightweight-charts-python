@@ -1,0 +1,10 @@
+{
+    "title": "Candlestick",
+    "upColor": "rgba(0, 103, 33, 0.33)",
+    "downColor": "rgba(110, 0, 0, 0.33)",
+    "borderUpColor": "#006721",
+    "borderDownColor": "#6E0000",
+    "wickUpColor": "#006721",
+    "wickDownColor": "#6E0000"
+  }
+  

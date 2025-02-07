@@ -798,7 +798,7 @@ class Candlestick(SeriesCommon):
         """
         Sets the initial data for the chart.\n
         :param df: columns: date/time, open, high, low, close, volume (if volume enabled).
-        :param keep_drawings: keeps any drawings made through the toolbox. Otherwise, they will be deleted.
+        :param 6: keeps any drawings made through the toolbox. Otherwise, they will be deleted.
         """
         if df is None or df.empty:
             self.run_script(f'{self.id}.series.setData([])')
@@ -1108,27 +1108,126 @@ class PositionPlot(SeriesCommon):
 class AbstractChart(Candlestick, Pane):
     def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False,
-                 autosize: bool = True, position: FLOAT = 'left'):
+                 autosize: bool = True, position: FLOAT = 'left', defaults: str = ''):
         Pane.__init__(self, window)
 
         self._lines = []
         self._scale_candles_only = scale_candles_only
         self._width = width
         self._height = height
-        self.events: Events = Events(self)
+        self.events: Events = Events(self)        
 
         from lightweight_charts.polygon import PolygonAPI
         self.polygon: PolygonAPI = PolygonAPI(self)
 
         self.run_script(
             f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})')
-
+        
         Candlestick.__init__(self, self)
 
         self.topbar: TopBar = TopBar(self)
         if toolbox:
             self.toolbox: ToolBox = ToolBox(self)
+        if defaults != '':
+            self.defaults = defaults 
+            self.set_defaults(defaults)
+            # Register the save defaults callback. (Note: using "save_defaults" instead of "save_drawings")
+            self.win.handlers[f'save_defaults'] = self._save_defaults
+            self.events.save_defaults += self._save_defaults
 
+
+    def _save_defaults(self, key: str, options: str) -> None:
+            """
+            Callback method that receives a key and a JSON string of options.
+            It parses the JSON and saves the resulting object in self.exportedDefaults.
+            Then writes it to disk in the defaults folder. If a file named `<key>.json` already exists,
+            it is overwritten; otherwise, a new file is created.
+
+            This method is invoked via a JS callback like:
+                window.callbackFunction("save_defaults_<key>_~_<json_options>")
+
+            :param key: The key under which to store the defaults.
+            :param options: A JSON string containing the options.
+            """
+            try:
+                # Parse the options JSON string.
+                parsed_options = json.loads(options)
+                # Save to memory.
+                if not hasattr(self, 'exportedDefaults'):
+                    self.exportedDefaults = {}
+                self.exportedDefaults[key] = parsed_options
+                print(f"Saved defaults for key '{key}' in memory: {parsed_options}")
+
+                # Determine the folder to save defaults.
+                # Here we assume that self.defaults holds the defaults folder path (passed in via the constructor)
+                # Otherwise, default to a folder named "./defaults".
+                defaults_folder = self.defaults if isinstance(self.defaults, str) else "./defaults"
+                # Ensure the folder exists.
+                if not os.path.exists(defaults_folder):
+                    os.makedirs(defaults_folder)
+                # Build the file path.
+                file_path = os.path.join(defaults_folder, f"{key}.json")
+                # Write the parsed options to the file (pretty-printed).
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(parsed_options, f, indent=2)
+                print(f"Defaults for key '{key}' written to disk at: {file_path}")
+            except Exception as e:
+                print(f"Error saving defaults for key '{key}': {e}")
+
+            
+    def set_defaults(self, defaults_dir: str) -> None:
+        """
+        Recursively loads all JSON default files from the provided directory and applies them
+        to the chart's defaultManager via run_script. In addition, if a file with key "chart"
+        is encountered, its options are applied to the chart via chart.applyOptions.
+
+        Assumes that:
+        - self has an 'id' property that is used in JS.
+        - self has a method 'run_script' that executes JS code.
+        - In the JS environment, the handler instance (referenced by self.id)
+            already has a 'defaultManager' property with a set method,
+            and a 'chart' property with an applyOptions method.
+
+        :param defaults_dir: The directory where JSON default files reside.
+        """
+        # Recursively walk through the directory.
+        for root, dirs, files in os.walk(defaults_dir):
+            for filename in files:
+                if filename.endswith('.json'):
+                    # Use the filename (without extension) as the key.
+                    key = os.path.splitext(filename)[0]
+                    file_path = os.path.join(root, filename)
+                    try:
+                        with open(file_path, 'r') as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        print(f"Error loading {file_path}: {e}")
+                        continue
+
+                    # Convert the Python dict to a JSON string.
+                    json_data = json.dumps(data)
+                    # Construct a JS snippet to call defaultManager.set on the chart's id.
+                    js_code = f'''
+                    {self.id}.defaultsManager.set("{key}", {json_data});
+                    '''
+                    try:
+                        # Execute the JS code in the browser/webview.
+                        self.run_script(js_code)
+                        print(f"Set defaults for key '{key}' successfully.")
+                    except Exception as e:
+                        print(f"Error running script for key '{key}': {e}")
+
+                    # If the key is "chart", apply the chart defaults.
+                if key.lower() == "chart":
+                    # Using spread syntax to ensure we apply all properties.
+                    js_apply = f'''
+                    {self.id}.chart.applyOptions({{ ...{self.id}.defaultsManager.get("chart") }});
+                    '''
+                    try:
+                        self.run_script(js_apply)
+                        print("Applied chart defaults successfully.")
+                    except Exception as e:
+                        print(f"Error applying chart defaults: {e}")
     def fit(self):
         """
         Fits the maximum amount of the chart data within the viewport.

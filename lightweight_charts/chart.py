@@ -166,7 +166,8 @@ class Chart(abstract.AbstractChart):
         inner_width: float = 1.0,
         inner_height: float = 1.0,
         scale_candles_only: bool = False,
-        position: FLOAT = 'left'
+        position: FLOAT = 'left',
+        defaults: str = None
     ):
         Chart.WV.debug = debug
         self._i = Chart.WV.create_window(
@@ -183,11 +184,11 @@ class Chart(abstract.AbstractChart):
         self.is_alive = True
 
         if Chart._main_window_handlers is None:
-            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position)
+            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults)
             Chart._main_window_handlers = self.win.handlers
         else:
             window.handlers = Chart._main_window_handlers
-            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position)
+            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults)
 
     def show(self, block: bool = False):
         """

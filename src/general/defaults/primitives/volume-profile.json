@@ -1,0 +1,17 @@
+{
+    "visible": true,
+    "sections": 0,
+    "upColor": null,
+    "downColor": null,
+    "borderUpColor": null,
+    "borderDownColor": null,
+    "rightSide": true,
+    "width": 0,
+    "lineColor": "#ffffff",
+    "lineStyle": "Solid",
+    "drawGrid": true,
+    "gridWidth": 1,
+    "gridColor": "rgba(255, 255, 255, 0.125)",
+    "gridLineStyle": "SparseDotted"
+  }
+  

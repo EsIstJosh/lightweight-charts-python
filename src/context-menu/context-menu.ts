@@ -92,6 +92,7 @@ import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
 import { ForkLine, PitchFork, PitchForkOptions } from "../pitchfork/pitchfork";
 import { ThreePointDrawing } from "../drawing/three-point-drawing";
 import { OffsetPoint } from "../helpers/general";
+import { DataMenu } from "./data-menu";
 
 // ----------------------------------
 // If you have actual code referencing commented-out or removed imports,
@@ -106,7 +107,6 @@ interface Item {
   action: Function;
   closeAction: Function | null;
 }
-
 declare const window: GlobalParams;
 // Define a common interface for an option descriptor.
 interface OptionDescriptor {
@@ -133,7 +133,7 @@ export class ContextMenu {
   public recentDrawing: Drawing | null = null;
 
   private volumeProfile: VolumeProfile | null = null;
-
+  public dataMenu: DataMenu | null 
   constructor(
     private handler: Handler,
     private handlerMap: Map<string, Handler>,
@@ -152,7 +152,7 @@ export class ContextMenu {
     //this.handler.chart.subscribeCrosshairMove((param: MouseEventParams) => {
     //  this.handleCrosshairMove(param);
     //});
-
+    this.dataMenu = new DataMenu({contextMenu: this, handler: this.handler})
     this.setupMenu();
   }
   private constraints: Record<
@@ -168,10 +168,11 @@ export class ContextMenu {
     lineStyle: { min: 0, max: 4 },
 
     seriesType: { skip: true },
-    chandelierSize: { skip: true },
-    volumeCandles: { skip: true },
+    chandelierSize: {min:1},// skip: true },
+    dynamicCandles: { skip: true },
     volumeMALength: { skip: true },
     volumeMultiplier: { skip: true },
+    volumeOpacityPeriod : {skip: true}
   };
   public setupDrawingTools(saveDrawings: Function, drawingTool: DrawingTool) {
     this.saveDrawings = saveDrawings;
@@ -1192,7 +1193,7 @@ export class ContextMenu {
     // This will render a dropdown that shows all options and executes the corresponding action on change.
     this.addMenuInput(this.div, {
       type: "hybrid",
-      label: "Move series to pane",
+      label: "Move to pane",
       sublabel: currentValue,
       value: currentValue,
       onChange: (newValue: string) => {
@@ -1318,31 +1319,51 @@ export class ContextMenu {
     //}else {
     //  // Volume candles are disabled: add a number input for chandelier size.
 
-    if (
-      series instanceof ohlcSeries &&
-      (series.options() as OhlcSeriesOptions).chandelierSize
-    ) {
-      // series is an OhlcSeries and has a defined chandelierSize option.
-      // Your code here...
-
-      this.addNumberInput(
-        "Chandelier Size",
-        (series.options() as OhlcSeriesOptions).chandelierSize ?? 1,
-        (newValue: number) => {
-          const options = { chandelierSize: newValue };
-          series.applyOptions(options as Partial<OhlcSeriesOptions>);
-          console.log(`Updated Chandelier Size to ${newValue}`);
-          // Optionally repopulate the menu dynamically if needed.
-        },
-        1,
-        100,
-        1
-      );
-    }
+   // if (
+   //   series instanceof ohlcSeries &&
+   //   (series.options() as OhlcSeriesOptions).chandelierSize
+   // ) {
+   //   // series is an OhlcSeries and has a defined chandelierSize option.
+   //   // Your code here...
+//
+   //   this.addNumberInput(
+   //     "Chandelier Size",
+   //     (series.options() as OhlcSeriesOptions).chandelierSize ?? 1,
+   //     (newValue: number) => {
+   //       const options = { chandelierSize: newValue };
+   //       series.applyOptions(options as Partial<OhlcSeriesOptions>);
+   //       console.log(`Updated Chandelier Size to ${newValue}`);
+   //       // Optionally repopulate the menu dynamically if needed.
+   //     },
+   //     1,
+   //     100,
+   //     1
+   //   );
+   // }
     //
     //
     // *************************************************************************
     // Add other options dynamically
+
+
+  // Add a new input for volume opacity period if volume opacity is enabled.
+  if (seriesOptions.enableVolumeOpacity) {
+    this.addNumberInput(
+      "Volume Opacity Period",
+      seriesOptions.volumeOpacityPeriod ?? 21, // Default period if not set
+      (newValue: number) => {
+        const options = { volumeOpacityPeriod: newValue };
+        series.applyOptions(options as Partial<OhlcSeriesOptions>);
+        console.log(`Updated Volume Opacity Period to ${newValue}`);
+        // Optionally, repopulate the menu if you want to reflect the change immediately.
+      },
+      1,    // Minimum period
+      10000,  // Maximum period (adjust as needed)
+      1     // Step value
+    );
+  }
+
+
     otherOptions.forEach((option) => {
       const optionLabel = camelToTitle(option.label); // Human-readable label
 
@@ -1350,24 +1371,19 @@ export class ContextMenu {
       if (this.constraints[option.label]?.skip) {
         return;
       }
-
       if (typeof option.value === "boolean") {
-        // Add a menu item with a checkbox for boolean options
-        this.addMenuItem(
-          `${optionLabel} ▸`,
-          () => {
-            this.div.innerHTML = ""; // Clear existing menu items
-
-            const newValue = !option.value; // Toggle the value
+        this.addCheckbox(
+          camelToTitle(option.label),
+          Boolean(option.value),
+          (newValue: boolean) => {
             const options = buildOptions(option.label, newValue);
             series.applyOptions(options);
-            console.log(`Toggled ${option.label} to ${newValue}`);
-
-            // Repopulate the menu dynamically
-          },
-          option.value // The checkbox state matches the current value
+            console.log(`Updated ${option.label} to ${newValue}`);
+            // Optionally, repopulate the menu dynamically if needed.
+          }
         );
-      } else if (typeof option.value === "string") {
+      }
+       else if (typeof option.value === "string") {
         // Add a submenu or text input for string options
         const predefinedOptions = this.getPredefinedOptions(option.label);
 
@@ -1416,36 +1432,27 @@ export class ContextMenu {
           );
         }
       } else if (typeof option.value === "number") {
-        // Add a submenu or number input for numeric options
+        // Get min and max constraints, if any.
         const min = this.constraints[option.label]?.min;
         const max = this.constraints[option.label]?.max;
-
-        this.addMenuItem(
-          `${optionLabel} ▸`,
-          () => {
-            this.div.innerHTML = ""; // Clear existing menu items
-
-            this.addNumberInput(
-              optionLabel,
-              option.value,
-              (newValue: number) => {
-                const options = buildOptions(option.label, newValue);
-                series.applyOptions(options);
-                console.log(`Updated ${option.label} to ${newValue}`);
-
-                // Repopulate the menu dynamically
-              },
-              min,
-              max
-            );
+      
+        // Directly add the number input for the numeric option.
+        this.addNumberInput(
+          optionLabel,
+          option.value,
+          (newValue: number) => {
+            const options = buildOptions(option.label, newValue);
+            series.applyOptions(options);
+            console.log(`Updated ${option.label} to ${newValue}`);
+            // Optionally, repopulate the menu dynamically if needed.
           },
-          false,
-          true // Mark as a submenu
+          min,
+          max
         );
       } else {
-        return; // Skip unsupported data types
+        return; // Skip unsupported data types.
       }
-    });
+    })   ,   
 
     // Add "Price Scale Options" Menu
     this.addMenuItem(
@@ -1500,6 +1507,22 @@ export class ContextMenu {
         false
       );
     }
+
+// NEW: Add a menu item to open the DataMenu for exporting/importing series data.
+this.addMenuItem(
+  "Export/Import Series Data ▸",
+  () => {
+    if (!this.dataMenu) {
+      this.dataMenu = new DataMenu({ contextMenu: this, handler: this.handler });
+    }
+    // Open the DataMenu with the series as the target. 
+    // Here we pass "Series" as the override type.
+    this.dataMenu.openMenu(series, event, "Series");
+  },
+  false
+);
+
+
     // Add remaining existing menu items
     this.addMenuItem(
       "⤝ Main Menu",
@@ -1594,6 +1617,22 @@ export class ContextMenu {
         false,
         true
       );
+
+
+    // NEW: Add a menu item to open the DataMenu for exporting/importing series data.
+    this.addMenuItem(
+      "Export/Import  PitchFork Data ▸",
+      () => {
+        if (!this.dataMenu) {
+          this.dataMenu = new DataMenu({ contextMenu: this, handler: this.handler });
+        }
+        // Open the DataMenu with the series as the target. 
+        // Here we pass "Series" as the override type.
+        this.dataMenu.openMenu(drawing as PitchFork, event, "PitchFork");
+      },
+      false
+    );
+
     }
 
     if (drawing.points?.length >= 2 && drawing.points[0] && drawing.points[1]) {
@@ -1754,9 +1793,23 @@ export class ContextMenu {
         ],
       },
     });
+  // ***** NEW: Add a menu item for exporting/importing the handler's state *****
+  this.addMenuItem(
+    "Export/Import Handler Data ▸",
+    () => {
+      if (!this.dataMenu) {
+        this.dataMenu = new DataMenu({ contextMenu: this, handler: this.handler });
+      }
+      // Open the DataMenu with the handler as the target.
+      // Pass "Handler" as the override type so that the exported JSON uses this label.
+      this.dataMenu.openMenu(this.handler, event, "Handler");
+    },
+    false
+  );
 
-    this.showMenu(event);
-  }
+  this.showMenu(event);
+}
+
   private populateLayoutMenu(event: MouseEvent): void {
     // Clear the menu
     this.div.innerHTML = "";
@@ -2996,7 +3049,7 @@ export class ContextMenu {
         "Sparse Dotted",
       ],
       lineType: ["Simple", "WithSteps", "Curved"],
-      Shape: ["Rectangle", "Rounded", "Ellipse", "Arrow", "3d", "Polygon"],
+      Shape: ["Rectangle", "Rounded", "Ellipse", "Arrow", "3d", "Polygon", "Bar"],
       "Candle Shape": [
         "Rectangle",
         "Rounded",
@@ -3231,229 +3284,23 @@ export class ContextMenu {
       true
     );
 
-    this.addMenuItem(
-      "Export Data",
-      () => this.showExportDataDialog(trendTrace),
-      false
-    );
+
+  // Use the new DataExportMenu to open the export/import dialog.
+  this.addMenuItem(
+    "Export/Import Data ▸",
+    () => {
+      if (!this.dataMenu){ 
+        this.dataMenu = new DataMenu({contextMenu: this, handler: this.handler})
+      }
+      this.dataMenu.openMenu(trendTrace, event, "Trend Trace");
+    },
+    false
+  );
     this.addMenuItem("⤝ Main Menu", () => this.populateChartMenu(event), false);
 
     this.showMenu(event);
   }
-  // Define a common interface for an option descriptor.
-  // TrendTrace.ts
-
-  private showExportDataDialog(trendTrace: TrendTrace): void {
-    // **Gather the data and options to export**
-    const exportData = {
-      sequence: trendTrace.toJSON(),
-      title: trendTrace.title,
-    };
-
-    const jsonData = JSON.stringify(exportData, null, 2); // Pretty-print with 2-space indentation
-
-    // **Create the modal elements**
-    const modalOverlay = document.createElement("div");
-    modalOverlay.style.position = "fixed";
-    modalOverlay.style.top = "0";
-    modalOverlay.style.left = "0";
-    modalOverlay.style.width = "100%";
-    modalOverlay.style.height = "100%";
-    modalOverlay.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-    modalOverlay.style.display = "flex";
-    modalOverlay.style.justifyContent = "center";
-    modalOverlay.style.alignItems = "center";
-    modalOverlay.style.zIndex = "1000"; // Ensure it's on top
-
-    // **Handle closing the modal with Esc key**
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        document.body.removeChild(modalOverlay);
-        document.removeEventListener("keydown", handleKeyDown);
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-
-    const modalContent = document.createElement("div");
-    modalContent.style.backgroundColor = "#fff";
-    modalContent.style.padding = "20px";
-    modalContent.style.borderRadius = "8px";
-    modalContent.style.width = "80%";
-    modalContent.style.maxWidth = "800px"; // Increased width for better readability
-    modalContent.style.maxHeight = "90%"; // Allow scrolling if content is too long
-    modalContent.style.overflowY = "auto"; // Enable vertical scrolling
-    modalContent.style.boxShadow = "0 2px 10px rgba(0,0,0,0.1)";
-    modalContent.setAttribute("tabindex", "-1"); // Make div focusable
-    modalContent.focus(); // Focus on the modal for accessibility
-
-    const title = document.createElement("h2");
-    title.textContent = "Export/Import TrendTrace Data";
-    modalContent.appendChild(title);
-
-    const textarea = document.createElement("textarea");
-    textarea.value = jsonData;
-    textarea.style.width = "100%";
-    textarea.style.height = "400px"; // Increased height for better usability
-    textarea.style.marginTop = "10px";
-    textarea.style.marginBottom = "10px";
-    textarea.style.resize = "vertical"; // Allow users to resize vertically
-    textarea.setAttribute("aria-label", "JSON Data Editor"); // Accessibility label
-    modalContent.appendChild(textarea);
-
-    // **Buttons Container**
-    const buttonsContainer = document.createElement("div");
-    buttonsContainer.style.display = "flex";
-    buttonsContainer.style.justifyContent = "flex-end";
-    buttonsContainer.style.gap = "10px";
-
-    // **Apply Changes Button**
-    const applyButton = document.createElement("button");
-    applyButton.textContent = "Apply Changes";
-    applyButton.style.padding = "8px 12px";
-    applyButton.style.cursor = "pointer";
-    applyButton.style.backgroundColor = "#4CAF50"; // Green background
-    applyButton.style.color = "#fff";
-    applyButton.style.border = "none";
-    applyButton.style.borderRadius = "4px";
-    applyButton.onclick = () => {
-      try {
-        const modifiedData = JSON.parse(textarea.value);
-
-        // **Validate the modified data structure**
-        if (
-          typeof modifiedData !== "object" ||
-          !modifiedData.sequence ||
-          !modifiedData.sequence.options ||
-          !Array.isArray(modifiedData.sequence.data)
-        ) {
-          throw new Error(
-            "Invalid data structure. Please ensure 'sequence', 'options', and 'data' are present."
-          );
-        }
-
-        // **Optional: Further validation can be added here to check specific fields.**
-
-        // **Apply the new options and data**
-        trendTrace.fromJSON(modifiedData.sequence); // Update the TrendTrace instance
-        trendTrace.updateViewFromSequence(); // Request the TrendTrace to re-render with new data
-
-        this.showNotification(
-          "TrendTrace data has been successfully updated.",
-          "success"
-        );
-        document.body.removeChild(modalOverlay);
-        document.removeEventListener("keydown", handleKeyDown);
-      } catch (error: any) {
-        this.showNotification(
-          "Failed to apply changes: " + error.message,
-          "error"
-        );
-      }
-    };
-    buttonsContainer.appendChild(applyButton);
-
-    // **Copy Button**
-    const copyButton = document.createElement("button");
-    copyButton.textContent = "Copy to Clipboard";
-    copyButton.style.padding = "8px 12px";
-    copyButton.style.cursor = "pointer";
-    copyButton.style.backgroundColor = "#008CBA"; // Blue background
-    copyButton.style.color = "#fff";
-    copyButton.style.border = "none";
-    copyButton.style.borderRadius = "4px";
-    copyButton.onclick = () => {
-      navigator.clipboard.writeText(textarea.value).then(
-        () => {
-          this.showNotification("Data copied to clipboard!", "success");
-        },
-        (err) => {
-          this.showNotification("Failed to copy data: " + err, "error");
-        }
-      );
-    };
-    buttonsContainer.appendChild(copyButton);
-
-    // **Download Button**
-    const downloadButton = document.createElement("button");
-    downloadButton.textContent = "Download JSON";
-    downloadButton.style.padding = "8px 12px";
-    downloadButton.style.cursor = "pointer";
-    downloadButton.style.backgroundColor = "#f44336"; // Red background
-    downloadButton.style.color = "#fff";
-    downloadButton.style.border = "none";
-    downloadButton.style.borderRadius = "4px";
-    downloadButton.onclick = () => {
-      try {
-        const blob = new Blob([textarea.value], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        6;
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "trendtrace_data.json";
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        this.showNotification("Failed to download data: " + error, "error");
-      }
-    };
-    buttonsContainer.appendChild(downloadButton);
-
-    // **Close Button**
-    const closeButton = document.createElement("button");
-    closeButton.textContent = "Close";
-    closeButton.style.padding = "8px 12px";
-    closeButton.style.cursor = "pointer";
-    closeButton.style.backgroundColor = "#555"; // Dark gray background
-    closeButton.style.color = "#fff";
-    closeButton.style.border = "none";
-    closeButton.style.borderRadius = "4px";
-    closeButton.onclick = () => {
-      document.body.removeChild(modalOverlay);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-    buttonsContainer.appendChild(closeButton);
-
-    modalContent.appendChild(buttonsContainer);
-    modalOverlay.appendChild(modalContent);
-    document.body.appendChild(modalOverlay);
-  }
-
-  /**
-   * Displays a notification message to the user.
-   *
-   * @param message - The message to display.
-   * @param type - The type of message ('success' or 'error').
-   */
-  private showNotification(message: string, type: "success" | "error"): void {
-    const notification = document.createElement("div");
-    notification.textContent = message;
-    notification.style.position = "fixed";
-    notification.style.bottom = "20px";
-    notification.style.right = "20px";
-    notification.style.padding = "10px 20px";
-    notification.style.borderRadius = "4px";
-    notification.style.color = "#fff";
-    notification.style.backgroundColor =
-      type === "success" ? "#4CAF50" : "#f44336";
-    notification.style.boxShadow = "0 2px 6px rgba(0,0,0,0.2)";
-    notification.style.zIndex = "1001";
-    notification.style.opacity = "0";
-    notification.style.transition = "opacity 0.5s ease-in-out";
-    document.body.appendChild(notification);
-
-    // Fade in
-    setTimeout(() => {
-      notification.style.opacity = "1";
-    }, 100);
-
-    // Remove after 3 seconds
-    setTimeout(() => {
-      notification.style.opacity = "0";
-      setTimeout(() => {
-        document.body.removeChild(notification);
-      }, 500);
-    }, 3000);
-  }
+ 
 
   private populateTrendColorMenu(
     event: MouseEvent,
@@ -4323,19 +4170,19 @@ export class ContextMenu {
     // 2a) Calculate the figures from the indicator
     const figures = ind.calc([...ohlcData], overrides, volumeData ?? undefined);
 
-    // 2b) If we already have them, update the existing figures
-    if (isISeriesIndicator(series)) {
-      const figMap = series.figures;
-      if (figMap) {
-        figures.forEach((f) => {
-          const existing = figMap.get(f.key);
-          if (existing) {
-            existing.setData(f.data);
-          }
-        });
-      }
-      return;
-    }
+    //// 2b) If we already have them, update the existing figures
+    //if (isISeriesIndicator(series)) {
+    //  const figMap = series.figures;
+    //  if (figMap) {
+    //    figures.forEach((f) => {
+    //      const existing = figMap.get(f.key);
+    //      if (existing) {
+    //        existing.setData(f.data);
+    //      }
+    //    });
+    //  }
+    //  return;
+    //}
 
     // 2c) Otherwise, create new indicator series
     const newMap = new Map<string, ISeriesIndicator>();
@@ -4355,6 +4202,9 @@ export class ContextMenu {
         if (hist.series) {
           hist.series.setData(f.data);
           seriesInstance = hist.series as ISeriesApi<"Histogram">;
+          if (series.getPane().paneIndex() !== seriesInstance.getPane().paneIndex()){
+            seriesInstance.moveToPane(series.getPane().paneIndex())
+          } 
         }
       } else {
         const line = this.handler.createLineSeries(f.title, {
@@ -4366,6 +4216,9 @@ export class ContextMenu {
         if (line.series) {
           line.series.setData(f.data);
           seriesInstance = line.series as ISeriesApi<"Line">;
+          if (series.getPane().paneIndex() !== seriesInstance.getPane().paneIndex()){
+            seriesInstance.moveToPane(series.getPane().paneIndex())
+          } 
         }
       }
 
@@ -4373,11 +4226,11 @@ export class ContextMenu {
         // 🎯 Decorate the series instance as an `ISeriesIndicator`
         const indicatorInstance = decorateSeriesAsIndicator(
           seriesInstance,
-          series, // The original candlestick/bar series
+          series, 
           ind,
           newMap,
           count,
-          overrides, // Store parameter overrides for recalculation
+          overrides, 
           recalculateIndicator
         );
 

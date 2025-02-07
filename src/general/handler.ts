@@ -16,9 +16,9 @@ import {
     SeriesType,
     Time,
     createChart,
-    createSeriesMarkers 
+    createSeriesMarkers,
+    ChartOptions
 } from "lightweight-charts";
-import * as lightweight_charts from "lightweight-charts";
 import { FillArea } from "../fill-area/fill-area";
 import { GlobalParams, globalParamInit, LegendItem, LegendPrimitive, LegendSeries } from "./global-params";
 import { Legend } from "./legend";
@@ -38,14 +38,15 @@ import {
     HistogramSeriesOptions,
     ISeriesApiExtended,
     LineSeriesOptions,
-    decorateSeries
+    decorateSeries,
+
 } from "../helpers/series";
 import { ohlcSeriesOptions, ohlcdefaultOptions, ohlcSeries } from "../ohlc-series/ohlc-series";
 import { TradeSeriesOptions, tradeDefaultOptions, TradeSeries } from "../tx-series/renderer";
 import { isISeriesApi } from "../helpers/typeguards";
-
-
-
+import { DefaultOptionsManager } from "./defaults";
+// Import our helper to get built–in defaults for each series type
+import { SupportedSeriesType, getDefaultSeriesOptions } from "../helpers/series";
 
 globalParamInit();
 declare const window: GlobalParams;
@@ -79,17 +80,14 @@ export class Handler {
 
     public _seriesList: ISeriesApi<SeriesType>[] = [];
     public seriesMap: Map<string, ISeriesApiExtended> = new Map();
-    public seriesMetadata: WeakMap<
-        ISeriesApi<any>,
-        { name: string; type: string }
-    >;
+    public seriesMetadata: WeakMap<ISeriesApi<any>, { name: string; type: string }>;
 
-    // Add a property for the SeriesContextMenu
+    // Series context menu
     public ContextMenu!: ContextMenu;
 
     public currentMouseEventParams: MouseEventParams<any> | null = null;
 
-    // Map to store pending options for saving
+    private defaultsManager: DefaultOptionsManager;
 
     // TODO find a better solution rather than the 'position' parameter
     constructor(
@@ -97,41 +95,42 @@ export class Handler {
         innerWidth: number,
         innerHeight: number,
         position: string,
-        autoSize: boolean
+        autoSize: boolean,
     ) {
-        this.reSize = this.reSize.bind(this)
+        this.reSize = this.reSize.bind(this);
 
-        this.id = chartId
+        this.id = chartId;
         this.scale = {
             width: innerWidth,
             height: innerHeight,
 
-        };
-
+        };        
+        
+        this.defaultsManager = new DefaultOptionsManager();
         Handler.handlers.set(chartId, this);
 
-        this.wrapper = document.createElement('div')
+        this.wrapper = document.createElement('div');
         this.wrapper.classList.add("handler");
-        this.wrapper.style.float = position
+        this.wrapper.style.float = position;
 
-        this.div = document.createElement('div')
-        this.div.style.position = 'relative'
+        this.div = document.createElement('div');
+        this.div.style.position = 'relative';
 
         this.wrapper.appendChild(this.div);
-        window.containerDiv.append(this.wrapper)
+        window.containerDiv.append(this.wrapper);
 
         this.chart = this._createChart();
         this.ContextMenu = new ContextMenu(
             this,
             Handler.handlers, // handlers: Map<string, Handler>
-            () => window.MouseEventParams ?? null // Ensure it returns null if undefined
+            () => window.MouseEventParams ?? null // returns null if undefined
         );
         this.legend = new Legend(this);
 
+
+        // Create series using merged options.
         this.series = this.createCandlestickSeries();
         this.volumeSeries = this.createVolumeSeries();
-        this.series.applyOptions;
-        // Inside Handler class constructor
 
         // Setup MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {
@@ -147,7 +146,7 @@ export class Handler {
         window.handlerInFocus = this.id;
         this.wrapper.addEventListener("mouseover", () => {
             window.handlerInFocus = this.id;
-            window.MouseEventParams = this.currentMouseEventParams || null; // Default to null if undefined
+            window.MouseEventParams = this.currentMouseEventParams || null;
         });
         this.seriesMetadata = new WeakMap();
 
@@ -155,13 +154,11 @@ export class Handler {
         if (!autoSize) return;
         window.addEventListener("resize", () => this.reSize());
 
-        // Setup MouseEventParams tracking
+        // Additional MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {
             this.currentMouseEventParams = param;
         });
-
     }
-
 
     reSize() {
         let topBarOffset =
@@ -206,55 +203,64 @@ export class Handler {
             timeScale: { timeVisible: true, secondsVisible: false },
             crosshair: {
                 mode: CrosshairMode.Normal,
-                vertLine: {
-                    labelBackgroundColor: 'rgb(46, 46, 46)'
-                },
-                horzLine: {
-                    labelBackgroundColor: 'rgb(55, 55, 55)'
-                }
+                vertLine: { labelBackgroundColor: 'rgb(46, 46, 46)' },
+                horzLine: { labelBackgroundColor: 'rgb(55, 55, 55)' }
             },
             grid: {
                 vertLines: { color: 'rgba(29, 30, 38, 5)' },
                 horzLines: { color: 'rgba(29, 30, 58, 5)' },
             },
             handleScroll: { vertTouchDrag: true },
-        })
+        });
     }
 
-    createCandlestickSeries() {
-        const title = "OHLC" 
-        const up = "rgba(39, 157, 130, 100)";
-        const down = "rgba(200, 97, 100, 100)";
-        const candleSeries = this.chart.addSeries(lightweight_charts.CandlestickSeries,{
-            upColor: up,
-            borderUpColor: up,
-            wickUpColor: up,
-            downColor: down,
-            borderDownColor: down,
-            wickDownColor: down,
-        });
-        candleSeries.priceScale().applyOptions({
-            scaleMargins: { top: 0.2, bottom: 0.2 },
-        });
-        // Decorate and store info
+    /**
+     * Helper method to merge series options.
+     * Merge order: { ...getDefaultSeriesOptions(type), ...fileDefaults, ...explicitOptions }
+     *
+     * @param type - The series type (SupportedSeriesType)
+     * @param explicitOptions - Options provided explicitly
+     */
+    private mergeSeriesOptions<T>(type: SupportedSeriesType, explicitOptions: Partial<T>): T {
+        // Get built–in defaults (base options)
+        const baseOptions = getDefaultSeriesOptions(type) as T;
+        // File defaults: lookup by lowercased type (e.g. "line", "area", etc.)
+        const fileDefaults = this.defaultsManager.defaults.get(type.toLowerCase()) || {} as T;
+        return { ...baseOptions, ...fileDefaults, ...explicitOptions };
+    }
+
+    /**
+     * Creates a candlestick series using merged options.
+     * (No explicit options provided; only built–in and file defaults are merged.)
+     */
+    createCandlestickSeries(): ISeriesApiExtended {
+        const type: SupportedSeriesType = "Candlestick";
+        // Merge built–in defaults and file defaults
+        const baseOptions = getDefaultSeriesOptions(type);
+        const fileDefaults = this.defaultsManager.defaults.get(type.toLowerCase()) || {};
+        const mergedOptions = { ...baseOptions, ...fileDefaults } as Record<string, any>;
+
+        const candleSeries = this.chart.addSeries(CandlestickSeries, mergedOptions);
+        candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.2, bottom: 0.2 } });
+
         const decorated = decorateSeries(candleSeries, this.legend);
-        decorated.applyOptions({title: title});
+        decorated.applyOptions({ title: "OHLC" });
         this._seriesList.push(decorated);
-        this.seriesMap.set(title, decorated);
-        const colorsArray = [up, down];
-        const legendSymbol = ['⋰','⋱']
+        this.seriesMap.set("OHLC", decorated);
+
+        const colorsArray = [mergedOptions.upColor, mergedOptions.downColor];
+        const legendSymbol = ['⋰', '⋱'];
         const legendItem: LegendItem = {
-            name:title,
+            name: "OHLC",
             series: decorated,
-            colors: colorsArray,
-            legendSymbol: legendSymbol,
-            seriesType:"Candlestick",
-            group:undefined,
+            colors: [mergedOptions.upColor, mergedOptions.downColor],
+            legendSymbol: ['⋰', '⋱'],
+            seriesType: "Candlestick",
+            group: undefined,
         };
 
         this.legend.addLegendItem(legendItem);
-
-        return decorated; // Return the decorated series for further use
+        return decorated;
     }
 
     createVolumeSeries() {
@@ -264,39 +270,33 @@ export class Handler {
             priceScaleId: "volume_scale",
         });
         volumeSeries.priceScale().applyOptions({
-            scaleMargins: { top: 0.8, bottom: 0 },
+            scaleMargins: { top: 0.2, bottom: 0 },
         });
+        volumeSeries.moveToPane(1)
 
         const decorated = decorateSeries(volumeSeries, this.legend);
         decorated.applyOptions({ title: "Volume" });
-
         return decorated;
     }
-
-    createLineSeries(
-        name: string,
-        options: LineSeriesOptions
-    ): { name: string; series: ISeriesApi<SeriesType> } {
+    /**
+     * Creates a line series using merged options.
+     */
+    createLineSeries(name: string, options: LineSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<LineSeriesOptions>("Line", options);
 
         const symbol = (() => {
-            switch (options.lineStyle) {
-            case 0:
-            return '―';
-            case 1:
-            return ':··';
-            case 2:
-            return '--';
-            case 3:
-            return '- -';
-            case 4:
-            return '· ·';
-            default:
-            return '~';
+            switch (mergedOptions.lineStyle) {
+                case 0: return '―';
+                case 1: return ':··';
+                case 2: return '--';
+                case 3: return '- -';
+                case 4: return '· ·';
+                default: return '~';
             }
-            })();
-            
-        const { group, legendSymbol = symbol, ...lineOptions } = options;
-        const line = this.chart.addSeries(LineSeries,lineOptions);
+        })();
+
+        const { group, legendSymbol = symbol, ...lineOptions } = mergedOptions;
+        const line = this.chart.addSeries(LineSeries, lineOptions);
 
         const decorated = decorateSeries(line, this.legend);
         decorated.applyOptions({ title: name });
@@ -304,9 +304,7 @@ export class Handler {
         this.seriesMap.set(name, decorated);
 
         const color = decorated.options().color || "rgba(255,0,0,1)";
-        const solidColor = color.startsWith("rgba")
-            ? color.replace(/[^,]+(?=\))/, "1")
-            : color;
+        const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
 
         const legendItem: LegendItem = {
             name,
@@ -322,58 +320,50 @@ export class Handler {
         return { name, series: decorated };
     }
 
-    createHistogramSeries(
-        name: string,
-        options: HistogramSeriesOptions
-    ): { name: string; series: ISeriesApi<SeriesType> } {
-        const { group, legendSymbol = "▨", ...histogramOptions } = options;
-        const histogram = this.chart.addSeries(HistogramSeries,histogramOptions);
+    /**
+     * Creates a histogram series using merged options.
+     */
+    createHistogramSeries(name: string, options: HistogramSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<HistogramSeriesOptions>("Histogram", options);
+        const { group, legendSymbol = "▨", ...histogramOptions } = mergedOptions;
+        const histogram = this.chart.addSeries(HistogramSeries, histogramOptions);
 
-        // Decorate the series (if your implementation decorates series)
         const decorated = decorateSeries(histogram, this.legend);
         decorated.applyOptions({ title: name });
         this._seriesList.push(decorated);
         this.seriesMap.set(name, decorated);
 
-        // Extract or determine the color for the legend
         const color = decorated.options().color || "rgba(255,0,0,1)";
-        const solidColor = color.startsWith("rgba")
-            ? color.replace(/[^,]+(?=\))/, "1") // Convert to solid color if rgba
-            : color;
+        const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
 
-        // Create the legend item for the histogram
         const legendItem: LegendItem = {
             name,
             series: decorated,
             colors: [solidColor],
             legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
-            seriesType: "Histogram", // Specify the series type
+            seriesType: "Histogram",
             group,
         };
 
-        // Add the legend item to the legend
         this.legend.addLegendItem(legendItem);
 
         return { name, series: decorated };
     }
 
-
-    createAreaSeries(
-        name: string,
-        options: AreaSeriesOptions
-    ): { name: string; series: ISeriesApi<SeriesType> } {
-        const { group, legendSymbol = "▨", ...areaOptions } = options;
-        const area = this.chart.addSeries(AreaSeries,areaOptions);
+    /**
+     * Creates an area series using merged options.
+     */
+    createAreaSeries(name: string, options: AreaSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<AreaSeriesOptions>("Area", options);
+        const { group, legendSymbol = "▨", ...areaOptions } = mergedOptions;
+        const area = this.chart.addSeries(AreaSeries, areaOptions);
 
         const decorated = decorateSeries(area, this.legend);
-
         this._seriesList.push(decorated);
         this.seriesMap.set(name, decorated);
 
         const color = decorated.options().lineColor || "rgba(255,0,0,1)";
-        const solidColor = color.startsWith("rgba")
-            ? color.replace(/[^,]+(?=\))/, "1")
-            : color;
+        const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
 
         const legendItem: LegendItem = {
             name,
@@ -389,14 +379,13 @@ export class Handler {
         return { name, series: decorated };
     }
 
-
-
-    createBarSeries(
-        name: string,
-        options: BarSeriesOptions
-    ): { name: string; series: ISeriesApi<SeriesType> } {
-        const { group, legendSymbol = ['┌', '└'], ...barOptions } = options;
-        const bar = this.chart.addSeries(BarSeries,barOptions);
+    /**
+     * Creates a bar series using merged options.
+     */
+    createBarSeries(name: string, options: BarSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<BarSeriesOptions>("Bar", options);
+        const { group, legendSymbol = ['┌', '└'], ...barOptions } = mergedOptions;
+        const bar = this.chart.addSeries(BarSeries, barOptions);
 
         const decorated = decorateSeries(bar, this.legend);
         decorated.applyOptions({ title: name });
@@ -404,8 +393,7 @@ export class Handler {
         this.seriesMap.set(name, decorated);
 
         const upColor = (decorated.options() as any).upColor || "rgba(0,255,0,1)";
-        const downColor =
-            (decorated.options() as any).downColor || "rgba(255,0,0,1)";
+        const downColor = (decorated.options() as any).downColor || "rgba(255,0,0,1)";
 
         const legendItem: LegendItem = {
             name,
@@ -417,33 +405,24 @@ export class Handler {
         };
 
         this.legend.addLegendItem(legendItem);
-
-        return { name, series: bar };
+        return { name, series: decorated };
     }
 
-    createCustomOHLCSeries(
-        name: string,
-        options: Partial<ohlcSeriesOptions> = {}
-    ): { name: string; series: ISeriesApi<SeriesType> } {
-        const seriesType = 'Ohlc';
-
-        const mergedOptions: ohlcSeriesOptions & {
-            seriesType?: string;
-            group?: string;
-            legendSymbol?: string[];
-        } = {
-            ...ohlcdefaultOptions,
+    /**
+     * Creates a custom OHLC series using merged options.
+     */
+    createCustomOHLCSeries(name: string, options: Partial<ohlcSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
+        // Merge built–in defaults, file defaults, and explicit options for "Ohlc"
+        const base = ohlcdefaultOptions;
+        const fileDefaults = this.defaultsManager.defaults.get("ohlc") || {};
+        const mergedOptions: ohlcSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] } = {
+            ...base,
+            ...fileDefaults,
             ...options,
-            seriesType,
+            seriesType: 'Ohlc',
         };
 
-        const {
-            group,
-            legendSymbol = ['⑃', '⑂'],
-            seriesType: _,
-            chandelierSize = 1,
-            ...filteredOptions
-        } = mergedOptions;
+        const { group, legendSymbol = ['⑃', '⑂'], seriesType: _, chandelierSize = 1, ...filteredOptions } = mergedOptions;
 
         const Instance = new ohlcSeries();
         const ohlcCustomSeries = this.chart.addCustomSeries(Instance, {
@@ -465,8 +444,8 @@ export class Handler {
             name,
             series: decorated,
             colors: colorsArray,
-            legendSymbol:  Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
-            seriesType,
+            legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
+            seriesType: 'Ohlc',
             group,
         };
 
@@ -475,153 +454,75 @@ export class Handler {
         return { name, series: ohlcCustomSeries };
     }
 
-    createTradeSeries(
-        name: string,
-        options: Partial<TradeSeriesOptions> = {}
-    ): { name: string; series: ISeriesApi<SeriesType> } {
-        const seriesType = 'Trade'; // A custom identifier for this series type
-
-        // Merge provided options with default options
-        const mergedOptions: TradeSeriesOptions & {
-            seriesType?: string;
-            group?: string;
-            legendSymbol?: string[] | string;
-        } = {
+    /**
+     * Creates a trade series using merged options.
+     */
+    createTradeSeries(name: string, options: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
             ...tradeDefaultOptions,
+            ...this.defaultsManager.defaults.get("trade"),
             ...options,
-            seriesType
+            seriesType: 'Trade',
         };
 
-        const {
-            group,
-            legendSymbol = ['$'],
-            seriesType: _,
-            ...filteredOptions
-        } = mergedOptions;
+        const { group, legendSymbol = ['$'], seriesType: _, ...filteredOptions } = mergedOptions;
 
-        // Create a new TradeSeries instance
         const instance = new TradeSeries();
-        // Add the custom series to the chart
         const tradeCustomSeries = this.chart.addCustomSeries(instance, filteredOptions);
 
-        // Decorate the series (assuming `decorateSeries` and `this.legend` are defined)
         const decorated = decorateSeries(tradeCustomSeries, this.legend);
         this._seriesList.push(decorated);
         this.seriesMap.set(name ?? 'Trade', decorated);
 
-        // For the legend colors, now we only have backgroundColorStop and backgroundColorTarget.
-        // We can provide these two as representative colors. If you want a third color, you may pick one of them again or define another logic.
         const colorsArray = [
             mergedOptions.backgroundColorStop,
             mergedOptions.backgroundColorTarget
         ];
-
         const finalLegendSymbol = Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol];
 
         const legendItem: LegendItem = {
-            name: name,
+            name,
             series: decorated,
             colors: colorsArray,
             legendSymbol: finalLegendSymbol,
-            seriesType,
+            seriesType: 'Trade',
             group,
         };
 
-        // Add legend item
         this.legend.addLegendItem(legendItem);
 
         return { name, series: tradeCustomSeries };
     }
-//
 
-    createFillArea(
-        name: string,
-        origin: string, // ID or key for the origin series
-        destination: string, // ID or key for the destination series
-        originColor?: string, // Optional; will use defaults if not provided
-        destinationColor?: string, // Optional; will use defaults if not provided
-    ): ISeriesPrimitive | undefined {
-        // Find origin and destination series
+    /**
+     * Creates a fill area between two series.
+     */
+    createFillArea(name: string, origin: string, destination: string, originColor?: string, destinationColor?: string): ISeriesPrimitive | undefined {
         const originSeries = this._seriesList.find(s => (s as ISeriesApi<SeriesType>).options()?.title === origin);
-
         const destinationSeries = this._seriesList.find(s => (s as ISeriesApi<SeriesType>).options()?.title === destination);
 
         if (!originSeries) {
             console.warn(`Origin series with title "${origin}" not found.`);
             return undefined;
         }
-
         if (!destinationSeries) {
             console.warn(`Destination series with title "${destination}" not found.`);
             return undefined;
         }
-        // Ensure the origin series is extended
         const extendedOriginSeries = ensureExtendedSeries(originSeries, this.legend);
-
-        // Create a FillArea instance with the provided options
         const fillArea = new FillArea(originSeries, destinationSeries, {
-            originColor: originColor || null, // Default to blue with 30% opacity
-            destinationColor: destinationColor || null, // Default to red with 30% opacity
-            lineWidth: null, // Default line width if not specified
+            originColor: originColor || null,
+            destinationColor: destinationColor || null,
+            lineWidth: null,
         });
 
-        // Attach the FillArea primitive to the origin series
         extendedOriginSeries.attachPrimitive(fillArea, name);
 
-
-        // Return the created primitive
         return fillArea;
     }
-    ///**
-    // * Creates a TrendTrace between two series.
-    // * 
-    // * @param name - Unique name for the TrendTrace.
-    // * @param origin - Identifier for the origin series.
-    // * @param destination - Identifier for the destination series.
-    // * @param p1 - Starting logical point.
-    // * @param p2 - Ending logical point.
-    // * @param options - Optional TrendTrace options.
-    // * @returns The created TrendTrace instance or undefined.
-    // */
-    //createTrendTrace(
-    //    name: string,
-    //    series: string,
-    //    lineID: string,
-    //    options?: Partial<TrendTraceOptions>
-    //): TrendTrace | undefined {
-    //    // Find origin and destination series by title or identifier
-    //    const source = this._seriesList.find(s => s.options()?.title === series);
-    //    t
-    //    if (!source) {
-    //        console.warn(`Origin series "${source}" not found.`);
-    //        return undefined;
-    //    }
-    //    // Ensure the origin series is extended
-    //    const extendedSeries = ensureExtendedSeries(source, this.legend);
-//
-//
-//
-    //    // Create a new TrendTrace instance
-    //    const trendTrace = new TrendTrace(this, extendedSeries, p1, p2, options);
-//
-    //    // Attach the TrendTrace to the origin series
-    //    extendedSeries.attachPrimitive(trendTrace, name,false,true);
-//
-    //    // Store the TrendTrace instance for future reference
-//
-    //    return trendTrace;
-    //}
-//
-    //// Implement other Handler methods as needed
-//
 
-    attachPrimitive(
-        lineColor: string,
-        primitiveType: "Tooltip" | "DeltaTooltip",
-        series?: ISeriesApiExtended | ISeriesApi<SeriesType>,
-        seriesName?: string
-    ): void {
-        let _series = series
+    attachPrimitive(lineColor: string, primitiveType: "Tooltip" | "DeltaTooltip", series?: ISeriesApiExtended | ISeriesApi<SeriesType>, seriesName?: string): void {
+        let _series = series;
         try {
             if (seriesName && !series) {
                 _series = this.seriesMap.get(seriesName);
@@ -645,21 +546,15 @@ export class Handler {
 
             extendedSeries.attachPrimitive(primitiveInstance, "Tooltip");
             this.primitives.set(_series, primitiveInstance);
-            //console.log(`${primitiveType} attached to`, seriesName);
         } catch (error) {
             console.error(`Failed to attach ${primitiveType}:`, error);
         }
     }
-    /**
-     * Removes a series from the chart and updates the legend accordingly.
-     * @param seriesName - The name of the series to remove.
-     */
+
     removeSeries(series: string | ISeriesApiExtended): void {
         let seriesName: string | undefined;
-    
-        // 🚀 **Step 1: Find Series Name (Reverse Lookup)**
+
         if (isISeriesApi(series)) {
-            // Find the key (name) associated with this series in `seriesMap`
             for (const [key, value] of this.seriesMap.entries()) {
                 if (value === series) {
                     seriesName = key;
@@ -667,47 +562,40 @@ export class Handler {
                 }
             }
         } else {
-            // If input is a string, assume it's already a series name
             seriesName = series;
             series = this.seriesMap.get(series) as ISeriesApiExtended;
         }
-    
+
         if (!series || !seriesName) {
             console.warn(`❌ Series "${series}" does not exist and cannot be removed.`);
             return;
         }
-    
+
         series = series as ISeriesApiExtended;
-    
-        // 🚀 **Step 2: Detach and Remove Primitives**
+
         if (series.primitives && series.primitives.length > 0) {
             series.primitives.forEach((primitive: ISeriesPrimitive) => {
                 series.detachPrimitive(primitive);
                 console.log(`✅ Detached primitive from series "${seriesName}".`);
             });
         }
-    
-        // 🚀 **Step 3: Remove from Internal Tracking Structures**
+
         this._seriesList = this._seriesList.filter(s => s !== series);
         this.seriesMap.delete(seriesName);
         console.log(`✅ Series "${seriesName}" removed from internal maps.`);
-    
-        // 🚀 **Step 4: Remove from Legend (Safely)**
+
         try {
             const legendItem = this.legend._items.find(
                 (item) => (item as LegendSeries).series === series
             ) as LegendSeries | undefined;
-    
+
             if (legendItem) {
-                // Remove associated primitives
                 if (legendItem.primitives && legendItem.primitives.length > 0) {
                     legendItem.primitives.forEach((primitive: LegendPrimitive) => {
                         this.legend.removeLegendPrimitive(primitive);
                         console.log(`✅ Removed primitive from legend for series "${seriesName}".`);
                     });
                 }
-    
-                // Remove legend entry
                 this.legend.deleteLegendEntry(legendItem.name, legendItem.group ?? undefined);
                 console.log(`✅ Removed series "${seriesName}" from legend.`);
             } else {
@@ -716,12 +604,11 @@ export class Handler {
         } catch (error) {
             console.error(`⚠️ Error removing legend entry for "${seriesName}":`, error);
         }
-    
-        // 🚀 **Step 5: Remove Series from Chart**
+
         this.chart.removeSeries(series);
         console.log(`✅ Series "${seriesName}" successfully removed.`);
     }
-    
+
     createToolBox() {
         this.toolBox = new ToolBox(this, this.id, this.chart, this.series, this.commandFunctions);
         this.div.appendChild(this.toolBox.div);
@@ -729,15 +616,16 @@ export class Handler {
 
     createTopBar() {
         this._topBar = new TopBar(this);
-        this.wrapper.prepend(this._topBar._div)
+        this.wrapper.prepend(this._topBar._div);
         return this._topBar;
     }
 
-    toJSON() {
-        // Exclude the chart attribute from serialization
-        const { chart, ...serialized } = this;
-        return serialized;
-    }
+
+    //toJSON() {
+    //    // Exclude the chart attribute from serialization
+    //    const { chart, ...serialized } = this;
+    //    return serialized;
+    //}
     /**
      * Extracts data from a series in a format suitable for indicators.
      * @param series - The series to extract data from.
@@ -915,5 +803,64 @@ export class Handler {
             rootStyle.setProperty(property, styles[valueKey]);
         }
     }
+/**
+ * Serializes the Handler's state into a JSON object.
+ *
+ * The serialization includes:
+ *  - Chart options from the internal chart instance.
+ *  - Scale and precision values.
+ *
+ * @returns A JSON object representing the Handler’s state.
+ */
+public toJSON(): {
+    id: string;
+    options?: ChartOptions;
+    scale?: Scale;
+    precision?: number;
+  } {
+    return {
+      id: this.id,
+      options: this.chart.options(),
+      scale: this.scale,
+      precision: this.precision,
+    };
+  }
+  
+  /**
+   * Restores the Handler’s state from a JSON object.
+   *
+   * This includes:
+   *  - Updating the internal chart’s options via chart.applyOptions.
+   *  - Restoring scale and precision.
+   *
+   * @param json The JSON object containing state.
+   */
+  public fromJSON(json: {
+    id: string;
+    options?: ChartOptions;
+    scale?: Scale;
+    precision?: number;
+  }): void {
+    if (!json) {
+      console.warn("No JSON data provided for handler deserialization.");
+      return;
+    }
+  
+    // Update chart options by delegating to the Chart class.
+    if (json.options) {
+      this.chart.applyOptions(json.options);
+    }
+  
+    // Restore scale and precision.
+    if (json.scale !== undefined) {
+      this.scale = json.scale;
+    }
+    if (json.precision !== undefined) {
+      this.precision = json.precision;
+    }
+  }
+  
 
+  public _type: string = "chart"
+  public title: string = "Lightweight-Charts"
 }
