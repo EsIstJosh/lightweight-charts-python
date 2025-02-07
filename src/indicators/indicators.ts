@@ -8,11 +8,13 @@ import { OSCILLATORS } from "./oscillators";
 /**
  * One indicator can produce multiple figures (lines or histograms).
  */
+
 export interface IndicatorFigure {
   key: string;      // e.g. "ema12", "hh14", etc.
   title: string;    // e.g. "EMA12", "HH14"
   type: "line" | "histogram";
   data: SingleValueData[];
+  pane?: number 
 }
 
 

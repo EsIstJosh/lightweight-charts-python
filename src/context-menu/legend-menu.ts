@@ -60,14 +60,14 @@ export class LegendMenu {
 
     private populateGroupMenu(group: LegendGroup, event: MouseEvent): void {
         // Add Group-Specific Options
-        this.contextMenu.addMenuItem("Rename Group", () => {
+        this.contextMenu.addMenuItem("Rename", () => {
             const newName = prompt("Enter new group name:", group.name);
             if (newName && newName.trim() !== "") {
                 this.renameGroup(group, newName.trim());
             }
         }, false);
     
-        this.contextMenu.addMenuItem("Remove All", () => {
+        this.contextMenu.addMenuItem("Remove", () => {
             if (confirm(`Are you sure you want to remove the group "${group.name}"? This will also remove all contained series.`)) {
                 group.seriesList.forEach((seriesItem: LegendSeries) => {
                     this.handler.legend.removeLegendSeries(seriesItem.series);
@@ -79,14 +79,107 @@ export class LegendMenu {
             }
         });
     
-        this.contextMenu.addMenuItem("Ungroup All", () => {
+        this.contextMenu.addMenuItem("Ungroup", () => {
             this.ungroupSeries(group);
         });
     
-        // Show the context menu at the event location
-        this.contextMenu.showMenu(event);
+    // Add Hybrid Input for moving all series within the group to another pane.
+    if (group.seriesList && group.seriesList.length > 0) {
+        // Use the first series as reference to get the current pane index.
+        const firstSeries = group.seriesList[0].series;
+        const currentPaneIndex: number = firstSeries.getPane().paneIndex();
+        const panes = this.handler.chart.panes();
+        const currentValue: string = `Pane ${currentPaneIndex}`;
+
+        // Define the default action:
+        // If the series is in the main pane (pane 0), move all to pane 1 (if available) or to a new pane.
+        // Otherwise, move them back to the main pane (pane 0).
+        const defaultAction = (): void => {
+            if (currentPaneIndex === 0) {
+                if (panes.length > 1) {
+                    group.seriesList.forEach((seriesItem: LegendSeries) => {
+                        seriesItem.series.moveToPane(1);
+                    });
+                    console.log(`Default: Moved group "${group.name}" series from pane ${currentPaneIndex} to pane 1.`);
+                } else {
+                    group.seriesList.forEach((seriesItem: LegendSeries) => {
+                        seriesItem.series.moveToPane(panes.length); // creates a new pane
+                    });
+                    console.log(`Default: Moved group "${group.name}" series from pane ${currentPaneIndex} to a new pane at index ${panes.length}.`);
+                }
+            } else {
+                group.seriesList.forEach((seriesItem: LegendSeries) => {
+                    seriesItem.series.moveToPane(0);
+                });
+                console.log(`Default: Moved group "${group.name}" series from pane ${currentPaneIndex} back to main pane (0).`);
+            }
+        };
+
+        // Build the list of options:
+        // For each existing pane, add an option labeled "Pane 0", "Pane 1", etc.
+        // Then add an extra option for a "New Pane".
+        interface PaneOption {
+            name: string;
+            action: () => void;
+        }
+
+        const options: PaneOption[] = [];
+        for (let i = 0; i < panes.length; i++) {
+            options.push({
+                name: `Pane ${i}`,
+                action: (): void => {
+                    group.seriesList.forEach((seriesItem: LegendSeries) => {
+                        seriesItem.series.moveToPane(i);
+                    });
+                    console.log(`Moved group "${group.name}" series to existing pane ${i}.`);
+                }
+            });
+        }
+        options.push({
+            name: "New Pane",
+            action: (): void => {
+                group.seriesList.forEach((seriesItem: LegendSeries) => {
+                    seriesItem.series.moveToPane(panes.length);
+                });
+                console.log(`Moved group "${group.name}" series to a new pane at index ${panes.length}.`);
+            }
+        });
+
+        // Create the hybrid input using the contextMenu's addMenuInput helper.
+        // Make sure to pass the parent element (this.div) and the configuration object.
+        this.contextMenu.addMenuInput(
+            this.contextMenu.div, // Parent HTMLElement. Replace this.div with your actual container if needed.
+            {
+                type: "hybrid",
+                label: "Move to",
+                sublabel: currentValue,
+                value: currentValue,
+                onChange: (newValue: string): void => {
+                    // When the user selects an option, look it up in the options array and execute its action.
+                    const selectedOption = options.find(opt => opt.name === newValue);
+                    if (selectedOption) {
+                        selectedOption.action();
+                    }
+                },
+                hybridConfig: {
+                    defaultAction: defaultAction,
+                    options: options.map(opt => ({
+                        name: opt.name,
+                        action: opt.action
+                    }))
+                }
+            }
+        );
     }
-    
+
+    // Optionally, add a "Close Menu" option.
+    this.contextMenu.separator();
+    this.contextMenu.addMenuItem("Close Menu", () => this.contextMenu.hideMenu());
+
+    // Position and display the menu at the event location.
+    this.contextMenu.showMenu(event);
+}
+
 
     /**
      * Populates the context menu for a LegendSeries.

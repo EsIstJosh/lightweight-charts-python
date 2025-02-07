@@ -11,7 +11,8 @@ export interface ohlcSeriesData extends CandlestickData {
     high: number;     // Highest price
     low: number;      // Lowest price
     close: number;    // Closing price
-
+	volume: number;
+	newBar?: boolean;
     // Optional customization properties
     color?: string;         // Optional fill color for the candle body
     borderColor?: string;   // Optional color for the candle border
@@ -30,6 +31,7 @@ export enum CandleShape {
 	Arrow = 'Arrow',
 	Cube =  '3d',
 	Polygon = 'Polygon',
+	Bar = 'Bar'
   }
   
   /**
@@ -45,6 +47,8 @@ export enum CandleShape {
 	high: number;
 	low: number;
 	close: number;
+	volume?:number;
+	newBar?: boolean;
 	lineStyle: LineStyle;
 	lineWidth: number;
 	shape: CandleShape;
@@ -61,6 +65,8 @@ export enum CandleShape {
 	high: number;
 	low: number;
 	close: number;
+	volume?:number;
+	newBar?:boolean;
 	x: number;
 	isUp: boolean;
 	startIndex: number;
@@ -73,74 +79,11 @@ export enum CandleShape {
 	lineStyle: LineStyle;
 	lineWidth: number;
 	shape: CandleShape;
+
   }
   
-  /**
-   * Interface for aggregator configuration options.
-   */
-  export interface AggregatorOptions {
-	/**
-	 * Size of the chandelier aggregation. Determines how many bars are grouped together.
-	 * Default is 1 (no aggregation).
-	 */
-	chandelierSize?: number;
+
   
-	/**
-	 * Color of upward-moving candles.
-	 * Default: 'rgba(0,255,0,0.333)'
-	 */
-	upColor?: string;
-  
-	/**
-	 * Color of downward-moving candles.
-	 * Default: 'rgba(255,0,0,0.333)'
-	 */
-	downColor?: string;
-  
-	/**
-	 * Border color for upward-moving candles.
-	 * If not specified, defaults to full opacity of `upColor`.
-	 */
-	borderUpColor?: string;
-  
-	/**
-	 * Border color for downward-moving candles.
-	 * If not specified, defaults to full opacity of `downColor`.
-	 */
-	borderDownColor?: string;
-  
-	/**
-	 * Wick color for upward-moving candles.
-	 * If not specified, defaults to `borderUpColor` or `upColor`.
-	 */
-	wickUpColor?: string;
-  
-	/**
-	 * Wick color for downward-moving candles.
-	 * If not specified, defaults to `borderDownColor` or `downColor`.
-	 */
-	wickDownColor?: string;
-  
-	/**
-	 * Line style for candle borders.
-	 * Uses the `LineStyle` enum.
-	 * Default: `LineStyle.Solid`
-	 */
-	lineStyle?: LineStyle;
-  
-	/**
-	 * Line width for candle borders.
-	 * Default: 1
-	 */
-	lineWidth?: LineWidth;
-  
-	/**
-	 * Shape of the candles.
-	 * Uses the `CandleShape` enum.
-	 * Default: `CandleShape.Rectangle`
-	 */
-	shape?: CandleShape;
-  }
   export function parseCandleShape(input: string): CandleShape | undefined {
 	switch (input.trim().toLowerCase()) {
 		case 'rectangle':
@@ -155,6 +98,8 @@ export enum CandleShape {
 			return CandleShape.Cube;
 		case 'polygon':
 			return CandleShape.Polygon;
+		case 'bar':
+			return CandleShape.Bar;
 		default:
 			console.warn(`Unknown CandleShape: ${input}`);
 			return CandleShape.Rectangle;

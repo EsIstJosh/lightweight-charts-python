@@ -9,8 +9,15 @@ import { RayLine } from "../horizontal-line/ray-line";
 import { VerticalLine } from "../vertical-line/vertical-line";
 // Right alongside your existing imports for other drawing classes:
 import { Handler } from "./handler";
-// Fix inconsistent imports of DrawingOptions
 
+// Import the pitchfork tools
+import { PitchFork } from "../pitchfork/pitchfork";
+
+//import { FibonacciCircleDrawing,
+//     FibonacciExtensionDrawing,
+//      FibonacciSegmentDrawing,
+//       FibonacciSpiralDrawing,
+//        GannBoxDrawing } from "../technical-analysis/technical-analysis";
 interface Icon {
     div: HTMLDivElement,
     group: SVGGElement,
@@ -25,6 +32,18 @@ export class ToolBox {
     private static readonly RAY_SVG: string = '<rect x="8" y="14" width="17" height="1"/><path d="M3.67,14.5l2.83,2.83l2.83-2.83L6.5,11.67L3.67,14.5z M7.91,14.5L6.5,15.91L5.09,14.5l1.41-1.41L7.91,14.5z"/>';
     private static readonly BOX_SVG: string = '<rect x="8" y="6" width="12" height="1"/><rect x="9" y="22" width="11" height="1"/><path d="M3.67,6.5L6.5,9.33L9.33,6.5L6.5,3.67L3.67,6.5z M7.91,6.5L6.5,7.91L5.09,6.5L6.5,5.09L7.91,6.5z"/><path d="M19.67,6.5l2.83,2.83l2.83-2.83L22.5,3.67L19.67,6.5z M23.91,6.5L22.5,7.91L21.09,6.5l1.41-1.41L23.91,6.5z"/><path d="M19.67,22.5l2.83,2.83l2.83-2.83l-2.83-2.83L19.67,22.5z M23.91,22.5l-1.41,1.41l-1.41-1.41l1.41-1.41L23.91,22.5z"/><path d="M3.67,22.5l2.83,2.83l2.83-2.83L6.5,19.67L3.67,22.5z M7.91,22.5L6.5,23.91L5.09,22.5l1.41-1.41L7.91,22.5z"/><rect x="22" y="9" width="1" height="11"/><rect x="6" y="9" width="1" height="11"/>';
     private static readonly VERT_SVG: string = ToolBox.RAY_SVG;
+
+    // Add new static SVG icons for pitchfork tools:
+    private static readonly PITCHFORK_SVG: string = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><g fill="#ffffff" fill-rule="nonzero"><path d="M7.275 21.432l12.579-12.579-.707-.707-12.579 12.579z"/><path d="M6.69 13.397l7.913 7.913.707-.707-7.913-7.913z"/><path d="M7.149 10.558l7.058-7.058-.707-.707-7.058 7.058z" id="Line"/><path d="M20.149 21.558l7.058-7.058-.707-.707-7.058 7.558z"/><path d="M5.5 23h11v-1h-11z"/><path d="M4.5 24c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5zm0 1c-1.381 0-2.5-1.119-2.5-2.5s1.119-2.5 2.5-2.5 2.5 1.119 2.5 2.5-1.119 2.5-2.5 2.5z"/></g></svg>';
+    //sprivate static readonly SCHIFF_PITCHFORK_SVG: string = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><g fill="#ffffff" fill-rule="nonzero"><path d="M7.354 21.354l14-14-.707-.707-14 14z"/><path d="M8.336 13.043l8.621 8.621.707-.707-8.621-8.621z"/><path d="M9.149 10.558l7.058-7.058-.707-.707-7.058 7.058z" id="Line"/><path d="M20.149 21.558l7.058-7.058-.707-.707-7.058 7.558z"/><path d="M5.5 23h10v-1h-10z"/><path d="M4.5 24c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5zm0 1c-1.381 0-2.5-1.119-2.5-2.5s1.119-2.5 2.5-2.5 2.5 1.119 2.5 2.5-1.119 2.5-2.5 2.5z"/></g></svg>';
+    //sprivate static readonly MODIFIED_SCHIFF_PITCHFORK_SVG: string = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><g fill="#ffffff" fill-rule="nonzero"><path d="M10.275 20.432l11.579-11.579-.707-.707-11.579 11.579z"/><path d="M6.69 13.397l7.913 7.913.707-.707-7.913-7.913z"/><path d="M7.149 10.558l7.058-7.058-.707-.707-7.058 7.058z" id="Line"/><path d="M20.149 21.558l7.058-7.058-.707-.707-7.058 7.558z"/><path d="M5.5 23h11v-1h-11z"/><path d="M4.5 24c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5zm0 1c-1.381 0-2.5-1.119-2.5-2.5s1.119-2.5 2.5-2.5 2.5 1.119 2.5 2.5-1.119 2.5-2.5 2.5z"/></g></svg>';
+    //sprivate static readonly INSIDE_PITCHFORK_SVG: string = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><g fill="#ffffff" fill-rule="nonzero"><path d="M6.5 23h12v-1h-12z" id="Line"/><path d="M21.596 20.715l3.091-9.66-.952-.305-3.091 9.66z"/><path d="M8.413 22.664l1.95-6.094-.952-.305-1.95 6.094z"/><path d="M11.602 12.695l3.085-9.641-.952-.305-3.085 9.641z"/><path d="M11.783 16.167l6.817 5.454.625-.781-6.817-5.454z"/><path d="M15.976 18.652l3.711-11.598-.952-.305-3.711 11.598z"/><path d="M4.5 24c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5zm0 1c-1.381 0-2.5-1.119-2.5-2.5s1.119-2.5 2.5-2.5 2.5 1.119 2.5 2.5-1.119 2.5-2.5 2.5z"/></g></svg>';
+    //sprivate static readonly SEGMENT_SVG: string = '<line x1="5" y1="10" x2="25" y2="10" stroke="black" stroke-width="1"/>';
+    //sprivate static readonly EXTENSION_SVG: string = '<line x1="5" y1="10" x2="25" y2="10" stroke="black" stroke-width="1" stroke-dasharray="4,2"/>';
+    //sprivate static readonly CIRCLE_SVG: string = '<circle cx="15" cy="15" r="10" stroke="black" stroke-width="1" fill="none"/>';
+    //sprivate static readonly SPIRAL_SVG: string = '<path d="M15 15 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0" fill="none" stroke="black" stroke-width="1"/>';
+    //sprivate static readonly GANN_SVG: string = '<rect x="8" y="8" width="12" height="12" stroke="black" fill="none" stroke-width="1"/><line x1="8" y1="8" x2="20" y2="20" stroke="black" stroke-width="1"/><line x1="20" y1="8" x2="8" y2="20" stroke="black" stroke-width="1"/>';
+
     div: HTMLDivElement;
     private activeIcon: Icon | null = null;
 
@@ -38,14 +57,14 @@ export class ToolBox {
         this._handlerID = handlerID;
         this._commandFunctions = commandFunctions;
         this._drawingTool = new DrawingTool(chart, series, () => this.removeActiveAndSave());
-        this.div = this._makeToolBox()
-        this.handler = handler 
-        this.handler.ContextMenu.setupDrawingTools(this.saveDrawings, this._drawingTool)
+        this.div = this._makeToolBox();
+        this.handler = handler;
+        this.handler.ContextMenu.setupDrawingTools(this.saveDrawings, this._drawingTool);
 
         commandFunctions.push((event: KeyboardEvent) => {
             if ((event.metaKey || event.ctrlKey) && event.code === 'KeyZ') {
                 const drawingToDelete = this._drawingTool.drawings.pop();
-                if (drawingToDelete) this._drawingTool.delete(drawingToDelete)
+                if (drawingToDelete) this._drawingTool.delete(drawingToDelete);
                 return true;
             }
             return false;
@@ -66,9 +85,17 @@ export class ToolBox {
         this.buttons.push(this._makeToolBoxElement(RayLine, 'KeyR', ToolBox.RAY_SVG));
         this.buttons.push(this._makeToolBoxElement(Box, 'KeyB', ToolBox.BOX_SVG));
         this.buttons.push(this._makeToolBoxElement(VerticalLine, 'KeyV', ToolBox.VERT_SVG, true));
-
-
-       // this.buttons.push(this._makeToolBoxElement(TrendSeries,'KeyS',ToolBox.TRENDSERIES_SVG));
+        // Add the four pitchfork tools:
+        this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyP', ToolBox.PITCHFORK_SVG));
+        //this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyS', ToolBox.SCHIFF_PITCHFORK_SVG));
+        //this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyM', ToolBox.MODIFIED_SCHIFF_PITCHFORK_SVG));
+        //this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyI', ToolBox.INSIDE_PITCHFORK_SVG));
+        //// New Fibonacci Tools
+        //this.buttons.push(this._makeToolBoxElement(FibonacciSegmentDrawing, "KeyS", ToolBox.SEGMENT_SVG));
+        //this.buttons.push(this._makeToolBoxElement(FibonacciExtensionDrawing, "KeyE", ToolBox.EXTENSION_SVG));
+        //this.buttons.push(this._makeToolBoxElement(FibonacciCircleDrawing, "KeyC", ToolBox.CIRCLE_SVG));
+        //this.buttons.push(this._makeToolBoxElement(FibonacciSpiralDrawing, "KeyP", ToolBox.SPIRAL_SVG));
+        //this.buttons.push(this._makeToolBoxElement(GannBoxDrawing, "KeyG", ToolBox.GANN_SVG));
 
         for (const button of this.buttons) {
             div.appendChild(button);
@@ -178,9 +205,35 @@ export class ToolBox {
                 case "VerticalLine":
                     this._drawingTool.addNewDrawing(new VerticalLine(d.points[0], d.options));
                     break;
-
-
+                // Add cases for pitchfork types if needed:
+                case "PitchFork":
+                    this._drawingTool.addNewDrawing(new PitchFork(d.points[0], d.points[1], d.points[2], d.options));
+                    break;
+                //case "SchiffPitchfork":
+                //    this._drawingTool.addNewDrawing(new PitchFork(d.points[0], d.points[1], d.points[2], {...d.options, variant: "schiff"}));
+                //    break;
+                //case "ModifiedSchiffPitchfork":
+                //    this._drawingTool.addNewDrawing(new PitchFork(d.points[0], d.points[1], d.points[2], {...d.options, variant: "modifiedSchiff"}));
+                //    break;
+                //case "InsidePitchfork":
+                //    this._drawingTool.addNewDrawing(new PitchFork(d.points[0], d.points[1], d.points[2], {...d.options, variant: "inside"}));
+                //    break;
+                //case "FibonacciSegment":
+                //    this._drawingTool.addNewDrawing(new FibonacciSegmentDrawing(d.points[0], d.points[1], d.options));
+                //    break;
+                //case "FibonacciExtension":
+                //    this._drawingTool.addNewDrawing(new FibonacciExtensionDrawing(d.points[0], d.points[1], d.options));
+                //    break;
+                //case "FibonacciCircle":
+                //    this._drawingTool.addNewDrawing(new FibonacciCircleDrawing(d.points[0], d.points[1], d.options));
+                //    break;
+                //case "FibonacciSpiral":
+                //    this._drawingTool.addNewDrawing(new FibonacciSpiralDrawing(d.points[0], d.points[1], d.options));
+                //    break;
+                //case "GannBox":
+                //    this._drawingTool.addNewDrawing(new GannBoxDrawing(d.points[0], d.points[1], d.points[2], d.points[3], d.options));
+                //    break;
+                }
+                });
             }
-        })
-    }
-}
+        }

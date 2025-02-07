@@ -63,3 +63,90 @@ export abstract class TwoPointDrawingPaneRenderer extends DrawingPaneRenderer {
         // scope.context.strokeStyle = this._options.lineColor;
     }
 }
+
+
+export abstract class    ThreePointDrawingPaneRenderer extends DrawingPaneRenderer {
+    _p1: ViewPoint;
+    _p2: ViewPoint;
+    _p3: ViewPoint;
+    protected _hovered: boolean;
+
+    constructor(p1: ViewPoint, p2: ViewPoint, p3: ViewPoint, options: DrawingOptions, hovered: boolean) {
+        super(options);
+        this._p1 = p1;
+        this._p2 = p2;
+        this._p3 = p3;
+        this._hovered = hovered;
+    }
+
+    abstract draw(target: CanvasRenderingTarget2D): void;
+
+    _getScaledCoordinates(scope: BitmapCoordinatesRenderingScope) {
+        if (this._p1.x === null || this._p1.y === null ||
+            this._p2.x === null || this._p2.y === null ||
+            this._p3.x === null || this._p3.y === null) return null;
+
+        return {
+            x1: Math.round(this._p1.x * scope.horizontalPixelRatio),
+            y1: Math.round(this._p1.y * scope.verticalPixelRatio),
+            x2: Math.round(this._p2.x * scope.horizontalPixelRatio),
+            y2: Math.round(this._p2.y * scope.verticalPixelRatio),
+            x3: Math.round(this._p3.x * scope.horizontalPixelRatio),
+            y3: Math.round(this._p3.y * scope.verticalPixelRatio),
+        };
+    }
+
+    _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number) {
+        const radius = 9;
+        scope.context.fillStyle = '#000';
+        scope.context.beginPath();
+        scope.context.arc(x, y, radius, 0, 2 * Math.PI);
+        scope.context.stroke();
+        scope.context.fill();
+    }
+}
+export abstract class FourPointDrawingPaneRenderer extends DrawingPaneRenderer {
+    _p1: ViewPoint;
+    _p2: ViewPoint;
+    _p3: ViewPoint;
+    _p4: ViewPoint;
+    protected _hovered: boolean;
+
+    constructor(p1: ViewPoint, p2: ViewPoint, p3: ViewPoint, p4: ViewPoint, options: DrawingOptions, hovered: boolean) {
+        super(options);
+        this._p1 = p1;
+        this._p2 = p2;
+        this._p3 = p3;
+        this._p4 = p4;
+        this._hovered = hovered;
+    }
+
+    abstract draw(target: CanvasRenderingTarget2D): void;
+
+    _getScaledCoordinates(scope: BitmapCoordinatesRenderingScope) {
+        if (this._p1.x === null || this._p1.y === null ||
+            this._p2.x === null || this._p2.y === null ||
+            this._p3.x === null || this._p3.y === null ||
+            this._p4.x === null || this._p4.y === null) return null;
+
+        return {
+            x1: Math.round(this._p1.x * scope.horizontalPixelRatio),
+            y1: Math.round(this._p1.y * scope.verticalPixelRatio),
+            x2: Math.round(this._p2.x * scope.horizontalPixelRatio),
+            y2: Math.round(this._p2.y * scope.verticalPixelRatio),
+            x3: Math.round(this._p3.x * scope.horizontalPixelRatio),
+            y3: Math.round(this._p3.y * scope.verticalPixelRatio),
+            x4: Math.round(this._p4.x * scope.horizontalPixelRatio),
+            y4: Math.round(this._p4.y * scope.verticalPixelRatio),
+        };
+    }
+
+    _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number) {
+        const radius = 9;
+        scope.context.fillStyle = '#000';
+        scope.context.beginPath();
+        scope.context.arc(x, y, radius, 0, 2 * Math.PI);
+        scope.context.stroke();
+        scope.context.fill();
+    }
+}

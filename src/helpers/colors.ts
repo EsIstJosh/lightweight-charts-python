@@ -84,43 +84,118 @@ export function darkenColor(color: string, amount: number = 0.2): string {
         ? `#${((1 << 24) + (Math.round(r) << 16) + (Math.round(g) << 8) + Math.round(b)).toString(16).slice(1)}`
         : `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${a})`;
 }
-/**
- * Generates a range of shades from a randomly selected base color.
- * @param count - The number of shades to generate.
- * @returns An array of color shades.
- */
+
 export function generateShades(count: number): string[] {
-    // List of potential base colors
-    const colorList =   ["#ff0000","#ff8700","#ffd300","#a1ff0a","#117a03","#0aff99","#0aefff","#147df5","#580aff","#be0aff"];
-  
-    // Pick a random base color
-    const baseColor = colorList[Math.floor(Math.random() * colorList.length)];
-  
-    // Convert HEX to RGB
-    const hexToRgb = (hex: string) => {
-      let r = parseInt(hex.slice(1, 3), 16);
-      let g = parseInt(hex.slice(3, 5), 16);
-      let b = parseInt(hex.slice(5, 7), 16);
-      return { r, g, b };
-    };
-  
-    // Convert RGB back to HEX
-    const rgbToHex = (r: number, g: number, b: number) => {
-      const toHex = (c: number) => Math.min(255, Math.max(0, c)).toString(16).padStart(2, "0");
-      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-    };
-  
-    const { r, g, b } = hexToRgb(baseColor);
-    const shades: string[] = [];
-  
-    for (let i = 0; i < count; i++) {
-      const factor = 1 - (i / (count * 1.5)); // Adjust brightness
-      const newR = Math.round(r * factor);
-      const newG = Math.round(g * factor);
-      const newB = Math.round(b * factor);
-      shades.push(rgbToHex(newR, newG, newB));
-    }
-  
-    return shades;
+    // List of potential base colors.
+    const colors = {
+        "#ff0000": [
+          "#ff0000",
+          "#f20000",
+          "#e60000",
+          "#d90000",
+          "#cc0000",
+          "#bf0000",
+          "#b30000",
+          "#a60000",
+          "#990000",
+          "#8c0000"
+        ],
+        "#ff8700": [
+          "#ff8700",
+          "#f28000",
+          "#e67a00",
+          "#d97300",
+          "#cc6c00",
+          "#bf6500",
+          "#b35f00",
+          "#a65800",
+          "#995100",
+          "#8c4a00"
+        ],
+        "#ffd300": [
+          "#ffd300",
+          "#fcca00",
+          "#e6c000",
+          "#d9b600",
+          "#ccb000",
+          "#bfaa00",
+          "#b3a000",
+          "#a69a00",
+          "#999000",
+          "#8c8600"
+        ],
+        "#a1ff0a": [
+          "#a1ff0a",
+          "#97f207",
+          "#8ded04",
+          "#83e701",
+          "#79db00",
+          "#6fd200",
+          "#65c900",
+          "#5bc000",
+          "#51b700",
+          "#47ae00"
+        ],
+        "#117a03": [
+          "#117a03",
+          "#107203",
+          "#0e6c03",
+          "#0c6603",
+          "#0a6003",
+          "#085a03",
+          "#065403",
+          "#044e03",
+          "#024803",
+          "#004203"
+        ],
+
+        "#580aff": [
+          "#580aff",
+          "#5109f2",
+          "#4a08e6",
+          "#4307da",
+          "#3c06ce",
+          "#3505c2",
+          "#2e04b6",
+          "#2703aa",
+          "#2002a0",
+          "#190196"
+        ],
+        "#be0aff": [
+          "#be0aff",
+          "#b308f2",
+          "#aa07e6",
+          "#a005da",
+          "#9704ce",
+          "#8e03c2",
+          "#8502b6",
+          "#7c01aa",
+          "#7300a0",
+          "#6a0096"
+        ]
+      }
+
+
+
+
+  // Tell TypeScript that the keys are exactly those of the colors object.
+  const baseColors = Object.keys(colors) as (keyof typeof colors)[];
+  // Pick a random base color.
+  const randomKey = baseColors[Math.floor(Math.random() * baseColors.length)];
+  const fullShades = colors[randomKey];
+
+  // If the requested count equals the full set, return it directly.
+  if (count === fullShades.length) {
+    return fullShades;
   }
-  
+
+  // Otherwise, return an evenly spaced selection of shades.
+  const result: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const index = count === 1 ? 0 : Math.round(i * (fullShades.length - 1) / (count - 1));
+    result.push(fullShades[index]);
+  }
+
+  return result;
+}
+

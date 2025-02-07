@@ -375,3 +375,48 @@ export function ohlcArrow(
   // Restore the canvas state after drawing.
   ctx.restore();
 }
+/**
+ * Draws a traditional OHLC bar using leftSide and rightSide coordinates.
+ *
+ * The vertical line is drawn at the midpoint between leftSide and rightSide,
+ * spanning from the high to the low. An open tick is drawn from leftSide to the center
+ * at the open price, and a close tick is drawn from the center to rightSide at the close price.
+ *
+ * @param ctx - The canvas rendering context.
+ * @param leftSide - The X-coordinate for the left edge of the bar.
+ * @param rightSide - The X-coordinate for the right edge of the bar.
+ * @param high - The Y-coordinate for the high price.
+ * @param low - The Y-coordinate for the low price.
+ * @param open - The Y-coordinate for the open price.
+ * @param close - The Y-coordinate for the close price.
+ */
+export function ohlcBar(
+  ctx: CanvasRenderingContext2D,
+  leftSide: number,
+  rightSide: number,
+  high: number,
+  low: number,
+  open: number,
+  close: number
+): void {
+  // Compute the center X coordinate of the bar.
+  const centerX = (leftSide + rightSide) / 2;
+
+  // Draw the vertical line (from high to low) at the center.
+  ctx.beginPath();
+  ctx.moveTo(centerX, high);
+  ctx.lineTo(centerX, low);
+  ctx.stroke();
+
+  // Draw the open tick from leftSide to center at the open price.
+  ctx.beginPath();
+  ctx.moveTo(leftSide, open);
+  ctx.lineTo(centerX, open);
+  ctx.stroke();
+
+  // Draw the close tick from center to rightSide at the close price.
+  ctx.beginPath();
+  ctx.moveTo(centerX, close);
+  ctx.lineTo(rightSide, close);
+  ctx.stroke();
+}

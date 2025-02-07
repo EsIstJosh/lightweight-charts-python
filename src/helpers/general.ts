@@ -1,10 +1,7 @@
-import { ISeriesApi, SeriesType, ISeriesPrimitive, AreaStyleOptions, BarStyleOptions, DeepPartial, HistogramStyleOptions, LineStyleOptions, SeriesOptionsCommon, LineStyle, IChartApi, Logical, MouseEventParams, Coordinate, SeriesDataItemTypeMap, LineSeries } from "lightweight-charts";
-import { Legend } from "../general/legend";
-import { ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
-import { convertDataItem, ISeriesApiExtended, SupportedSeriesType } from "./series";
+import { ISeriesApi, SeriesType, LineStyle, IChartApi, Logical, MouseEventParams, Coordinate, LineSeries, Time } from "lightweight-charts";
+import { ISeriesApiExtended} from "./series";
 import { Point as LogicalPoint } from "../drawing/data-source";
 import { Point as CanvasPoint } from "lightweight-charts";
-import { ViewPoint } from "../drawing/pane-view";
 
 
 /**
@@ -235,4 +232,41 @@ export function toLogicalPoint(
   }
   // Otherwise assume it is already a LogicalPoint
   return input as LogicalPoint;
+}
+
+
+export class OffsetPoint implements LogicalPoint {
+  /**
+   * Constructs an OffsetPoint.
+   *
+   * @param basePoint - The original point.
+   * @param xOffset - Optional horizontal offset to apply to the logical value (defaults to 0).
+   * @param yOffset - Optional vertical offset to apply to the price (defaults to 0).
+   */
+  constructor(
+    private basePoint: LogicalPoint,
+    private xOffset: number = 0,
+    private yOffset: number = 0
+  ) {}
+
+  /**
+   * Returns the original time value.
+   */
+  get time(): Time | null {
+    return this.basePoint.time;
+  }
+
+  /**
+   * Returns the logical value with the xOffset applied.
+   */
+  get logical(): Logical {
+    return (Math.round(this.basePoint.logical + this.xOffset)) as Logical;
+  }
+
+  /**
+   * Returns the price with the yOffset applied.
+   */
+  get price(): number {
+    return this.basePoint.price + this.yOffset;
+  }
 }
