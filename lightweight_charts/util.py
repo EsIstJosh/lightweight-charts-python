@@ -137,7 +137,7 @@ NUM = Union[float, int]
 
 FLOAT = Literal['left', 'right', 'top', 'bottom']
 
-CANDLE_SHAPE = Literal['Ellipse','Rectangle','Hourglass','Bowtie','X','3d','Polygon']
+CANDLE_SHAPE = Literal['Rectangle','Rounded','Ellipse','Arrow','Polygon','Bar','3d',]
 
 def as_enum(value, string_types):
     types = string_types.__args__

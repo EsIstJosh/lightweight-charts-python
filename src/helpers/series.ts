@@ -1,5 +1,5 @@
-import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions } from "lightweight-charts";
-import { CandleShape } from "../ohlc-series/data";
+import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData } from "lightweight-charts";
+import {CandleShape } from "../ohlc-series/data";
 import { isOHLCData, isSingleValueData, isWhitespaceData } from "./typeguards";
 import { TradeData, tradeDefaultOptions, TradeSeries, TradeSeriesOptions } from "../tx-series/renderer";
 import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
@@ -823,9 +823,160 @@ export function recalculateIndicator(indicatorSeries: ISeriesIndicator, override
     if (existingSeries) {
       existingSeries.setData(newFigure.data);
       existingSeries.applyOptions({ title: newFigure.title });
+      if (newFigure.pane) {
+        // Check if the current pane of the series is the same as the source series' pane.
+        if (existingSeries.getPane() === indicatorSeries.sourceSeries.getPane()) {
+          const currentPane = existingSeries.getPane();
+          const paneIndex = currentPane.paneIndex(); // Call the function to get a number
+          existingSeries.moveToPane(paneIndex + newFigure.pane);
+        }
+      }
     }
   });
 
   // Store the current (merged) parameters for future recalculations.
   indicatorSeries.paramMap = updatedParams;
+}
+
+// Assume these types are defined in your project:
+export interface BarItem {
+  time: Time,
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  x: number;
+  // Optional indices for reference:
+  startIndex: number;
+  endIndex: number;
+}
+
+
+// Simplified configuration options interface
+export interface SimpleAggregatorOptions {
+  chandelierSize?: number; // Number of bars to group (default: 1)
+}
+
+/**
+ * Simplified BarDataAggregator: aggregates raw bar data into grouped BarItem objects.
+ * Only the essential properties (open, high, low, close, volume, x) are computed.
+ */
+export class BarDataAggregator {
+  private _options: SimpleAggregatorOptions | null;
+
+  /**
+   * Constructs a new BarDataAggregator instance.
+   * @param options - Aggregation options. Can be null to use defaults.
+   */
+  constructor(options: SimpleAggregatorOptions | null) {
+    this._options = options;
+  }
+
+  /**
+   * Aggregates an array of BarItem objects into grouped BarItem objects.
+   * @param data - The raw bar data to aggregate.
+   * @param priceToCoordinate - Function to convert price values to canvas coordinates.
+   * @returns An array of aggregated BarItem objects.
+   */
+  public staticAggregate(
+    data: BarItem[],
+    priceToCoordinate: PriceToCoordinateConverter
+  ): BarItem[] {
+    // Determine the group size based on chandelierSize (default to 1 if not provided)
+    const groupSize = this._options?.chandelierSize ?? 1;
+    const aggregatedBars: BarItem[] = [];
+
+    // Iterate over the data in increments of groupSize to form buckets.
+    for (let i = 0; i < data.length; i += groupSize) {
+      const bucket = data.slice(i, i + groupSize);
+      if (bucket.length === 0) {
+        console.warn("Empty bucket encountered during aggregation.");
+        continue;
+      }
+
+      // Aggregate the current bucket into a single BarItem.
+      const aggregatedBar = this._chandelier(
+        bucket,
+        i,
+        i + bucket.length - 1,
+        priceToCoordinate
+      );
+      aggregatedBars.push(aggregatedBar);
+    }
+
+    return aggregatedBars;
+  }
+
+  /**
+   * Aggregates a single bucket of BarItem objects into one consolidated BarItem.
+   * Uses the first bar's open, the last bar's close, the maximum high, the minimum low,
+   * the sum of volumes, and the first bar's x-position.
+   *
+   * @param bucket - The group of BarItem objects to aggregate.
+   * @param startIndex - The starting index of the bucket in the original data array.
+   * @param endIndex - The ending index of the bucket in the original data array.
+   * @param priceToCoordinate - Function to convert price values to canvas coordinates.
+   * @returns A single aggregated BarItem.
+   * @throws Will throw an error if the bucket is empty.
+   */
+  private _chandelier(
+    bucket: BarItem[],
+    startIndex: number,
+    endIndex: number,
+    priceToCoordinate: PriceToCoordinateConverter
+  ): BarItem {
+    if (bucket.length === 0) {
+      throw new Error("Bucket cannot be empty in _chandelier method.");
+    }
+
+    // Use the first bar's open, the last bar's close.
+    const openPrice = bucket[0].open;
+    const closePrice = bucket[bucket.length - 1].close;
+
+    // For high and low, aggregate from the entire bucket.
+    const highPrice = Math.max(...bucket.map((bar) => bar.high));
+    const lowPrice = Math.min(...bucket.map((bar) => bar.low));
+
+    // Sum up the volume from the bucket.
+    startIndex = startIndex??0
+    endIndex = endIndex??0
+    // Use the first bar's x-coordinate (alternatively, you might use an average).
+    const x = bucket[0].x;
+    const time = bucket[0].time
+    // Optionally, you can convert prices to canvas coordinates.
+    const open = (priceToCoordinate(openPrice)??0 )as Coordinate;
+    const close = (priceToCoordinate(closePrice)??0 )as Coordinate;
+    const high = (priceToCoordinate(highPrice)??0 )as Coordinate;
+    const low = (priceToCoordinate(lowPrice)??0 )as Coordinate;
+
+    // Return the aggregated BarItem with the essential properties.
+    return {
+      time,
+      open,
+      high,
+      low,
+      close,
+      x,
+      startIndex,
+      endIndex,
+    };
+  }
+}
+/**
+ * Converts a SingleValueData object to an OhlcData object by assigning
+ * the `value` property to the open, high, low, and close prices.
+ *
+ * @param data - The single value data point.
+ * @returns An OhlcData object with open, high, low, and close set to data.value.
+ */
+export function singleToOhlcData<HorzScaleItem = Time>(
+  data: SingleValueData<HorzScaleItem>
+): OhlcData<HorzScaleItem> {
+  return {
+    time: data.time,
+    open: data.value,
+    high: data.value,
+    low: data.value,
+    close: data.value,
+  };
 }

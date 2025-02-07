@@ -20,9 +20,16 @@ import {
   getVwap,
   setHistogramColors,
   getNumericArray,
-  pickParam
+  pickParam,
+  getVwma,
+  getWma,
+  getVwapNumeric,
+  getVwmaNumeric
 } from "./functions";
 import { IndicatorDefinition, IndicatorFigure } from "./indicators";
+import { ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
+import { BarDataAggregator } from "../helpers/series";
+import { BarItem } from "../helpers/series";
 
 
 /************************************************
@@ -931,16 +938,73 @@ export const weightedMovingAverage: IndicatorDefinition = {
     return figs;
   },
 };
+export const highestHighLowestLow: IndicatorDefinition = {
+  name: "High & Low",
+  shortName: "HHLL",
+  shouldOhlc: true,
+  paramMap: {
+    length: { defaultValue: [14], type: "numberArray" },
+  },
+  calc(dataList, overrideParams) {
+    // Get the length values (as an array of numbers)
+    const arr = getNumericArray(
+      overrideParams,
+      "length",
+      this.paramMap.length.defaultValue as number[]
+    );
+    const figs: IndicatorFigure[] = [];
+    
+    arr.forEach((val, i) => {
+      const hhArr: SingleValueData[] = [];
+      const llArr: SingleValueData[] = [];
+      
+      // Iterate through each data bar to compute both HH and LL
+      dataList.forEach((bar, idx) => {
+        if (idx < val - 1) {
+          hhArr.push({ time: bar.time, value: NaN });
+          llArr.push({ time: bar.time, value: NaN });
+          return;
+        }
+        
+        let highest = -Infinity;
+        let lowest = Infinity;
+        for (let j = idx - (val - 1); j <= idx; j++) {
+          highest = Math.max(highest, dataList[j].high);
+          lowest = Math.min(lowest, dataList[j].low);
+        }
+        
+        hhArr.push({ time: bar.time, value: highest });
+        llArr.push({ time: bar.time, value: lowest });
+      });
+      
+      const suffix = arr.length > 1 ? `_${i + 1}` : "";
+      figs.push({
+        key: "hh" + suffix,
+        title: "HH" + val + (arr.length > 1 ? ` #${i + 1}` : ""),
+        type: "line",
+        data: hhArr,
+      });
+      figs.push({
+        key: "ll" + suffix,
+        title: "LL" + val + (arr.length > 1 ? ` #${i + 1}` : ""),
+        type: "line",
+        data: llArr,
+      });
+    });
+    
+    return figs;
+  },
+};
 
-/************************************************
- * INDICATORS
- ************************************************/
+
+
 export const OVERLAYS : IndicatorDefinition[] = [
   // Overlay Indicators
   arnaudLegouxMovingAverage,
   bollingerBands,
   exponentialMovingAverage,
   highestHigh,
+  highestHighLowestLow,
   linRegIndicator,
   lowestLow,
   median,

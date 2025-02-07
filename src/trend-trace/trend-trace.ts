@@ -41,6 +41,7 @@ import {
   ohlcArrow,
   ohlc3d,
   ohlcPolygon,
+  ohlcBar,
 } from "../ohlc-series/shapes";
 import { InteractionState } from "../drawing/drawing";
 import {
@@ -103,15 +104,19 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
     source: ISeriesApiExtended,
     p1: LogicalPoint,
     p2: LogicalPoint,
-    options?: Partial<SequenceOptions>
+    options?: Partial<SequenceOptions>,
+    pOffset?:number
   ) {
     super();
     this._handler = handler;
     this._source = source;
 
     // Initialize original points
+    
     this._originalP1 = { ...p1 };
     this._originalP2 = { ...p2 };
+
+    
     const sourceOptions: Readonly<
       | BarSeriesOptions
       | CandlestickSeriesOptions
@@ -135,7 +140,7 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
     };
 
     // Create and store the sequence
-    this._sequence = this._createSequence({p1, p2});
+    this._sequence = this._createSequence({p1, p2},this._options,pOffset);
     this.p1 = this._sequence.p1;
     this.p2 = this._sequence.p2;
     // Initialize pane views
@@ -231,7 +236,8 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
 
   private _createSequence(
     source: { p1: LogicalPoint; p2: LogicalPoint } | { data: Sequence },
-    options?: SequenceOptions
+    options?: SequenceOptions,
+    offset?: number
 ): Sequence{   
     let sequence: Sequence;
 
@@ -242,6 +248,8 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
             source.p1,
             source.p2,
             options ?? this._options,
+            offset
+
         );
         sequence.onComplete = () => this.updateViewFromSequence();
         this.updateViewFromSequence();
@@ -252,7 +260,8 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
             source.data,
             source.data._originalP1,
             source.data._originalP2,
-            options??this._options
+            options??this._options,
+            offset
         );
         sequence.onComplete = () => this.updateViewFromSequence();
         this.updateViewFromSequence();
@@ -445,42 +454,52 @@ export class TrendTrace extends PluginBase implements ISeriesPrimitive<Time> {
   }
 
   protected _mouseIsOverSequence(param: MouseEventParams): boolean {
+    // Validate the presence of necessary properties in param
     if (!param.logical || !param.point) {
-      return false;
+        console.warn('Invalid MouseEventParams: Missing logical or point.');
+        return false;
     }
 
+    // Convert the Y-coordinate of the mouse point to a price
     const mousePrice = this._source.coordinateToPrice?.(param.point.y);
-
     if (mousePrice == null) {
-      return false;
-    }
-    let bar;
-    // For a more robust approach, you might search for the bar whose .logical matches param.logical.
-    // Or find the nearest bar to param.logical if there's no direct match.
-    // Here's a simplistic approach:
-    if (param.logical) {
-      bar = this._sequence.data.find(
-        (d) => Math.round(d.x1) === Math.round(param.logical!)
-      );
-    }
-    if (!bar) {
-      return false;
+        console.warn('Mouse price could not be determined.');
+        return false;
     }
 
-    // If it’s OHLC data, check (low..high)
-    if (bar.low !== (0 || undefined) && bar.high !== (0 || undefined)) {
-      return mousePrice >= bar.low && mousePrice <= bar.high;
+    // Attempt to find the corresponding bar by time
+    let bar = param.time
+        ? this._sequence.data.find((d) => d.time === param.time)
+        : undefined;
+
+    // If no bar is found by time, attempt to find by logical
+    if (!bar) {
+        bar = this._sequence.data.find((d) => Math.round(d.x1) === Math.round(param.logical as Logical));
     }
-    // If single-value data
-    if (bar.value !== (0 || undefined)) {
-      // For example, we can define a small tolerance of ±(bar.value*0.02)
-      const tolerance = bar.value * 0.05;
-      return (
-        mousePrice > bar.value - tolerance && mousePrice < bar.value + tolerance
-      );
+
+    // If no matching bar is found, return false
+    if (!bar) {
+        console.warn('No matching bar found for the given parameters.');
+        return false;
     }
+
+    // Check if the mouse price is within the bar's price range
+    if (bar.low != null && bar.high != null) {
+        // Apply a small tolerance to account for minor discrepancies
+        const tolerance = (bar.high - bar.low) * 0.05;
+        return mousePrice >= bar.low - tolerance && mousePrice <= bar.high + tolerance;
+    }
+
+    // For single-value data, apply a 5% tolerance
+    if (bar.value != null) {
+        const tolerance = bar.value * 0.05;
+        return mousePrice >= bar.value - tolerance && mousePrice <= bar.value + tolerance;
+    }
+
+    // If bar lacks necessary price information, return false
+    console.warn('Bar lacks price information.');
     return false;
-  }
+}
 
   _moveToState(state: InteractionState) {
     switch (state) {
@@ -994,6 +1013,9 @@ export class TrendTracePaneRenderer
     case CandleShape.Polygon:
       ohlcPolygon(ctx, leftSide, rightSide, barY, barVerticalSpan, scaledHigh, scaledLow, isUp);
       break;
+    case CandleShape.Bar:
+      ohlcBar(ctx, leftSide, rightSide, scaledHigh, scaledLow, scaledOpen, scaledClose);
+      break;  
     default:
       console.warn(`Unknown shape '${shape}', using default Rectangle`);
       ohlcRectangle(ctx, leftSide, rightSide, barY, barVerticalSpan);

@@ -25,6 +25,11 @@ export interface ohlcSeriesOptions
 	barSpacing: number;
 	lineStyle: LineStyle;
 	lineWidth: LineWidth;
+	dynamicCandles:boolean;
+	volumeMALength?: number;    // e.g. 20 (default if not provided)
+	volumeMultiplier?: number;  // e.g. 1.0 (default if not provided)
+	dynamicTrigger: () => { newBar: boolean }; // Corrected function signature
+
 		}
 	//upperUpColor: string|undefined
 	//upperDownColor: string|undefined
@@ -47,8 +52,9 @@ export const ohlcdefaultOptions: ohlcSeriesOptions = {
 	chandelierSize: 1,
 	barSpacing: 0.8,
 	lineStyle: 0 as LineStyle,
-	lineWidth: 2 as  LineWidth
-
+	lineWidth: 2 as  LineWidth,
+	dynamicCandles: false,
+	dynamicTrigger: () => ({ newBar: true }) // Corrected function implementation
 } as const;
 	//upperUpColor: undefined,
 	//upperDownColor: undefined,

@@ -135,7 +135,7 @@ export class Sequence {
     private series: ISeriesApi<SeriesType>;
     private _originalData: DataPoint[] = [];
     private _originalSlice: DataPoint[] = [];
-
+    public offset: number;
     /**
      * This array holds only the slice from _originalP1 to _originalP2,
      * so we never repeatedly slice the entire series data again.
@@ -156,6 +156,7 @@ export class Sequence {
         p1: LogicalPoint,
         p2: LogicalPoint,
         options: SequenceOptions,
+        pOffset?: number
     ) {
         this._options = { ...options, ...defaultSequenceOptions };
         let left: LogicalPoint, right:LogicalPoint
@@ -170,7 +171,7 @@ export class Sequence {
     
         this._originalP1 = { ...left }; 
         this._originalP2 = { ...right };
-        
+        this.offset = pOffset??0
         this.p1 = p1;
         this.p2 = p2;
 
@@ -193,9 +194,24 @@ export class Sequence {
          * calls only transform, not re-slice.
          */
         const x1 = Math.min(this._originalP1.logical, this._originalP2.logical);
-        const x2 = Math.max(this._originalP1.logical, this._originalP2.logical);
-        this._originalSlice = this._originalData.slice(x1, x2 + 1);
-
+        const x2 = Math.max(this._originalP1.logical, this._originalP2.logical) ;
+        if (pOffset && pOffset> 0){ 
+        this._originalSlice = this._originalData.slice(x2, Math.min(this.series.data().length-1,x2 + 1+ pOffset));
+        console.log("Data Sliced with Offset",x1,x2,pOffset, "Offset Point:", Math.min(this.series.data().length-1,x2 + 1+ pOffset))
+        } 
+        else {
+            this._originalSlice = this._originalData.slice(x1, x2 + 1);
+            console.log("Data Sliced:",x1,x2)
+        }
+            // If a pOffset is provided, adjust each bar in the slice by adding the offset to x1 and x2.
+        if (pOffset && pOffset > 0) {
+            this._originalSlice = this._originalSlice.map((bar: any) => ({
+            ...bar,
+            x1: bar.x1 + pOffset,
+            x2: bar.x2 + pOffset
+            }));
+            console.log("Adjusted originalSlice with pOffset:", pOffset);
+        }
 
         // Adjust this once initially
         this.transform= this.recalculateSpatial();
@@ -295,7 +311,7 @@ export class Sequence {
             y: scaleY !== 0 ? Math.round(scaleY * 100) / 100 : 1
         },
         shift: {
-            x: this._originalP1.logical - this.p1.logical,
+            x: (this._originalP1.logical - this.p1.logical),
             y: this._originalP1.price - this.p1.price
         }
     };
@@ -412,8 +428,8 @@ export class Sequence {
                     high: highPrice,
                     low: lowPrice,
                     isUp,
-                    x1: barX,
-                    x2: barX,
+                    x1: barX   + this.offset,
+                    x2: barX   + this.offset,
                     isInProgress: false,
                     originalData: {...orig, x1: index},
                     barSpacing: this._barWidth,
@@ -432,8 +448,8 @@ export class Sequence {
                 return {
                     value: valuePrice,
                     isUp: undefined,
-                    x1: barX,
-                    x2: barX,
+                    x1: barX  + this.offset,
+                    x2: barX  + this.offset,
                     isInProgress: false,
                     originalData: orig,
                     barSpacing: this._options.barSpacing ?? 0.8

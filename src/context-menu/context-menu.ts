@@ -15,6 +15,9 @@ import {
   Background,
   ISeriesApi,
   SingleValueData,
+  CustomSeriesOptions,
+  LineWidth,
+  OhlcData,
 } from "lightweight-charts";
 // ----------------------------------
 // Internal Helpers and Types
@@ -24,7 +27,9 @@ import {
   decorateSeriesAsIndicator,
   ensureExtendedSeries,
   ISeriesIndicator,
+  OhlcSeriesOptions,
   recalculateIndicator,
+  singleToOhlcData,
   SupportedSeriesType,
 } from "../helpers/series";
 import {
@@ -83,6 +88,10 @@ import { PluginBase } from "../plugin-base";
 
 import { generateShades, setOpacity } from "../helpers/colors";
 import { INDICATORS, IndicatorDefinition } from "../indicators/indicators";
+import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
+import { ForkLine, PitchFork, PitchForkOptions } from "../pitchfork/pitchfork";
+import { ThreePointDrawing } from "../drawing/three-point-drawing";
+import { OffsetPoint } from "../helpers/general";
 
 // ----------------------------------
 // If you have actual code referencing commented-out or removed imports,
@@ -111,7 +120,7 @@ interface OptionDescriptor {
   options?: string[];
 }
 export class ContextMenu {
-  private div: HTMLDivElement;
+  public div: HTMLDivElement;
   private hoverItem: Item | null;
   private items: HTMLElement[] = [];
   private colorPicker: seriesColorPicker = new seriesColorPicker(
@@ -159,7 +168,10 @@ export class ContextMenu {
     lineStyle: { min: 0, max: 4 },
 
     seriesType: { skip: true },
-    chandelierSize: { min: 1 },
+    chandelierSize: { skip: true },
+    volumeCandles: { skip: true },
+    volumeMALength: { skip: true },
+    volumeMultiplier: { skip: true },
   };
   public setupDrawingTools(saveDrawings: Function, drawingTool: DrawingTool) {
     this.saveDrawings = saveDrawings;
@@ -266,7 +278,7 @@ export class ContextMenu {
     } else if (drawingFromProximity) {
       // Right-click on a drawing
       console.log("Right-click detected on a drawing.");
-      this.populateDrawingMenu(drawingFromProximity, event);
+      this.populateDrawingMenu(event, drawingFromProximity);
       this.recentDrawing = drawingFromProximity;
     } else if (trendFromProximity) {
       // Right-click on a drawing
@@ -491,7 +503,7 @@ export class ContextMenu {
     });
   }
 
-  private addMenuInput(
+  public addMenuInput(
     parent: HTMLElement,
     config: {
       type: "string" | "color" | "number" | "boolean" | "select" | "hybrid";
@@ -821,7 +833,6 @@ export class ContextMenu {
     dynamicItems.forEach((item) => item.remove());
     this.items = [];
     this.div.innerHTML = "";
-
   }
 
   /**
@@ -880,8 +891,6 @@ export class ContextMenu {
           }
         }
       }
-
-
     };
 
     menuItem.addEventListener("click", (event: MouseEvent) => {
@@ -934,6 +943,7 @@ export class ContextMenu {
         BarSeriesOptions &
         AreaSeriesOptions &
         CandlestickSeriesOptions &
+        ohlcSeriesOptions &
         SeriesOptionsExtended
     >;
 
@@ -1080,6 +1090,7 @@ export class ContextMenu {
             "Arrow",
             "3d",
             "Polygon",
+            "Bar",
           ];
           if (predefinedShapes) {
             tempStyleOptions.push({
@@ -1104,15 +1115,17 @@ export class ContextMenu {
       series.options().title || "", // Default to empty string if no title exists
       (newValue: string) => {
         const options = { title: newValue };
-                // Remove old entry and re-add with new title
-      if (this.handler.seriesMap.has(series.options().title)) {
+        // Remove old entry and re-add with new title
+        if (this.handler.seriesMap.has(series.options().title)) {
           this.handler.seriesMap.delete(series.options().title);
         }
         this.handler.seriesMap.set(newValue, series);
         console.log(`Updated seriesMap label to: ${newValue}`);
 
-                // Update the legend title
-        const legendItem = this.handler.legend._lines.find(item => item.series === series);
+        // Update the legend title
+        const legendItem = this.handler.legend._lines.find(
+          (item) => item.series === series
+        );
         if (legendItem && legendItem.series === series) {
           legendItem.name = newValue;
           console.log(`Updated legend title to: ${newValue}`);
@@ -1122,77 +1135,81 @@ export class ContextMenu {
       }
     );
 
-      // Retrieve current pane index of the series and the array of existing panes.
-      const currentPaneIndex = series.getPane().paneIndex();
-      const panes = this.handler.chart.panes();
+    // Retrieve current pane index of the series and the array of existing panes.
+    const currentPaneIndex = series.getPane().paneIndex();
+    const panes = this.handler.chart.panes();
 
-      // Determine the current value (label) for the hybrid input.
-      const currentValue = `Pane ${currentPaneIndex}`;
+    // Determine the current value (label) for the hybrid input.
+    const currentValue = `Pane ${currentPaneIndex}`;
 
-      // Define the default action:
-      // If the series is in the main pane (pane 0), move it to the next existing pane (if available)
-      // or create a new pane if there isn’t one.
-      // Otherwise (if the series is on any other pane), move it back to the main pane (pane 0).
-      const defaultAction = () => {
-        if (currentPaneIndex === 0) {
-          if (panes.length > 1) {
-            series.moveToPane(1);
-            console.log(`Default: Moved series from pane ${currentPaneIndex} to pane 1.`);
-          } else {
-            series.moveToPane(panes.length); // creates a new pane
-            console.log(`Default: Moved series from pane ${currentPaneIndex} to a new pane at index ${panes.length}.`);
-          }
+    // Define the default action:
+    // If the series is in the main pane (pane 0), move it to the next existing pane (if available)
+    // or create a new pane if there isn’t one.
+    // Otherwise (if the series is on any other pane), move it back to the main pane (pane 0).
+    const defaultAction = () => {
+      if (currentPaneIndex === 0) {
+        if (panes.length > 1) {
+          series.moveToPane(1);
+          console.log(
+            `Default: Moved series from pane ${currentPaneIndex} to pane 1.`
+          );
         } else {
-          series.moveToPane(0);
-          console.log(`Default: Moved series from pane ${currentPaneIndex} back to main pane (0).`);
+          series.moveToPane(panes.length); // creates a new pane
+          console.log(
+            `Default: Moved series from pane ${currentPaneIndex} to a new pane at index ${panes.length}.`
+          );
         }
-      };
-
-      // Build the list of options:
-      // For each existing pane, add an option labeled "Pane 0", "Pane 1", etc.
-      // Then add an extra option for a "New Pane".
-      const options: { name: string; action: () => void }[] = [];
-      for (let i = 0; i < panes.length; i++) {
-        options.push({
-          name: `Pane ${i}`,
-          action: () => {
-            series.moveToPane(i);
-            console.log(`Moved series to existing pane ${i}.`);
-          }
-        });
+      } else {
+        series.moveToPane(0);
+        console.log(
+          `Default: Moved series from pane ${currentPaneIndex} back to main pane (0).`
+        );
       }
+    };
+
+    // Build the list of options:
+    // For each existing pane, add an option labeled "Pane 0", "Pane 1", etc.
+    // Then add an extra option for a "New Pane".
+    const options: { name: string; action: () => void }[] = [];
+    for (let i = 0; i < panes.length; i++) {
       options.push({
-        name: "New Pane",
+        name: `Pane ${i}`,
         action: () => {
-          series.moveToPane(panes.length);
-          console.log(`Moved series to a new pane at index ${panes.length}.`);
-        }
-      });
-
-      // Create the hybrid input using your addMenuInput helper.
-      // This will render a dropdown that shows all options and executes the corresponding action on change.
-      this.addMenuInput(this.div, {
-        type: "hybrid",
-        label: "Move series to pane",
-        sublabel: currentValue,
-        value: currentValue,
-        onChange: (newValue: string) => {
-          // When the user selects an option, look it up in the options array and execute its action.
-          const selectedOption = options.find(opt => opt.name === newValue);
-          if (selectedOption) {
-            selectedOption.action();
-          }
+          series.moveToPane(i);
+          console.log(`Moved series to existing pane ${i}.`);
         },
-        hybridConfig: {
-          defaultAction: defaultAction,
-          options: options.map(opt => ({
-            name: opt.name,
-            action: opt.action
-          }))
-        }
       });
+    }
+    options.push({
+      name: "New Pane",
+      action: () => {
+        series.moveToPane(panes.length);
+        console.log(`Moved series to a new pane at index ${panes.length}.`);
+      },
+    });
 
-
+    // Create the hybrid input using your addMenuInput helper.
+    // This will render a dropdown that shows all options and executes the corresponding action on change.
+    this.addMenuInput(this.div, {
+      type: "hybrid",
+      label: "Move series to pane",
+      sublabel: currentValue,
+      value: currentValue,
+      onChange: (newValue: string) => {
+        // When the user selects an option, look it up in the options array and execute its action.
+        const selectedOption = options.find((opt) => opt.name === newValue);
+        if (selectedOption) {
+          selectedOption.action();
+        }
+      },
+      hybridConfig: {
+        defaultAction: defaultAction,
+        options: options.map((opt) => ({
+          name: opt.name,
+          action: opt.action,
+        })),
+      },
+    });
 
     // Inside populateSeriesMenu (already in your code above)
     this.addMenuItem(
@@ -1249,6 +1266,82 @@ export class ContextMenu {
       );
     }
 
+    // **** New block: add numeric inputs for volume-based or chandelier aggregation ****
+    //let aggregatorOptions = series.options();
+    //if ( "volumeCandles" in aggregatorOptions && "volumeMALength" in aggregatorOptions &&
+    //  "volumeMultiplier" in aggregatorOptions &&
+    //  "chandelierSize" in aggregatorOptions &&
+    //  aggregatorOptions?.volumeCandles !== undefined) {
+
+    //const aggregatorOptions = series.options() as  OhlcSeriesOptions ;
+
+    // if ('volumeCandles' in aggregatorOptions && "volumeMALength" in aggregatorOptions &&
+    //   "volumeMultiplier" in aggregatorOptions) {
+
+    //  // Add a checkbox for toggling volumeCandles.
+    //  // When toggled, the series options are updated and the menu is repopulated.
+    //  this.addCheckbox("Volume Candles", (aggregatorOptions as OhlcSeriesOptions).volumeCandles ?? false, (newValue: boolean) => {
+    //    const options = { volumeCandles: newValue };
+    //    series.applyOptions(options as Partial<OhlcSeriesOptions>);
+    //    console.log(`Updated volumeCandles to ${newValue}`);
+    //    // Repopulate the series menu with the updated options.
+    //    this.populateSeriesMenu(series, event);
+    //  });
+    //  if ((series.options() as ohlcSeriesOptions).volumeCandles) {
+    //  // Volume candles are enabled: add number inputs for the volume moving average length and multiplier.
+    //  this.addNumberInput(
+    //    "Volume MA Length",
+    //    (aggregatorOptions as OhlcSeriesOptions).volumeMALength ?? 20,
+    //    (newValue: number) => {
+    //      const options = { volumeMALength: newValue };
+    //      series.applyOptions(options as Partial<OhlcSeriesOptions>);
+    //      console.log(`Updated Volume MA Length to ${newValue}`);
+    //      // Optionally repopulate the menu dynamically if needed.
+    //    },
+    //    1,
+    //    100,
+    //    1
+    //  );
+    //  this.addNumberInput(
+    //    "Volume Multiplier",
+    //    (aggregatorOptions as OhlcSeriesOptions).volumeMultiplier ?? 1.0,
+    //    (newValue: number) => {
+    //      const options = { volumeMultiplier: newValue };
+    //      series.applyOptions(options as Partial<OhlcSeriesOptions>);
+    //      console.log(`Updated Volume Multiplier to ${newValue}`);
+    //      // Optionally repopulate the menu dynamically if needed.
+    //    },
+    //    0.1,
+    //    10,
+    //    0.1
+    //  );
+    //}else {
+    //  // Volume candles are disabled: add a number input for chandelier size.
+
+    if (
+      series instanceof ohlcSeries &&
+      (series.options() as OhlcSeriesOptions).chandelierSize
+    ) {
+      // series is an OhlcSeries and has a defined chandelierSize option.
+      // Your code here...
+
+      this.addNumberInput(
+        "Chandelier Size",
+        (series.options() as OhlcSeriesOptions).chandelierSize ?? 1,
+        (newValue: number) => {
+          const options = { chandelierSize: newValue };
+          series.applyOptions(options as Partial<OhlcSeriesOptions>);
+          console.log(`Updated Chandelier Size to ${newValue}`);
+          // Optionally repopulate the menu dynamically if needed.
+        },
+        1,
+        100,
+        1
+      );
+    }
+    //
+    //
+    // *************************************************************************
     // Add other options dynamically
     otherOptions.forEach((option) => {
       const optionLabel = camelToTitle(option.label); // Human-readable label
@@ -1377,38 +1470,35 @@ export class ContextMenu {
       false,
       true
     );
-    const data = series.data(); 
-    // Assuming you already have `isOHLCData(...)` or something similar
-    const hasOhlc = Array.isArray(data) && data.every(d => isOHLCData(d));
-  
-    if (hasOhlc) {
-      // 2) If all items are OHLC, add a submenu item for your “Indicators”
-      this.addMenuItem(
-        "Indicators ▸",
-        () => {
-          // Here you’d call your “populateIndicatorMenu” or “showIndicatorModal” or 
-          // whichever method lists available indicators and applies them
-          this.populateIndicatorMenu((series as ISeriesApi<"Candlestick"|"Bar">) ,event);
-        },
-        false, // do not hide the entire menu automatically
-        true   // indicates a submenu arrow “▸”
-      );
-    }
 
-  // Check if this series is part of an indicator
-  if (isISeriesIndicator(series)) {
-    
-    const indicatorSeries = series as ISeriesIndicator;
-
+    // 2) If all items are OHLC, add a submenu item for your “Indicators”
     this.addMenuItem(
-      `Configure ${indicatorSeries.indicator.name}`,
+      "Indicators ▸",
       () => {
-        this.configureIndicatorParams(indicatorSeries,event,indicatorSeries.figureCount);
+        this.populateIndicatorMenu(
+          series as ISeriesApi<"Candlestick" | "Bar">,
+          event
+        );
       },
-      false
+      false, // do not hide the entire menu automatically
+      true // indicates a submenu arrow “▸”
     );
-  
 
+    // Check if this series is part of an indicator
+    if (isISeriesIndicator(series)) {
+      const indicatorSeries = series as ISeriesIndicator;
+
+      this.addMenuItem(
+        `Configure ${indicatorSeries.indicator.name}`,
+        () => {
+          this.configureIndicatorParams(
+            indicatorSeries,
+            event,
+            indicatorSeries.figureCount
+          );
+        },
+        false
+      );
     }
     // Add remaining existing menu items
     this.addMenuItem(
@@ -1423,7 +1513,7 @@ export class ContextMenu {
     this.showMenu(event);
   }
 
-  private populateDrawingMenu(drawing: Drawing, event: MouseEvent): void {
+  private populateDrawingMenu(event: MouseEvent, drawing: Drawing): void {
     this.div.innerHTML = ""; // Clear existing menu items
     if (!this.drawingTool) {
       this.drawingTool = new DrawingTool(
@@ -1451,10 +1541,71 @@ export class ContextMenu {
         subMenu._div.style.display = "none";
       });
     }
+
+    // 1) If this drawing is a PitchFork, add a select input for variant.
+    if (drawing._type === "PitchFork") {
+      // For clarity, cast or check if your PitchFork uses drawing._options.variant
+      const currentVariant =
+        (drawing._options as PitchForkOptions).variant || "standard";
+      const allowedVariants = [
+        "standard",
+        "schiff",
+        "modifiedSchiff",
+        "inside",
+      ];
+
+      this.addSelectInput(
+        "Pitchfork Variant",
+        currentVariant,
+        allowedVariants,
+        (newValue: string) => {
+          (drawing._options as PitchForkOptions).variant = newValue as
+            | "standard"
+            | "schiff"
+            | "modifiedSchiff"
+            | "inside"
+            | undefined;
+          if (this.saveDrawings) {
+            this.saveDrawings();
+          }
+        }
+      );
+      // Add a number input for "value".
+      this.addNumberInput(
+        "Length",
+        (drawing._options as PitchForkOptions).length,
+        (newValue: number) => {
+          (drawing._options as PitchForkOptions).length = newValue;
+          if (this.saveDrawings) {
+            this.saveDrawings();
+          }
+        },
+        0, // minimum value (adjust as needed)
+        1000, // maximum value (adjust as needed)
+        0.1 // step (adjust as needed)
+      );
+
+      // Add a menu item to populate the detailed PitchFork menu.
+      this.addMenuItem(
+        "Fork Line Options ▸",
+        () => {
+          this.populateForkLineMainMenu(event, drawing);
+        },
+        false,
+        true
+      );
+    }
+
     if (drawing.points?.length >= 2 && drawing.points[0] && drawing.points[1]) {
-      const twoPointDrawing = drawing as TwoPointDrawing;
-      if (twoPointDrawing.linkedObjects?.length) {
-        twoPointDrawing.linkedObjects.forEach((object: PluginBase) => {
+      let multiPointDrawing;
+      if (drawing.points?.length > 2) {
+        multiPointDrawing = drawing as ThreePointDrawing;
+      } else {
+        multiPointDrawing = drawing as TwoPointDrawing;
+      }
+
+      if (multiPointDrawing.linkedObjects?.length) {
+        multiPointDrawing.linkedObjects.forEach((object: PluginBase) => {
           if (object instanceof TrendTrace) {
             this.addMenuItem(
               `${object.title} Options`,
@@ -1481,7 +1632,7 @@ export class ContextMenu {
       this.addMenuItem(
         "Trend Trace ▸",
         () => {
-          this._createTrendTrace(event, drawing as TwoPointDrawing);
+          this._createTrendTrace(event, multiPointDrawing);
         },
         false,
         true
@@ -1490,7 +1641,7 @@ export class ContextMenu {
       this.addMenuItem(
         "Volume Profile ▸",
         () => {
-          this._createVolumeProfile(drawing as TwoPointDrawing);
+          this._createVolumeProfile(multiPointDrawing);
         },
         false,
         true
@@ -1828,7 +1979,7 @@ export class ContextMenu {
     //  false,
     //  true
     //);//
-    
+
     // Add a Back option
     this.addMenuItem(
       "⤝ Back",
@@ -1846,7 +1997,7 @@ export class ContextMenu {
     series: ISeriesApiExtended
   ): void {
     this.div.innerHTML = ""; // Clear the current menu
-  
+
     this.currentStyleOptions.forEach((option) => {
       const predefinedOptions = this.getPredefinedOptions(option.name);
       if (predefinedOptions) {
@@ -1856,13 +2007,13 @@ export class ContextMenu {
           predefinedOptions,
           (newValue: string) => {
             let finalValue: unknown = newValue;
-  
+
             // If the option name indicates it's a line style, map string => numeric
             if (option.name.toLowerCase().includes("style")) {
               const lineStyleMap: Record<string, number> = {
-                "Solid": 0,
-                "Dotted": 1,
-                "Dashed": 2,
+                Solid: 0,
+                Dotted: 1,
+                Dashed: 2,
                 "Large Dashed": 3,
                 "Sparse Dotted": 4,
               };
@@ -1877,15 +2028,18 @@ export class ContextMenu {
               };
               finalValue = lineTypeMap[newValue] ?? 0; // fallback to Simple (0)
             }
-  
+
             // Build the updated options object
             const updatedOptions = buildOptions(option.name, finalValue);
             series.applyOptions(updatedOptions);
-            console.log(`Updated ${option.name} to "${newValue}" =>`, finalValue);
-  
+            console.log(
+              `Updated ${option.name} to "${newValue}" =>`,
+              finalValue
+            );
+
             // --- Update the Legend Symbol if it's a lineStyle change on a Line series ---
             if (
-              option.name.toLowerCase().includes("style") && 
+              option.name.toLowerCase().includes("style") &&
               series.seriesType() === "Line"
             ) {
               // Convert the numeric finalValue into a symbol
@@ -1893,27 +2047,29 @@ export class ContextMenu {
               const symbol = (() => {
                 switch (lineStyleNumeric) {
                   case 0:
-                    return "―";     // Solid
+                    return "―"; // Solid
                   case 1:
-                    return "··";   // Dotted
+                    return "··"; // Dotted
                   case 2:
-                    return "--";    // Dashed
+                    return "--"; // Dashed
                   case 3:
-                    return "- -";   // Large Dashed
+                    return "- -"; // Large Dashed
                   case 4:
-                    return "· ·";   // Sparse Dotted
+                    return "· ·"; // Sparse Dotted
                   default:
-                    return "~";     // Fallback
+                    return "~"; // Fallback
                 }
               })();
-  
+
               // Find the corresponding legend item in the legend._lines array
               const legendItem = this.handler.legend._lines.find(
                 (item) => item.series === series
               );
               if (legendItem) {
                 legendItem.legendSymbol = [symbol];
-                console.log(`Updated legend symbol for lineStyle(${lineStyleNumeric}) to: ${symbol}`);
+                console.log(
+                  `Updated legend symbol for lineStyle(${lineStyleNumeric}) to: ${symbol}`
+                );
               }
             }
           }
@@ -1922,7 +2078,7 @@ export class ContextMenu {
         console.warn(`No predefined options found for "${option.name}".`);
       }
     });
-  
+
     // Add a Back option
     this.addMenuItem(
       "⤝ Back",
@@ -1932,10 +2088,9 @@ export class ContextMenu {
       false,
       false
     );
-  
+
     this.showMenu(event);
   }
-  
 
   private populateCloneSeriesMenu(
     series: ISeriesApiExtended,
@@ -2514,42 +2669,54 @@ export class ContextMenu {
     this.div.innerHTML = ""; // Clear current menu
 
     if (series) {
-      this.addMenuInput(
-        this.div,
-        {
+      this.addMenuInput(this.div, {
         type: "hybrid",
         label: "Price Scale",
         value: series.options().priceScaleId || "",
         onChange: (newValue: string) => {
-        series.applyOptions({ priceScaleId: newValue });
-        console.log(`Updated price scale to: ${newValue}`);
+          series.applyOptions({ priceScaleId: newValue });
+          console.log(`Updated price scale to: ${newValue}`);
         },
         hybridConfig: {
-        defaultAction: () => {
-        const newPriceScaleId = series.options().priceScaleId === "left" ? "right" : "left";
-        series.applyOptions({ priceScaleId: newPriceScaleId });
-        console.log(`Series price scale switched to: ${newPriceScaleId}`);
+          defaultAction: () => {
+            const newPriceScaleId =
+              series.options().priceScaleId === "left" ? "right" : "left";
+            series.applyOptions({ priceScaleId: newPriceScaleId });
+            console.log(`Series price scale switched to: ${newPriceScaleId}`);
+          },
+          options: [
+            {
+              name: "Left",
+              action: () => series.applyOptions({ priceScaleId: "left" }),
+            },
+            {
+              name: "Right",
+              action: () => series.applyOptions({ priceScaleId: "right" }),
+            },
+            {
+              name: "Volume",
+              action: () =>
+                series.applyOptions({ priceScaleId: "volume_scale" }),
+            },
+            {
+              name: "Custom",
+              action: () => {
+                const inputContainer = document.createElement("div");
+                const inputField = document.createElement("input");
+                inputField.type = "text";
+                inputField.placeholder = "Enter custom scale ID";
+                inputField.value = series.options().priceScaleId || "";
+                inputField.addEventListener("change", () => {
+                  series.applyOptions({ priceScaleId: inputField.value });
+                  console.log(`Custom scale ID set to: ${inputField.value}`);
+                });
+                inputContainer.appendChild(inputField);
+                this.div.appendChild(inputContainer);
+              },
+            },
+          ],
         },
-        options: [
-        { name: "Left", action: () => series.applyOptions({ priceScaleId: "left" }) },
-        { name: "Right", action: () => series.applyOptions({ priceScaleId: "right" }) },
-        { name: "Volume", action: () => series.applyOptions({ priceScaleId: "volume_scale" }) },
-        { name: "Custom", action: () => {
-        const inputContainer = document.createElement("div");
-        const inputField = document.createElement("input");
-        inputField.type = "text";
-        inputField.placeholder = "Enter custom scale ID";
-        inputField.value = series.options().priceScaleId || "";
-        inputField.addEventListener("change", () => {
-        series.applyOptions({ priceScaleId: inputField.value });
-        console.log(`Custom scale ID set to: ${inputField.value}`);
-        });
-        inputContainer.appendChild(inputField);
-        this.div.appendChild(inputContainer);
-        }}
-        ]
-      }});
-    
+      });
     } else {
       // Dropdown for Price Scale Mode
       const currentMode: PriceScaleMode =
@@ -2837,6 +3004,7 @@ export class ContextMenu {
         "Arrow",
         "3d",
         "Polygon",
+        "Bar",
       ],
     };
 
@@ -2869,8 +3037,6 @@ export class ContextMenu {
     }
 
     let seriesOptions: SeriesOption[] = [...mappedSeries];
-
-
 
     if (this.handler.volumeSeries) {
       const volumeSeries: SeriesOption = {
@@ -2979,9 +3145,21 @@ export class ContextMenu {
    *
    * @param series - The series to which the TrendTrace will be attached.
    */
-  public _createTrendTrace(event: MouseEvent, drawing: TwoPointDrawing): void {
+  public _createTrendTrace(
+    event: MouseEvent,
+    drawing: TwoPointDrawing | ThreePointDrawing
+  ): void {
     // Populate the Series List Menu
     this.populateSeriesListMenu(event, false, (series: ISeriesApiExtended) => {
+      let offset;
+      if (drawing._type === "PitchFork" && series && drawing.p1 && drawing.p2) {
+        console.log("Series selected:", series.options().title);
+        const options = drawing._options as PitchForkOptions;
+        offset =
+          (options.length ?? 1) *
+          Math.abs(drawing.p2.logical - drawing.p1.logical);
+      }
+
       if (series && drawing.p1 && drawing.p2) {
         console.log("Series selected:", series.options().title);
         series.primitives["TrendTrace"] = new TrendTrace(
@@ -2989,7 +3167,8 @@ export class ContextMenu {
           series,
           drawing.p1 as LogicalPoint,
           drawing.p2 as LogicalPoint,
-          defaultSequenceOptions
+          defaultSequenceOptions,
+          offset
         );
         series.attachPrimitive(
           series.primitives["TrendTrace"],
@@ -3004,7 +3183,9 @@ export class ContextMenu {
       }
     });
   }
-  public _createVolumeProfile(drawing: TwoPointDrawing): void {
+  public _createVolumeProfile(
+    drawing: TwoPointDrawing | ThreePointDrawing
+  ): void {
     const series = this.handler.series ?? this.handler._seriesList[0];
     if (series && drawing.p1 && drawing.p2) {
       console.log("Series selected:", series.options().title);
@@ -3050,7 +3231,6 @@ export class ContextMenu {
       true
     );
 
-
     this.addMenuItem(
       "Export Data",
       () => this.showExportDataDialog(trendTrace),
@@ -3061,210 +3241,219 @@ export class ContextMenu {
     this.showMenu(event);
   }
   // Define a common interface for an option descriptor.
-// TrendTrace.ts
+  // TrendTrace.ts
 
-private showExportDataDialog(trendTrace: TrendTrace): void {
-  // **Gather the data and options to export**
-  const exportData = {
-    sequence: trendTrace.toJSON(),
-    title: trendTrace.title,
-  };
+  private showExportDataDialog(trendTrace: TrendTrace): void {
+    // **Gather the data and options to export**
+    const exportData = {
+      sequence: trendTrace.toJSON(),
+      title: trendTrace.title,
+    };
 
-  const jsonData = JSON.stringify(exportData, null, 2); // Pretty-print with 2-space indentation
+    const jsonData = JSON.stringify(exportData, null, 2); // Pretty-print with 2-space indentation
 
-  // **Create the modal elements**
-  const modalOverlay = document.createElement("div");
-  modalOverlay.style.position = "fixed";
-  modalOverlay.style.top = "0";
-  modalOverlay.style.left = "0";
-  modalOverlay.style.width = "100%";
-  modalOverlay.style.height = "100%";
-  modalOverlay.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-  modalOverlay.style.display = "flex";
-  modalOverlay.style.justifyContent = "center";
-  modalOverlay.style.alignItems = "center";
-  modalOverlay.style.zIndex = "1000"; // Ensure it's on top
+    // **Create the modal elements**
+    const modalOverlay = document.createElement("div");
+    modalOverlay.style.position = "fixed";
+    modalOverlay.style.top = "0";
+    modalOverlay.style.left = "0";
+    modalOverlay.style.width = "100%";
+    modalOverlay.style.height = "100%";
+    modalOverlay.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+    modalOverlay.style.display = "flex";
+    modalOverlay.style.justifyContent = "center";
+    modalOverlay.style.alignItems = "center";
+    modalOverlay.style.zIndex = "1000"; // Ensure it's on top
 
-  // **Handle closing the modal with Esc key**
-  const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
+    // **Handle closing the modal with Esc key**
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        document.body.removeChild(modalOverlay);
+        document.removeEventListener("keydown", handleKeyDown);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+
+    const modalContent = document.createElement("div");
+    modalContent.style.backgroundColor = "#fff";
+    modalContent.style.padding = "20px";
+    modalContent.style.borderRadius = "8px";
+    modalContent.style.width = "80%";
+    modalContent.style.maxWidth = "800px"; // Increased width for better readability
+    modalContent.style.maxHeight = "90%"; // Allow scrolling if content is too long
+    modalContent.style.overflowY = "auto"; // Enable vertical scrolling
+    modalContent.style.boxShadow = "0 2px 10px rgba(0,0,0,0.1)";
+    modalContent.setAttribute("tabindex", "-1"); // Make div focusable
+    modalContent.focus(); // Focus on the modal for accessibility
+
+    const title = document.createElement("h2");
+    title.textContent = "Export/Import TrendTrace Data";
+    modalContent.appendChild(title);
+
+    const textarea = document.createElement("textarea");
+    textarea.value = jsonData;
+    textarea.style.width = "100%";
+    textarea.style.height = "400px"; // Increased height for better usability
+    textarea.style.marginTop = "10px";
+    textarea.style.marginBottom = "10px";
+    textarea.style.resize = "vertical"; // Allow users to resize vertically
+    textarea.setAttribute("aria-label", "JSON Data Editor"); // Accessibility label
+    modalContent.appendChild(textarea);
+
+    // **Buttons Container**
+    const buttonsContainer = document.createElement("div");
+    buttonsContainer.style.display = "flex";
+    buttonsContainer.style.justifyContent = "flex-end";
+    buttonsContainer.style.gap = "10px";
+
+    // **Apply Changes Button**
+    const applyButton = document.createElement("button");
+    applyButton.textContent = "Apply Changes";
+    applyButton.style.padding = "8px 12px";
+    applyButton.style.cursor = "pointer";
+    applyButton.style.backgroundColor = "#4CAF50"; // Green background
+    applyButton.style.color = "#fff";
+    applyButton.style.border = "none";
+    applyButton.style.borderRadius = "4px";
+    applyButton.onclick = () => {
+      try {
+        const modifiedData = JSON.parse(textarea.value);
+
+        // **Validate the modified data structure**
+        if (
+          typeof modifiedData !== "object" ||
+          !modifiedData.sequence ||
+          !modifiedData.sequence.options ||
+          !Array.isArray(modifiedData.sequence.data)
+        ) {
+          throw new Error(
+            "Invalid data structure. Please ensure 'sequence', 'options', and 'data' are present."
+          );
+        }
+
+        // **Optional: Further validation can be added here to check specific fields.**
+
+        // **Apply the new options and data**
+        trendTrace.fromJSON(modifiedData.sequence); // Update the TrendTrace instance
+        trendTrace.updateViewFromSequence(); // Request the TrendTrace to re-render with new data
+
+        this.showNotification(
+          "TrendTrace data has been successfully updated.",
+          "success"
+        );
+        document.body.removeChild(modalOverlay);
+        document.removeEventListener("keydown", handleKeyDown);
+      } catch (error: any) {
+        this.showNotification(
+          "Failed to apply changes: " + error.message,
+          "error"
+        );
+      }
+    };
+    buttonsContainer.appendChild(applyButton);
+
+    // **Copy Button**
+    const copyButton = document.createElement("button");
+    copyButton.textContent = "Copy to Clipboard";
+    copyButton.style.padding = "8px 12px";
+    copyButton.style.cursor = "pointer";
+    copyButton.style.backgroundColor = "#008CBA"; // Blue background
+    copyButton.style.color = "#fff";
+    copyButton.style.border = "none";
+    copyButton.style.borderRadius = "4px";
+    copyButton.onclick = () => {
+      navigator.clipboard.writeText(textarea.value).then(
+        () => {
+          this.showNotification("Data copied to clipboard!", "success");
+        },
+        (err) => {
+          this.showNotification("Failed to copy data: " + err, "error");
+        }
+      );
+    };
+    buttonsContainer.appendChild(copyButton);
+
+    // **Download Button**
+    const downloadButton = document.createElement("button");
+    downloadButton.textContent = "Download JSON";
+    downloadButton.style.padding = "8px 12px";
+    downloadButton.style.cursor = "pointer";
+    downloadButton.style.backgroundColor = "#f44336"; // Red background
+    downloadButton.style.color = "#fff";
+    downloadButton.style.border = "none";
+    downloadButton.style.borderRadius = "4px";
+    downloadButton.onclick = () => {
+      try {
+        const blob = new Blob([textarea.value], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        6;
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "trendtrace_data.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        this.showNotification("Failed to download data: " + error, "error");
+      }
+    };
+    buttonsContainer.appendChild(downloadButton);
+
+    // **Close Button**
+    const closeButton = document.createElement("button");
+    closeButton.textContent = "Close";
+    closeButton.style.padding = "8px 12px";
+    closeButton.style.cursor = "pointer";
+    closeButton.style.backgroundColor = "#555"; // Dark gray background
+    closeButton.style.color = "#fff";
+    closeButton.style.border = "none";
+    closeButton.style.borderRadius = "4px";
+    closeButton.onclick = () => {
       document.body.removeChild(modalOverlay);
       document.removeEventListener("keydown", handleKeyDown);
-    }
-  };
-  document.addEventListener("keydown", handleKeyDown);
+    };
+    buttonsContainer.appendChild(closeButton);
 
-  const modalContent = document.createElement("div");
-  modalContent.style.backgroundColor = "#fff";
-  modalContent.style.padding = "20px";
-  modalContent.style.borderRadius = "8px";
-  modalContent.style.width = "80%";
-  modalContent.style.maxWidth = "800px"; // Increased width for better readability
-  modalContent.style.maxHeight = "90%"; // Allow scrolling if content is too long
-  modalContent.style.overflowY = "auto"; // Enable vertical scrolling
-  modalContent.style.boxShadow = "0 2px 10px rgba(0,0,0,0.1)";
-  modalContent.setAttribute("tabindex", "-1"); // Make div focusable
-  modalContent.focus(); // Focus on the modal for accessibility
+    modalContent.appendChild(buttonsContainer);
+    modalOverlay.appendChild(modalContent);
+    document.body.appendChild(modalOverlay);
+  }
 
-  const title = document.createElement("h2");
-  title.textContent = "Export/Import TrendTrace Data";
-  modalContent.appendChild(title);
-
-  const textarea = document.createElement("textarea");
-  textarea.value = jsonData;
-  textarea.style.width = "100%";
-  textarea.style.height = "400px"; // Increased height for better usability
-  textarea.style.marginTop = "10px";
-  textarea.style.marginBottom = "10px";
-  textarea.style.resize = "vertical"; // Allow users to resize vertically
-  textarea.setAttribute("aria-label", "JSON Data Editor"); // Accessibility label
-  modalContent.appendChild(textarea);
-
-  // **Buttons Container**
-  const buttonsContainer = document.createElement("div");
-  buttonsContainer.style.display = "flex";
-  buttonsContainer.style.justifyContent = "flex-end";
-  buttonsContainer.style.gap = "10px";
-
-  // **Apply Changes Button**
-  const applyButton = document.createElement("button");
-  applyButton.textContent = "Apply Changes";
-  applyButton.style.padding = "8px 12px";
-  applyButton.style.cursor = "pointer";
-  applyButton.style.backgroundColor = "#4CAF50"; // Green background
-  applyButton.style.color = "#fff";
-  applyButton.style.border = "none";
-  applyButton.style.borderRadius = "4px";
-  applyButton.onclick = () => {
-    try {
-      const modifiedData = JSON.parse(textarea.value);
-
-      // **Validate the modified data structure**
-      if (
-        typeof modifiedData !== "object" ||
-        !modifiedData.sequence ||
-        !modifiedData.sequence.options ||
-        !Array.isArray(modifiedData.sequence.data)
-      ) {
-        throw new Error("Invalid data structure. Please ensure 'sequence', 'options', and 'data' are present.");
-      }
-
-      // **Optional: Further validation can be added here to check specific fields.**
-
-      // **Apply the new options and data**
-      trendTrace.fromJSON(modifiedData.sequence); // Update the TrendTrace instance
-      trendTrace.updateViewFromSequence(); // Request the TrendTrace to re-render with new data
-
-      this.showNotification("TrendTrace data has been successfully updated.", "success");
-      document.body.removeChild(modalOverlay);
-      document.removeEventListener("keydown", handleKeyDown);
-    } catch (error: any) {
-      this.showNotification("Failed to apply changes: " + error.message, "error");
-    }
-  };
-  buttonsContainer.appendChild(applyButton);
-
-  // **Copy Button**
-  const copyButton = document.createElement("button");
-  copyButton.textContent = "Copy to Clipboard";
-  copyButton.style.padding = "8px 12px";
-  copyButton.style.cursor = "pointer";
-  copyButton.style.backgroundColor = "#008CBA"; // Blue background
-  copyButton.style.color = "#fff";
-  copyButton.style.border = "none";
-  copyButton.style.borderRadius = "4px";
-  copyButton.onclick = () => {
-    navigator.clipboard.writeText(textarea.value).then(
-      () => {
-        this.showNotification("Data copied to clipboard!", "success");
-      },
-      (err) => {
-        this.showNotification("Failed to copy data: " + err, "error");
-      }
-    );
-  };
-  buttonsContainer.appendChild(copyButton);
-
-  // **Download Button**
-  const downloadButton = document.createElement("button");
-  downloadButton.textContent = "Download JSON";
-  downloadButton.style.padding = "8px 12px";
-  downloadButton.style.cursor = "pointer";
-  downloadButton.style.backgroundColor = "#f44336"; // Red background
-  downloadButton.style.color = "#fff";
-  downloadButton.style.border = "none";
-  downloadButton.style.borderRadius = "4px";
-  downloadButton.onclick = () => {
-    try {
-      const blob = new Blob([textarea.value], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "trendtrace_data.json";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      this.showNotification("Failed to download data: " + error, "error");
-    }
-  };
-  buttonsContainer.appendChild(downloadButton);
-
-  // **Close Button**
-  const closeButton = document.createElement("button");
-  closeButton.textContent = "Close";
-  closeButton.style.padding = "8px 12px";
-  closeButton.style.cursor = "pointer";
-  closeButton.style.backgroundColor = "#555"; // Dark gray background
-  closeButton.style.color = "#fff";
-  closeButton.style.border = "none";
-  closeButton.style.borderRadius = "4px";
-  closeButton.onclick = () => {
-    document.body.removeChild(modalOverlay);
-    document.removeEventListener("keydown", handleKeyDown);
-  };
-  buttonsContainer.appendChild(closeButton);
-
-  modalContent.appendChild(buttonsContainer);
-  modalOverlay.appendChild(modalContent);
-  document.body.appendChild(modalOverlay);
-}
-
-/**
- * Displays a notification message to the user.
- *
- * @param message - The message to display.
- * @param type - The type of message ('success' or 'error').
- */
-private showNotification(message: string, type: "success" | "error"): void {
-  const notification = document.createElement("div");
-  notification.textContent = message;
-  notification.style.position = "fixed";
-  notification.style.bottom = "20px";
-  notification.style.right = "20px";
-  notification.style.padding = "10px 20px";
-  notification.style.borderRadius = "4px";
-  notification.style.color = "#fff";
-  notification.style.backgroundColor = type === "success" ? "#4CAF50" : "#f44336";
-  notification.style.boxShadow = "0 2px 6px rgba(0,0,0,0.2)";
-  notification.style.zIndex = "1001";
-  notification.style.opacity = "0";
-  notification.style.transition = "opacity 0.5s ease-in-out";
-  document.body.appendChild(notification);
-  
-  // Fade in
-  setTimeout(() => {
-    notification.style.opacity = "1";
-  }, 100);
-  
-  // Remove after 3 seconds
-  setTimeout(() => {
+  /**
+   * Displays a notification message to the user.
+   *
+   * @param message - The message to display.
+   * @param type - The type of message ('success' or 'error').
+   */
+  private showNotification(message: string, type: "success" | "error"): void {
+    const notification = document.createElement("div");
+    notification.textContent = message;
+    notification.style.position = "fixed";
+    notification.style.bottom = "20px";
+    notification.style.right = "20px";
+    notification.style.padding = "10px 20px";
+    notification.style.borderRadius = "4px";
+    notification.style.color = "#fff";
+    notification.style.backgroundColor =
+      type === "success" ? "#4CAF50" : "#f44336";
+    notification.style.boxShadow = "0 2px 6px rgba(0,0,0,0.2)";
+    notification.style.zIndex = "1001";
     notification.style.opacity = "0";
-    setTimeout(() => {
-      document.body.removeChild(notification);
-    }, 500);
-  }, 3000);
-}
+    notification.style.transition = "opacity 0.5s ease-in-out";
+    document.body.appendChild(notification);
 
+    // Fade in
+    setTimeout(() => {
+      notification.style.opacity = "1";
+    }, 100);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+      notification.style.opacity = "0";
+      setTimeout(() => {
+        document.body.removeChild(notification);
+      }, 500);
+    }, 3000);
+  }
 
   private populateTrendColorMenu(
     event: MouseEvent,
@@ -3426,6 +3615,7 @@ private showNotification(message: string, type: "success" | "error"): void {
             { label: "Ellipse", value: CandleShape.Ellipse },
             { label: "Arrow", value: CandleShape.Arrow },
             { label: "Polygon", value: CandleShape.Polygon },
+            { label: "Bar", value: CandleShape.Bar },
           ],
         },
         {
@@ -3769,9 +3959,7 @@ private showNotification(message: string, type: "success" | "error"): void {
     this.showMenu(event);
   }
 
-
-
- /**
+  /**
    * Here, we define the method that shows a minimal overlay listing all indicators,
    * letting the user click “Add” or “Remove.” We'll reuse references to `this.handler.chart`
    * and `this.handler.seriesMap`, etc. We also define `this.applyIndicator` and `this.removeIndicator`
@@ -3781,15 +3969,23 @@ private showNotification(message: string, type: "success" | "error"): void {
   // A map from indicator name => { figureKey => ISeriesApi }
   private indicatorSeriesMap = new Map<
     string,
-    Map<string, ISeriesApi<"Line" | "Histogram" | "Area" | "Candlestick" | "Bar" | "Baseline" | "Custom">>
+    Map<
+      string,
+      ISeriesApi<
+        | "Line"
+        | "Histogram"
+        | "Area"
+        | "Candlestick"
+        | "Bar"
+        | "Baseline"
+        | "Custom"
+      >
+    >
   >();
-  public populateIndicatorMenu(
-    series: ISeriesApi<"Candlestick" | "Bar">,
-    event: MouseEvent
-  ) {
+  public populateIndicatorMenu(series: ISeriesApi<any>, event: MouseEvent) {
     // Clear the menu first
     this.div.innerHTML = "";
-  
+
     // Show each indicator
     INDICATORS.forEach((indicator) => {
       this.addMenuItem(
@@ -3797,34 +3993,42 @@ private showNotification(message: string, type: "success" | "error"): void {
         () => {
           // If indicator has paramMap, let user configure
           if (indicator.paramMap) {
-            this.configureIndicatorParams({series, indicator}, event,1,true);
+            this.configureIndicatorParams(
+              { series, indicator },
+              event,
+              1,
+              true
+            );
           } else {
             // Otherwise, directly apply
-            this.applyIndicator(series, indicator, /* no overrides */ {},1);
+            this.applyIndicator(series, indicator, /* no overrides */ {}, 1);
           }
         },
         false
       );
     });
-  
+
     // Add a back/cancel item
-    this.addMenuItem("⤝ Back", () => {
-      this.hideMenu();
-      // or populate something else
-    }, false);
-  
+    this.addMenuItem(
+      "⤝ Back",
+      () => {
+        this.hideMenu();
+        // or populate something else
+      },
+      false
+    );
+
     // Display
     this.showMenu(event);
   }
 
-
   private configureIndicatorParams(
     indicatorInput:
-      | { series: ISeriesApi<"Candlestick" | "Bar">; indicator: IndicatorDefinition }
+      | { series: ISeriesApi<any>; indicator: IndicatorDefinition }
       | ISeriesIndicator,
     event: MouseEvent,
     globalCountParam?: number,
-    init: boolean = false  // <-- New optional parameter for global figure count
+    init: boolean = false // Optional parameter for global figure count.
   ) {
     // Clear existing menu items
     this.div.innerHTML = "";
@@ -3835,14 +4039,17 @@ private showNotification(message: string, type: "success" | "error"): void {
       "sourceSeries" in indicatorInput
         ? indicatorInput
         : (indicatorInput.series as ISeriesApi<"Candlestick" | "Bar">);
-    const indicator = ("indicator" in indicatorInput
-      ? indicatorInput.indicator
-      : (indicatorInput as ISeriesIndicator).indicator) as IndicatorDefinition;
-  
+    const indicator = (
+      "indicator" in indicatorInput
+        ? indicatorInput.indicator
+        : (indicatorInput as ISeriesIndicator).indicator
+    ) as IndicatorDefinition;
+
     // Use stored parameters if available; otherwise, use indicator defaults.
-    const storedParams = "paramMap" in indicatorInput ? indicatorInput.paramMap : {};
+    const storedParams =
+      "paramMap" in indicatorInput ? indicatorInput.paramMap : {};
     const overrides: Record<string, any> = {};
-  
+
     /**************************************************
      * 1. Global Figure Count Input
      * If any parameter is an array type, add a top-level input for
@@ -3886,25 +4093,26 @@ private showNotification(message: string, type: "success" | "error"): void {
         (newCount: number) => {
           // Update the indicator's property with the new count.
 
-          (indicatorInput as ISeriesIndicator).figureCount = newCount
+          (indicatorInput as ISeriesIndicator).figureCount = newCount;
           // Redraw the parameter menu using the new global count.
-          this.configureIndicatorParams(indicatorInput, event, newCount,true);
+          this.configureIndicatorParams(indicatorInput, event, newCount, true);
         },
         1,
         10,
         1
       );
     }
-    
-  
+
     /**************************************************
      * 2. Process Each Parameter
      **************************************************/
     Object.entries(indicator.paramMap).forEach(([paramName, paramSpec]) => {
       const labelText = paramName; // Optionally, format the label.
       const defaultVal =
-        storedParams[paramName] !== undefined ? storedParams[paramName] : paramSpec.defaultValue;
-  
+        storedParams[paramName] !== undefined
+          ? storedParams[paramName]
+          : paramSpec.defaultValue;
+
       if (
         paramSpec.type === "numberArray" ||
         paramSpec.type === "selectArray" ||
@@ -3912,7 +4120,8 @@ private showNotification(message: string, type: "success" | "error"): void {
         paramSpec.type === "stringArray"
       ) {
         // Get the global count from the indicator's property.
-        const count: number = globalCountParam??(indicatorInput as ISeriesIndicator).figureCount
+        const count: number =
+          globalCountParam ?? (indicatorInput as ISeriesIndicator).figureCount;
 
         // Determine base type by stripping "Array"
         const baseType = paramSpec.type.replace("Array", "");
@@ -3920,7 +4129,10 @@ private showNotification(message: string, type: "success" | "error"): void {
         for (let i = 0; i < count; i++) {
           let itemDefault: any;
           if (Array.isArray(defaultVal)) {
-            itemDefault = i < defaultVal.length ? defaultVal[i] : defaultVal[defaultVal.length - 1];
+            itemDefault =
+              i < defaultVal.length
+                ? defaultVal[i]
+                : defaultVal[defaultVal.length - 1];
           } else {
             itemDefault = defaultVal;
           }
@@ -4025,7 +4237,7 @@ private showNotification(message: string, type: "success" | "error"): void {
         }
       }
     });
-  
+
     /**************************************************
      * 3. Apply and Cancel Buttons
      **************************************************/
@@ -4055,12 +4267,12 @@ private showNotification(message: string, type: "success" | "error"): void {
             }
           });
         } else {
-          this.applyIndicator(series, indicator, overrides,currentCount);
+          this.applyIndicator(series, indicator, overrides, currentCount);
         }
       },
       false
     );
-  
+
     this.addMenuItem(
       "Cancel",
       () => {
@@ -4068,30 +4280,49 @@ private showNotification(message: string, type: "success" | "error"): void {
       },
       false
     );
-  
+
     this.showMenu(event);
   }
-  
-  
 
-  private applyIndicator(series: ISeriesApi<"Candlestick"|"Bar">| ISeriesIndicator, ind: IndicatorDefinition, overrides: Record<string, any>, count:number) {
-    // 1) Grab your main data
+  /**
+   * Applies an indicator to the given series.
+   *
+   * This method now accepts any ISeriesApi (not just Candlestick or Bar) and converts the data
+   * to OHLC data if needed before calling the indicator's calc function.
+   *
+   * After calculating indicator figures, it either updates existing series or creates new ones,
+   * and moves them to the appropriate pane if the figure defines a pane offset.
+   *
+   * @param series - The series on which to apply the indicator.
+   * @param ind - The indicator definition.
+   * @param overrides - User-specified parameter overrides.
+   * @param count - The figure count.
+   */
+  private applyIndicator(
+    series: ISeriesApi<any> | ISeriesIndicator,
+    ind: IndicatorDefinition,
+    overrides: Record<string, any>,
+    count: number
+  ) {
+    // 1) Grab your main data.
     const data = [...series.data()];
-    if (!data) {
+    if (!data || data.length === 0) {
       console.warn("No data found on this series.");
       return;
     }
-  
-    // 2) If the data is OHLC and not whitespace
-    if (!(Array.isArray(data) && data.every(isOHLCData))) {
-      console.warn("Data is not recognized as OHLC or it is whitespace data.");
-      console.log(JSON.stringify(data, null, 2));
-      return;
+
+    // 2) Convert the data to OHLC if it isn't already.
+    let ohlcData: OhlcData[];
+    if (data.every(isOHLCData)) {
+      ohlcData = data as OhlcData[];
+    } else {
+      // Assume data is SingleValueData and convert each point.
+      ohlcData = data.map(singleToOhlcData);
     }
-    const volumeData = this.handler.volumeSeries.data() as SingleValueData[]
+    const volumeData = this.handler.volumeSeries.data() as SingleValueData[];
     // 2a) Calculate the figures from the indicator
-    const figures = ind.calc([...data], overrides,volumeData??undefined); // Pass user-specified params
-  
+    const figures = ind.calc([...ohlcData], overrides, volumeData ?? undefined);
+
     // 2b) If we already have them, update the existing figures
     if (isISeriesIndicator(series)) {
       const figMap = series.figures;
@@ -4105,58 +4336,285 @@ private showNotification(message: string, type: "success" | "error"): void {
       }
       return;
     }
-  
+
     // 2c) Otherwise, create new indicator series
     const newMap = new Map<string, ISeriesIndicator>();
-  
+    const colorShades = generateShades(figures.length); // Generate unique shades
+
     figures.forEach((f, index) => {
-      const colorShades = generateShades(figures.length); // Generate unique shades
       const selectedColor = colorShades[index];
-  
+
       let seriesInstance: ISeriesApi<"Line" | "Histogram"> | null = null;
       if (f.type === "histogram") {
         const hist = this.handler.createHistogramSeries(f.title, {
           color: selectedColor,
           base: 0,
           title: f.title,
-          ...(figures.length > 1 ? { group: ind.name } : {}) // ✅ Only set `group` if multiple figures exist
-                });
+          ...(figures.length > 1 ? { group: ind.name } : {}), // ✅ Only set `group` if multiple figures exist
+        });
         if (hist.series) {
           hist.series.setData(f.data);
-          seriesInstance = (hist.series as ISeriesApi<"Histogram">);
+          seriesInstance = hist.series as ISeriesApi<"Histogram">;
         }
       } else {
         const line = this.handler.createLineSeries(f.title, {
           color: selectedColor,
           lineWidth: 2,
           title: f.title,
-          ...(figures.length > 1 ? { group: ind.name } : {} // ✅ Only set `group` if multiple figures exist
-        
-    )});
+          ...(figures.length > 1 ? { group: ind.name } : {}), // ✅ Only set `group` if multiple figures exist
+        });
         if (line.series) {
           line.series.setData(f.data);
-          seriesInstance = (line.series as ISeriesApi<"Line">);
+          seriesInstance = line.series as ISeriesApi<"Line">;
         }
       }
-  
+
       if (seriesInstance) {
         // 🎯 Decorate the series instance as an `ISeriesIndicator`
         const indicatorInstance = decorateSeriesAsIndicator(
           seriesInstance,
           series, // The original candlestick/bar series
           ind,
-          newMap, 
+          newMap,
           count,
           overrides, // Store parameter overrides for recalculation
           recalculateIndicator
         );
-  
+
         // Store the decorated indicator series
         newMap.set(f.key, indicatorInstance);
+        // If the indicator figure has a pane property, move the series to the appropriate pane.
+        if (f.pane) {
+          // Check if the current pane of the indicator is the same as the source series' pane.
+          if (indicatorInstance.getPane() === series.getPane()) {
+            const currentPane = indicatorInstance.getPane();
+            // Since paneIndex is a function, call it to get a number.
+            const paneIndex = currentPane.paneIndex();
+            // Move the indicator series to a new pane by adding the offset.
+            indicatorInstance.moveToPane(paneIndex + f.pane);
+          }
+        }
       }
     });
-  
-    // Store the new indicator in the map
+
+    // Store the new indicator in the map.
     this.indicatorSeriesMap.set(ind.name, newMap);
+  }
+
+  private populateForkLineMainMenu(event: MouseEvent, drawing: Drawing): void {
+    // Clear the menu container.
+    this.div.innerHTML = "";
+
+    // Only applicable if the drawing is a PitchFork.
+    if (drawing._type !== "PitchFork") return;
+
+    const options = drawing._options as PitchForkOptions;
+    if (!options.forkLines) {
+      options.forkLines = [];
+    }
+    const forkLines = options.forkLines;
+
+    // For each fork line, add one menu item that will open its detailed options.
+    forkLines.forEach((_, index) => {
+      this.addMenuItem(
+        `Fork Line ${index + 1}`,
+        () => {
+          // When clicked, clear the menu and show the options for this fork line.
+          this.populateForkLineOptions(event, drawing, index);
+        },
+        false,
+        true
+      );
+    });
+
+    // Add a menu item to add a new fork line.
+    this.addMenuItem(
+      "Add Fork Line",
+      () => {
+        const newForkLine: ForkLine = {
+          value: 0.5, // Default offset value.
+          width: 1, // Default width.
+          style: LineStyle.Solid, // Default style (ensure this is valid per your LineStyle)
+          color: "#ffffff", // Default color.
+          fillColor: undefined, // No fill by default.
+        };
+        forkLines.push(newForkLine);
+        if (this.saveDrawings) {
+          this.saveDrawings();
+        }
+        // Refresh the main fork line menu.
+        this.populateForkLineMainMenu(event, drawing);
+      },
+      false,
+      true
+    );
+
+    // Add a back button to return to the drawing menu.
+    this.addMenuItem(
+      "⤝ Back",
+      () => {
+        this.populateDrawingMenu(event, drawing);
+      },
+      false,
+      false
+    );
+
+    this.showMenu(event);
+  }
+
+  private populateForkLineOptions(
+    event: MouseEvent,
+    drawing: Drawing,
+    index: number
+  ): void {
+    // Clear the menu container.
+    this.div.innerHTML = "";
+
+    const options = drawing._options as PitchForkOptions;
+    if (!options.forkLines || !options.forkLines[index]) return;
+    const fork = options.forkLines[index];
+
+    // Add a header for clarity.
+
+    // Add a number input for "value".
+    this.addNumberInput(
+      "Value",
+      fork.value,
+      (newValue: number) => {
+        fork.value = newValue;
+        if (this.saveDrawings) {
+          this.saveDrawings();
+        }
+      },
+      0, // minimum value (adjust as needed)
+      10, // maximum value (adjust as needed)
+      0.1 // step (adjust as needed)
+    );
+
+    // Add a number input for "width".
+    this.addNumberInput(
+      "Width",
+      fork.width,
+      (newValue: number) => {
+        fork.width = newValue as LineWidth;
+        if (this.saveDrawings) {
+          this.saveDrawings();
+        }
+      },
+      1, // minimum width
+      10, // maximum width (adjust as needed)
+      1
+    );
+
+    // Define allowed styles for fork lines.
+    const allowedStyles = [
+      { name: "Solid", var: LineStyle.Solid },
+      { name: "Dotted", var: LineStyle.Dotted },
+      { name: "Dashed", var: LineStyle.Dashed },
+      { name: "Large Dashed", var: LineStyle.LargeDashed },
+      { name: "Sparse Dotted", var: LineStyle.SparseDotted },
+    ];
+
+    // In your populateForkLineOptions method, for the "Style" menu item:
+    this.addSelectInput(
+      "Style",
+      // Show the current style name (by matching fork.style with the allowedStyles array)
+      allowedStyles.find((styleObj) => styleObj.var === fork.style)?.name ||
+        allowedStyles[0].name,
+      // Provide the names as the options for the select input.
+      allowedStyles.map((styleObj) => styleObj.name),
+      (newValue: string) => {
+        // When a new style is selected, look it up in allowedStyles.
+        const selected = allowedStyles.find(
+          (styleObj) => styleObj.name === newValue
+        );
+        if (selected) {
+          fork.style = selected.var;
+          if (this.saveDrawings) {
+            this.saveDrawings();
+          }
+        }
+      }
+    );
+    // For the main color:
+    this.addForkLineColorPickerMenuItem("Color", fork.color, fork, "color");
+
+    // For the fill color (an empty string indicates no fill):
+    this.addForkLineColorPickerMenuItem(
+      "Fill Color",
+      fork.fillColor || "",
+      fork,
+      "fillColor"
+    );
+
+    // Add a menu item to remove this fork line.
+    this.addMenuItem(
+      "Remove Fork Line",
+      () => {
+        options.forkLines!.splice(index, 1);
+        if (this.saveDrawings) {
+          this.saveDrawings();
+        }
+        // Return to the main fork line menu.
+        this.populateForkLineMainMenu(event, drawing);
+      },
+      false,
+      true
+    );
+
+    // Add a back button to return to the main fork line menu.
+    this.addMenuItem(
+      "⤝ Back",
+      () => {
+        this.populateForkLineMainMenu(event, drawing);
+      },
+      false,
+      false
+    );
+
+    this.showMenu(event);
+  }
+
+  /**
+   * Unified fork-line color picker menu item.
+   *
+   * @param label - Display label for the menu item.
+   * @param currentColor - The current color value.
+   * @param forkLine - The fork line object to update.
+   * @param property - The property of the fork line to update ("color" or "fillColor").
+   * @returns The created menu item HTMLElement.
+   */
+  private addForkLineColorPickerMenuItem(
+    label: string,
+    currentColor: string | null,
+    forkLine: ForkLine,
+    property: "color" | "fillColor"
+  ): HTMLElement {
+    const menuItem = document.createElement("span");
+    menuItem.classList.add("context-menu-item");
+    menuItem.innerText = label;
+
+    this.div.appendChild(menuItem);
+
+    const applyColor = (newColor: string) => {
+      forkLine[property] = newColor;
+      console.log(`Updated fork line ${property} to ${newColor}`);
+      if (this.saveDrawings) {
+        this.saveDrawings();
+      }
+    };
+
+    menuItem.addEventListener("click", (event: MouseEvent) => {
+      event.stopPropagation();
+      if (!this.colorPicker) {
+        this.colorPicker = new seriesColorPicker(
+          currentColor ?? "#000000",
+          applyColor
+        );
+      }
+      this.colorPicker.openMenu(event, 225, applyColor);
+    });
+
+    return menuItem;
   }
 }

@@ -73,6 +73,7 @@ export const awesomeOscillator: IndicatorDefinition = {
         title,
         type: "histogram",
         data: aoArr,
+        pane: 1
       });
     }
     return results;
@@ -119,6 +120,8 @@ export const averageTrueRange: IndicatorDefinition = {
         title: "ATR" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: atrArr,
+        pane: 1
+
       });
     });
     return results;
@@ -153,6 +156,8 @@ export const bias: IndicatorDefinition = {
         title: `BIAS${val}` + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: [],
+        pane: 1
+
       }));
       dataList.forEach((bar, idx) => {
         const c = bar.close;
@@ -217,12 +222,16 @@ export const brar: IndicatorDefinition = {
         title: "BR" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: brData,
+        pane: 1
+
       });
       results.push({
         key: "ar" + suffix,
         title: "AR" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: arData,
+        pane: 1
+
       });
     });
     return results;
@@ -278,6 +287,8 @@ export const bullAndBearIndex: IndicatorDefinition = {
         title: "BBI" + [p1, p2, p3, p4].join(",") + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: bbiArr,
+        pane: 1
+
       });
     }
     return results;
@@ -326,6 +337,7 @@ export const commodityChannelIndex: IndicatorDefinition = {
         title: "CCI" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: cciArr,
+        pane: 1
       });
     });
     return results;
@@ -371,6 +383,7 @@ export const currentRatio: IndicatorDefinition = {
         title: "CR" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: crArr,
+        pane: 1
       });
     });
     return results;
@@ -438,12 +451,14 @@ export const differentOfMovingAverage: IndicatorDefinition = {
         title: "DMA" + n1 + "-" + n2 + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: dmaArr,
+        pane: 1
       });
       results.push({
         key: "ama" + suffix,
         title: "AMA" + n1 + "-" + n2 + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: amaArr,
+        pane: 1
       });
     }
     return results;
@@ -537,24 +552,28 @@ export const directionalMovementIndex: IndicatorDefinition = {
         title: "PDI" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: pdiArr,
+        pane: 1
       });
       results.push({
         key: "mdi" + suffix,
         title: "MDI" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: mdiArr,
+        pane: 1
       });
       results.push({
         key: "adx" + suffix,
         title: "ADX" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: adxArr,
+        pane: 1
       });
       results.push({
         key: "adxr" + suffix,
         title: "ADXR" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: adxrArr,
+        pane: 1
       });
     }
     return results;
@@ -607,12 +626,14 @@ export const momentum: IndicatorDefinition = {
         title: "MTM" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: mtmArr,
+        pane: 1
       });
       figs.push({
         key: "maMtm" + suffix,
         title: "MAMTM" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: maMtmArr,
+        pane: 1
       });
     }
     return figs;
@@ -671,12 +692,14 @@ export const psychologicalLine: IndicatorDefinition = {
         title: "PSY" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: psyArr,
+        pane:1
       });
       figs.push({
         key: "maPsy" + suffix,
         title: "MAPSY" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: maPsyArr,
+        pane:1
       });
     }
     return figs;
@@ -733,12 +756,15 @@ export const rateOfChange: IndicatorDefinition = {
         title: "ROC" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: rocArr,
+        pane: 1
+
       });
       figs.push({
         key: "maRoc" + suffix,
         title: "MAROC" + N + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: maRocArr,
+        pane: 1
       });
     }
     return figs;
@@ -775,6 +801,7 @@ export const relativeStrengthIndex: IndicatorDefinition = {
         title: `RSI${val}` + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: [],
+        pane:1
       }));
       dataList.forEach((bar, idx) => {
         const prev = idx - 1 >= 0 ? dataList[idx - 1] : bar;
@@ -857,18 +884,21 @@ export const stoch: IndicatorDefinition = {
         title: "K" + nVal + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: kArrOut,
+        pane:1
       });
       results.push({
         key: "d" + suffix,
         title: "D" + nVal + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: dArrOut,
+        pane:1
       });
       results.push({
         key: "j" + suffix,
         title: "J" + nVal + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: jArrOut,
+        pane:1
       });
     }
     return results;
@@ -906,6 +936,7 @@ export const variance: IndicatorDefinition = {
         title: "Variance" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: varArr,
+        pane:1
       });
     });
     return results;
@@ -940,6 +971,7 @@ export const williamsR: IndicatorDefinition = {
         title: `WR${val}` + (figureCount > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: [],
+        pane:1
       }));
       dataList.forEach((bar, idx) => {
         arrP.forEach((period, j) => {
@@ -991,6 +1023,7 @@ export const change: IndicatorDefinition = {
         title: "Change" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: chArr,
+        pane:1
       });
     });
     return results;
@@ -1028,6 +1061,7 @@ export const range: IndicatorDefinition = {
         title: "Range" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: rArr,
+        pane:1
       });
     });
     return results;
@@ -1066,6 +1100,7 @@ export const standardDeviation: IndicatorDefinition = {
         title: "StdDev" + length + (arr.length > 1 ? ` #${i + 1}` : ""),
         type: "line",
         data: sdArr,
+        pane:1
       });
     });
     return results;
@@ -1152,9 +1187,9 @@ const movingAverageConvergenceDivergence: IndicatorDefinition = {
     setHistogramColors(macdArr, upColor, downColor);
 
     return [
-      { key: 'dif', title: 'DIF', type: 'line', data: difArr },
-      { key: 'dea', title: 'DEA', type: 'line', data: deaArr },
-      { key: 'macd', title: 'MACD', type: 'histogram', data: macdArr },
+      { key: 'dif', title: 'DIF', type: 'line', data: difArr, pane: 1},
+      { key: 'dea', title: 'DEA', type: 'line', data: deaArr, pane: 1},
+      { key: 'macd', title: 'MACD', type: 'histogram', data: macdArr, pane: 1},
     ];
   },
 };
