@@ -1,16 +1,106 @@
 <div align="center">
-
 # lightweight-charts-python
+![image](https://github.com/user-attachments/assets/dff85a97-34ed-4f7a-a2ec-cc18d3ca2fa8)
 
-[![PyPi Release](https://img.shields.io/pypi/v/lightweight-charts?color=32a852&label=PyPi)](https://pypi.org/project/lightweight-charts/)
-[![Made with Python](https://img.shields.io/badge/Python-3.8+-c7a002?logo=python&logoColor=white)](https://python.org "Go to Python homepage")
-[![License](https://img.shields.io/github/license/louisnw01/lightweight-charts-python?color=9c2400)](https://github.com/louisnw01/lightweight-charts-python/blob/main/LICENSE)
+## Forked to Add Features
+
+### Series Types
+    - Area
+    - Bar
+    - Custom Candlesticks - Capable of candle data aggregation for displaying multiple timeframes simultaneously
+
+### Plugins
+    - Fill Area: Shades the area between two series.
+    - Volume Profile: Displays volume profiles based on the visible range and supports drawing.
+    - Trend Trace: A transformable replica of a section of series between a drawings points.
+    - Pitch Fork: Tool for drawing:
+      - Standard
+      - Schiff
+      - Modified Schiff
+      - Inside 
+                                  (added to toolbox)
+
+### Indicators (from KLineChart primarily ( https://github.com/klinecharts/KLineChart ))
+    
+    Overlay Indicators:
+        - Arnaud Legoux Moving Average
+        - Bollinger Bands
+        - Exponential Moving Average
+        - Highest High
+        - Highest High Lowest Low
+        - Linear Regression Indicator
+        - Lowest Low
+        - Median
+        - Moving Average
+        - Rolling Moving Average
+        - Simple Moving Average
+        - Stop and Reverse
+        - Super Trend
+        - Symmetric Weighted Moving Average
+        - Triple Exponentially Smoothed Average
+        - Volume Weighted Average Price
+        - Volume Weighted Moving Average
+        - Weighted Moving Average
+    
+    Oscillator Indicators:
+        - Awesome Oscillator
+        - Average True Range
+        - Bias
+        - BRAR
+        - Bull and Bear Index
+        - Commodity Channel Index
+        - Current Ratio
+        - Difference of Moving Average
+        - Directional Movement Index
+        - Momentum
+        - Moving Average Convergence Divergence
+        - Psychological Line
+        - Rate of Change
+        - Relative Strength Index
+        - Stochastic Oscillator
+        - Variance
+        - Williams %R
+        - Change
+        - Range
+        - Standard Deviation
+
+### Context Menu
+    - Upgraded context menu for better control over chart/series/primitive settings.
+    - Ability to save options for chart, series, and primitives to JSON.
+
+### Legend
+    - Upgraded to allow for collapsible grouping of series.
+    - Tree-style display of groups > series > primitives.
+### Series Cloning / Type Conversion
+    - Simple cloning to different series types
+
+
+
+
+
+
+
+    
+---####################################################################################---
+## Original 
+
+
+[![PyPi Release](https://img.shields.io/pypi/v/lightweight-charts?color=32a852&label=PyPi)](https://pypi.org/project/lightweight-charts/)  
+[![Made with Python](https://img.shields.io/badge/Python-3.8+-c7a002?logo=python&logoColor=white)](https://python.org "Go to Python homepage")  
+[![License](https://img.shields.io/github/license/louisnw01/lightweight-charts-python?color=9c2400)](https://github.com/louisnw01/lightweight-charts-python/blob/main/LICENSE)  
 [![Documentation](https://img.shields.io/badge/documentation-006ee3)](https://lightweight-charts-python.readthedocs.io/en/latest/index.html)
 
-![cover](https://raw.githubusercontent.com/louisnw01/lightweight-charts-python/main/cover.png)
+![Cover Image](https://raw.githubusercontent.com/louisnw01/lightweight-charts-python/main/cover.png)
 
-lightweight-charts-python aims to provide a simple and pythonic way to access and implement [TradingView's Lightweight Charts](https://www.tradingview.com/lightweight-charts/).
-</div>
+**lightweight-charts-python** aims to provide a simple and Pythonic way to access and implement [TradingView's Lightweight Charts](https://www.tradingview.com/lightweight-charts/).
+
+---
+
+
+## Installation
+
+```bash
+pip install lightweight-charts
 
 
 ## Installation
