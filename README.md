@@ -6,20 +6,34 @@
 ### Series Types
     - Area
     - Bar
-    - Custom Candlesticks - Capable of candle data aggregation for displaying multiple timeframes simultaneously
-
+    - ** Custom ** Candlestick implementation
+        - Capable of candle data aggregation for displaying multiple timeframes simultaneously
+        - Customizable Line Width
+        - Customizable Line Style
+        - Customizable Bar Spacing
+        - Customizable Shape: 
+            - Rectangle
+            - Rounded
+            - Ellipse 
+            - Arrow
+            - Polygon
+            - Bar
+            - 3d
+        - Volume Color Opacity
+        
+            
 ### Plugins
-    - Fill Area: Shades the area between two series.
-    - Volume Profile: Displays volume profiles based on the visible range and supports drawing.
-    - Trend Trace: A transformable replica of a section of series between a drawings points.
-    - Pitch Fork: Tool for drawing:
+    - Fill Area: Shades the area between two series. 
+    - Pitch Fork: Tool for drawing (added to toolbox):
       - Standard
       - Schiff
       - Modified Schiff
       - Inside 
-                                  (added to toolbox)
-
-### Indicators (from KLineChart primarily ( https://github.com/klinecharts/KLineChart ))
+    - Volume Profile: Displays volume profiles based on the visible range and supports drawing. 
+    
+    - Trend Trace: A transformable/scalable  replica of a section of series between a drawings points. Similar to 'Bars Pattern' in TradingView (instantiated from and linked to existing drawing: box, trendline etc)
+    
+### Indicators (implemented in typescript, from KLineChart primarily ( https://github.com/klinecharts/KLineChart ))
     
     Overlay Indicators:
         - Arnaud Legoux Moving Average
@@ -70,6 +84,7 @@
 ### Legend
     - Upgraded to allow for collapsible grouping of series.
     - Tree-style display of groups > series > primitives.
+    
 ### Series Cloning / Type Conversion
     - Simple cloning to different series types
 
