@@ -1,6 +1,5 @@
 <div align="center">
 # lightweight-charts-python
-Screenshot 2025-02-07 114921.png
 
 ## Forked to Add Features
 
