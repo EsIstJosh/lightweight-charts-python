@@ -1,0 +1,19 @@
+{
+    "title": "Ohlc",
+    "upColor": "rgba(0, 103, 33, 0.33)",
+    "downColor": "rgba(110, 0, 0, 0.33)",
+    "borderUpColor": "#00a921",
+    "borderDownColor": "#aa0000",
+    "wickUpColor": "#006721",
+    "wickDownColor": "#6E0000",
+    "shape": "Rounded",
+    "chandelierSize": 1,
+    "barSpacing": 0.777,
+    "lineStyle": 0,
+    "lineWidth": 1,
+    "enableVolumeOpacity": true,
+	"volumeOpacityPeriod": 21,
+	"maxOpacity":0.333,
+	"dynamicCandles": false
+  }
+  

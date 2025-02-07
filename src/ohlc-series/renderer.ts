@@ -73,46 +73,92 @@ export class BarDataAggregator {
 	constructor(options: ohlcSeriesOptions | null) {
 		this._options = options;
 	}
-
-	/**
-	 * Aggregates an array of BarItem objects into grouped BarItem objects.
-	 * @param data - The raw bar data to aggregate.
-	 * @param priceToCoordinate - Function to convert price values to canvas coordinates.
-	 * @returns An array of aggregated BarItem objects.
-	 */
-	public staticAggregate(
-		data: BarItem[],
-		priceToCoordinate: PriceToCoordinateConverter
-	): BarItem[] {
-		// Determine the number of bars to group based on chandelierSize.
-		const groupSize = this._options?.chandelierSize ?? 1;
-		const aggregatedBars: BarItem[] = [];
-
-		// Iterate over the data in increments of groupSize to create buckets.
-		for (let i = 0; i < data.length; i += groupSize) {
-			const bucket = data.slice(i, i + groupSize);
-			const isInProgress =
-				bucket.length < groupSize && i + bucket.length === data.length;
-
-			// Warn and skip if an empty bucket is encountered.
-			if (bucket.length === 0) {
-				console.warn('Empty bucket encountered during aggregation.');
-				continue;
-			}
-
-			// Aggregate the current bucket into a single BarItem.
-			const aggregatedBar = this._chandelier(
-				bucket,
-				i,
-				i + bucket.length - 1,
-				priceToCoordinate,
-				isInProgress
-			);
-			aggregatedBars.push(aggregatedBar);
-		}
-
-		return aggregatedBars;
+/**
+ * Aggregates an array of BarItem objects into grouped BarItem objects.
+ * Handles the styling and property consolidation for candle rendering.
+ *
+ * @param data - The raw bar data to aggregate.
+ * @param priceToCoordinate - Function to convert price values to canvas coordinates.
+ * @returns An array of aggregated BarItem objects.
+ */
+public staticAggregate(
+	data: BarItem[],
+	priceToCoordinate: PriceToCoordinateConverter
+  ): BarItem[] {
+	// Determine the number of bars to group based on chandelierSize.
+	const groupSize = this._options?.chandelierSize ?? 1;
+	const aggregatedBars: BarItem[] = [];
+  
+	// Iterate over the data in increments of groupSize to create buckets.
+	for (let i = 0; i < data.length; i += groupSize) {
+	  const bucket = data.slice(i, i + groupSize);
+	  const isInProgress =
+		bucket.length < groupSize && i + bucket.length === data.length;
+  
+	  // Warn and skip if an empty bucket is encountered.
+	  if (bucket.length === 0) {
+		console.warn('Empty bucket encountered during aggregation.');
+		continue;
+	  }
+  
+	  // Aggregate the current bucket into a single BarItem.
+	  const aggregatedBar = this._chandelier(
+		bucket,
+		i,
+		i + bucket.length - 1,
+		priceToCoordinate,
+		isInProgress
+	  );
+	  aggregatedBars.push(aggregatedBar);
 	}
+	// -------------------------------------
+	// Volume-based opacity adjustment
+	// -------------------------------------
+	if (this._options?.enableVolumeOpacity) {
+		// Ensure that every aggregated bar has a volume property.
+		const hasVolumeData = aggregatedBars.every(
+		(bar) => bar.volume !== undefined && typeof bar.volume === 'number'
+		);
+		if (!hasVolumeData) {
+		console.warn(
+			"Volume opacity enabled but not all aggregated bars have volume data. Skipping volume-based opacity adjustment."
+		);
+		} else {
+		// Use a base period from options or default to 20.
+		const basePeriod = this._options.volumeOpacityPeriod ?? 20;
+		// Multiply the base period by the chandelier size (groupSize).
+		const period = basePeriod * groupSize;
+
+		aggregatedBars.forEach((bar, i, arr) => {
+			// Only process bars that have volume data.
+			if (bar.volume == null) { 
+			  return;
+			}
+		  
+			// Define the sliding window: the last `period` aggregated bars (or fewer if at the start).
+			const windowStart = Math.max(0, i - period + 1);
+			const windowBars = arr.slice(windowStart, i + 1);
+		  
+			// Determine the maximum volume among the bars in the window.
+			const maxVolume = windowBars.reduce((max, current) => {
+			  return current.volume !== undefined && current.volume > max ? current.volume : max;
+			}, 0);
+		  
+			const opacity = (maxVolume > 0 ? bar.volume / maxVolume : 1) * (this._options?.maxOpacity??0.3 / 1);
+
+			// Set the bar's color using upColor or downColor from options, applying the computed opacity.
+			if (bar.isUp) {
+			bar.color = setOpacity(this._options?.upColor || 'rgba(0,255,0,0.333)', opacity);
+			} else {
+			bar.color = setOpacity(this._options?.downColor || 'rgba(255,0,0,0.333)', opacity);
+			}
+		});
+		}
+	}
+
+	return aggregatedBars;
+	}
+	
 	public dynamicAggregate(data: BarItem[], priceToCoordinate: PriceToCoordinateConverter): BarItem[] {
 		if (
 			data.length === 0 || 

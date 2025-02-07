@@ -1,0 +1,154 @@
+{
+  "width": 784,
+  "height": 561,
+  "autoSize": false,
+  "layout": {
+    "background": {
+      "type": "gradient",
+      "color": "#000000",
+      "topColor": "rgba(199, 199, 199, 0.2)",
+      "bottomColor": "rgba(0, 59, 255, 0.19)"
+    },
+    "textColor": "rgba(59, 255, 0, 1)",
+    "fontSize": 12,
+    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+    "panes": {
+      "enableResize": true,
+      "separatorColor": "#E0E3EB",
+      "separatorHoverColor": "rgba(178, 181, 189, 0.2)"
+    },
+    "attributionLogo": true,
+    "colorSpace": "srgb",
+    "colorParsers": []
+  },
+  "crosshair": {
+    "vertLine": {
+      "color": "#9598A1",
+      "width": 1,
+      "style": 3,
+      "visible": true,
+      "labelVisible": true,
+      "labelBackgroundColor": "rgb(46, 46, 46)"
+    },
+    "horzLine": {
+      "color": "#9598A1",
+      "width": 1,
+      "style": 3,
+      "visible": true,
+      "labelVisible": true,
+      "labelBackgroundColor": "rgb(55, 55, 55)"
+    },
+    "mode": 1
+  },
+  "grid": {
+    "vertLines": {
+      "color": "rgba(29, 30, 38, 5)",
+      "style": 0,
+      "visible": true
+    },
+    "horzLines": {
+      "color": "rgba(29, 30, 58, 5)",
+      "style": 0,
+      "visible": true
+    }
+  },
+  "overlayPriceScales": {
+    "autoScale": true,
+    "mode": 0,
+    "invertScale": false,
+    "alignLabels": true,
+    "borderVisible": true,
+    "borderColor": "#2B2B43",
+    "entireTextOnly": false,
+    "visible": false,
+    "ticksVisible": false,
+    "scaleMargins": {
+      "bottom": 0.1,
+      "top": 0.2
+    },
+    "minimumWidth": 0
+  },
+  "leftPriceScale": {
+    "autoScale": true,
+    "mode": 0,
+    "invertScale": false,
+    "alignLabels": true,
+    "borderVisible": true,
+    "borderColor": "#2B2B43",
+    "entireTextOnly": false,
+    "visible": false,
+    "ticksVisible": false,
+    "scaleMargins": {
+      "bottom": 0.1,
+      "top": 0.2
+    },
+    "minimumWidth": 0
+  },
+  "rightPriceScale": {
+    "autoScale": true,
+    "mode": 0,
+    "invertScale": false,
+    "alignLabels": true,
+    "borderVisible": true,
+    "borderColor": "#2B2B43",
+    "entireTextOnly": false,
+    "visible": true,
+    "ticksVisible": false,
+    "scaleMargins": {
+      "bottom": 0.2,
+      "top": 0.2
+    },
+    "minimumWidth": 0
+  },
+  "timeScale": {
+    "rightOffset": 0,
+    "barSpacing": 6,
+    "minBarSpacing": 0.5,
+    "maxBarSpacing": 0,
+    "fixLeftEdge": false,
+    "fixRightEdge": false,
+    "lockVisibleTimeRangeOnResize": false,
+    "rightBarStaysOnScroll": false,
+    "borderVisible": true,
+    "borderColor": "#2B2B43",
+    "visible": true,
+    "timeVisible": true,
+    "secondsVisible": false,
+    "shiftVisibleRangeOnNewBar": true,
+    "allowShiftVisibleRangeOnWhitespaceReplacement": false,
+    "ticksVisible": false,
+    "uniformDistribution": false,
+    "minimumHeight": 0,
+    "allowBoldLabels": true,
+    "ignoreWhitespaceIndices": false
+  },
+  "localization": {
+    "locale": "en-US",
+    "dateFormat": "dd MMM 'yy"
+  },
+  "handleScroll": {
+    "mouseWheel": true,
+    "pressedMouseMove": true,
+    "horzTouchDrag": true,
+    "vertTouchDrag": true
+  },
+  "handleScale": {
+    "axisPressedMouseMove": {
+      "time": true,
+      "price": true
+    },
+    "axisDoubleClickReset": {
+      "time": true,
+      "price": true
+    },
+    "mouseWheel": true,
+    "pinch": true
+  },
+  "kineticScroll": {
+    "mouse": false,
+    "touch": true
+  },
+  "trackingMode": {
+    "exitMode": 1
+  }
+}

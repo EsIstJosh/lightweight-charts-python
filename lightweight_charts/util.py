@@ -230,7 +230,8 @@ class Events:
             '''),
             wrapper=lambda func, c, *args: func(c, *[float(a) if a != 'null' else None for a in args])
         )
-
+       # Add a new event emitter for "save defaults"
+        self.save_defaults = Emitter()
 class BulkRunScript:
     def __init__(self, script_func):
         self.enabled = False

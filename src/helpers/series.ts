@@ -1,10 +1,11 @@
-import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData } from "lightweight-charts";
+import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData, SeriesOptions } from "lightweight-charts";
 import {CandleShape } from "../ohlc-series/data";
 import { isOHLCData, isSingleValueData, isWhitespaceData } from "./typeguards";
 import { TradeData, tradeDefaultOptions, TradeSeries, TradeSeriesOptions } from "../tx-series/renderer";
 import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
 import { Handler, Legend } from "../general";
 import { IndicatorDefinition } from "../indicators/indicators";
+import { DataPoint } from "../trend-trace/sequence";
 
 
 export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
@@ -14,14 +15,16 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       length: number; // Array-like length
     };
     primitive: any; // Reference to the most recently attached primitive
-    addPeer(peer: ISeriesApi<any>): void; // Add a peer series
-    removePeer(peer: ISeriesApi<any>): void; // Remove a peer series
-    peers: ISeriesApi<any>[]; // List of peer series
+
     sync(series: ISeriesApi<any>): void;
     attachPrimitive(primitive:ISeriesPrimitive, name?: string, replace?:boolean, addToLegend?:boolean): void; // Method to attach a primitive
     detachPrimitive(primitive:ISeriesPrimitive): void; // Detach a primitive by type
     detachPrimitives():void;
-  decorated: boolean; // Flag indicating if the series has been decorated
+    decorated: boolean; // Flag indicating if the series has been decorated
+    toJSON(): { options: SeriesOptions<any>; data: [] };
+    fromJSON(json: { options?: SeriesOptions<any>; data?: [] }): void;
+    _type: string;
+    title: string;
   }
   export function decorateSeries<T extends ISeriesApi<SeriesType>>(
     original: T,
@@ -36,7 +39,6 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
   // Mark the series as decorated
   (original as any)._isDecorated = true;
     const decorated: boolean = true;
-    const peers: ISeriesApi<any>[] = [];
     const originalSetData = (original as ISeriesApi<any>).setData.bind(original);
 
     // Array to store attached primitives
@@ -58,6 +60,8 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
    * @param copy - If true, copies all properties from sourceItem, overriding `keys`.
    * @returns A partial data item or null if `time` is missing.
    */
+  const _type: string = original.seriesType();
+  const title = original.options().title;
 
   function sync(series: ISeriesApi<SeriesType>): void {
     // 1) Determine the type from the series’ own options
@@ -71,7 +75,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       console.warn("Source data is missing for synchronization.");
       return;
     }
-  
+
     const targetData = [...series.data()];
     for (let i = targetData.length; i < sourceData.length; i++) {
       // Now call your convertDataItem with the discovered type:
@@ -190,35 +194,54 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
 
     function setData(data: any[]) {
       originalSetData(data);
-      peers.forEach((peer) => peer.setData?.(data));
-      console.log("Data updated on series and peers.");
           }
   
-    function addPeer(peer: ISeriesApi<any>) {
-      peers.push(peer);
-    }
-  
-    function removePeer(peer: ISeriesApi<any>) {
-      const index = peers.indexOf(peer);
-      if (index !== -1) peers.splice(index, 1);
-    }
-  
+
     return Object.assign(original, {
     setData,
-      addPeer,
-      removePeer,
-      peers,
+
       primitives,
       sync,
       attachPrimitive,
       detachPrimitive,
       detachPrimitives,
       decorated,
+      _type,
+      title,
     get primitive() {
       return lastAttachedPrimitive;
     },
-    });
-  }
+
+    toJSON(): { options: SeriesOptions<any>; data: [] } {
+			return {
+				options: original.options(),
+				data: originalData(),
+			};
+		},
+    fromJSON(json: { options?: SeriesOptions<any>; data?: [] }): void {
+      // If data is provided, update the series' data.
+      if (json.data) {
+        originalSetData(json.data);
+      }
+      // If options are provided, iterate over each property and apply it.
+      if (json.options) {
+        // Cast json.options to a plain record.
+        const opts = json.options as Record<string, any>;
+        for (const key in opts) {
+          if (Object.prototype.hasOwnProperty.call(opts, key)) {
+            // Cast key to string (since TS sometimes infers symbol too).
+            const typedKey = key as keyof SeriesOptions<any> & string;
+            original.applyOptions({ [typedKey]: opts[typedKey] });
+          }
+        }
+      }
+    },
+  });
+}
+
+
+    
+
   
 export interface SeriesOptionsExtended {
     primitives?: {
@@ -764,7 +787,7 @@ export function ensureExtendedSeries(
   return decorateSeries(series, legend);
 }
 export interface ISeriesIndicator extends ISeriesApi<"Line" | "Histogram" | "Area"> {
-  sourceSeries: ISeriesApi<"Candlestick" | "Bar">;
+  sourceSeries: ISeriesApi<any>;
   indicator: IndicatorDefinition;
   figures: Map<string, ISeriesApi<"Line" | "Histogram" | "Area">>;
   paramMap: Record<string, any>; // Stores the current parameters used for calculation
@@ -774,7 +797,7 @@ export interface ISeriesIndicator extends ISeriesApi<"Line" | "Histogram" | "Are
 
 export function decorateSeriesAsIndicator(
   series: ISeriesApi<"Line" | "Histogram" | "Area">,
-  sourceSeries: ISeriesApi<"Candlestick" | "Bar">,
+  sourceSeries: ISeriesApi<any>,
   ind: IndicatorDefinition,
   figures: Map<string, ISeriesApi<"Line" | "Histogram" | "Area">>,
   figureCount: number,
@@ -805,13 +828,23 @@ export function decorateSeriesAsIndicator(
 }
 
 export function recalculateIndicator(indicatorSeries: ISeriesIndicator, overrides?: Record<string, any>) {
+
   // Merge new overrides into the stored parameters to get the current parameters.
   const updatedParams = { ...indicatorSeries.paramMap, ...overrides };
 
   // Retrieve the source series data.
-  const data = [...indicatorSeries.sourceSeries.data()];
-  if (!data || !Array.isArray(data) || !data.every(isOHLCData)) {
+  const rawData = [...indicatorSeries.sourceSeries.data()];
+  if (!rawData || !Array.isArray(rawData) || rawData.length === 0) {
     return;
+  }
+
+  // If the raw data is already in OHLC format, use it;
+  // otherwise, convert each data point using singleToOhlcData.
+  let data: OhlcData[];
+  if (rawData.every(isOHLCData)) {
+    data = rawData as OhlcData[];
+  } else {
+    data = rawData.map(singleToOhlcData);
   }
 
   // Run the indicator's calculation with the updated parameters.

@@ -2,6 +2,8 @@ import { ISeriesApi, SeriesType, LineStyle, IChartApi, Logical, MouseEventParams
 import { ISeriesApiExtended} from "./series";
 import { Point as LogicalPoint } from "../drawing/data-source";
 import { Point as CanvasPoint } from "lightweight-charts";
+import { PluginBase } from "../plugin-base";
+import { TrendTrace } from "../trend-trace/trend-trace";
 
 
 /**
@@ -270,3 +272,7 @@ export class OffsetPoint implements LogicalPoint {
     return this.basePoint.price + this.yOffset;
   }
 }
+export const PluginRegistry: { [key: string]: new (...args: any[]) => PluginBase } = {
+  "TrendTrace": TrendTrace,
+  // Add other plugin types as needed...
+};

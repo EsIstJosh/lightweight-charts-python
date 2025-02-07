@@ -1,4 +1,4 @@
-import { Logical, IChartApi, ISeriesApi, SeriesType, Point as CanvasPoint, Time } from "lightweight-charts";
+import { Logical, IChartApi, ISeriesApi, SeriesType, Point as CanvasPoint, Time, LineSeries } from "lightweight-charts";
 import { Point as LogicalPoint } from "../drawing/data-source";
 export function buildOptions(optionPath: string, value: any): any {
   const keys = optionPath.split(".");
