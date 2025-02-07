@@ -6,8 +6,12 @@
 ### Series Types
     - Area
     - Bar
-    - ** Custom ** Candlestick implementation
-        - Capable of candle data aggregation for displaying multiple timeframes simultaneously
+    - Custom Candlestick implementation 
+            |   |   |
+            V   V   V
+        - Capable of candle data aggregation
+            for displaying multiple timeframes 
+            simultaneously
         - Customizable Line Width
         - Customizable Line Style
         - Customizable Bar Spacing
