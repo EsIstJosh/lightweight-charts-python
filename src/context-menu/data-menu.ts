@@ -461,4 +461,179 @@ private showNotification(message: string, type: "success" | "error"): void {
       }
     }, 500);
   }, 3000);
-}}
+}
+
+public openDefaultOptions(defaultKey: string): void {
+  // 1) Fetch the current defaults for this key from your manager.
+  //    e.g., if your Handler has a property like `defaultsManager`.
+  const defaultsManager = this.handler.defaultsManager;
+  if (!defaultsManager) {
+    this.showNotification("No defaults manager found.", "error");
+    return;
+  }
+
+  const currentDefaults = defaultsManager.get(defaultKey);
+  if (!currentDefaults) {
+    this.showNotification(`No default config found for key: "${defaultKey}"`, "error");
+    return;
+  }
+
+  // Convert current defaults to JSON (prettified)
+  const defaultsJson = JSON.stringify(currentDefaults, null, 2);
+
+  // 2) Create the modal overlay
+  const modalOverlay = document.createElement("div");
+  modalOverlay.style.position = "fixed";
+  modalOverlay.style.top = "0";
+  modalOverlay.style.left = "0";
+  modalOverlay.style.width = "100%";
+  modalOverlay.style.height = "100%";
+  modalOverlay.style.backgroundColor = "rgba(0,0,0,0.5)";
+  modalOverlay.style.display = "flex";
+  modalOverlay.style.justifyContent = "center";
+  modalOverlay.style.alignItems = "center";
+  modalOverlay.style.zIndex = "1000";
+
+  // 3) ESC key closes the modal
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      this.close(modalOverlay, handleKeyDown);
+    }
+  };
+  document.addEventListener("keydown", handleKeyDown);
+
+  // 4) Modal content container
+  const modalContent = document.createElement("div");
+  modalContent.style.backgroundColor = "#333";
+  modalContent.style.color = "#fff";
+  modalContent.style.padding = "20px";
+  modalContent.style.borderRadius = "8px";
+  modalContent.style.width = "80%";
+  modalContent.style.maxWidth = "800px";
+  modalContent.style.maxHeight = "90%";
+  modalContent.style.overflowY = "auto";
+  modalContent.style.boxShadow = "0 2px 10px rgba(0,0,0,0.5)";
+  modalContent.setAttribute("tabindex", "-1");
+  modalContent.focus();
+
+  // Title
+  const titleElem = document.createElement("h2");
+  titleElem.textContent = `Edit Default Options - "${defaultKey}"`;
+  modalContent.appendChild(titleElem);
+
+  // Textarea showing the current defaults JSON
+  const textarea = document.createElement("textarea");
+  textarea.value = defaultsJson;
+  textarea.style.width = "100%";
+  textarea.style.height = "400px";
+  textarea.style.resize = "vertical";
+  textarea.style.backgroundColor = "#444";
+  textarea.style.color = "#fff";
+  textarea.style.border = "none";
+  textarea.style.margin = "10px 0";
+  textarea.style.padding = "10px";
+  modalContent.appendChild(textarea);
+
+  // Buttons row
+  const buttonRow = document.createElement("div");
+  buttonRow.style.display = "flex";
+  buttonRow.style.flexWrap = "wrap";
+  buttonRow.style.gap = "10px";
+  buttonRow.style.justifyContent = "flex-end";
+
+  // 5) Export button
+  const exportButton = document.createElement("button");
+  exportButton.textContent = "Export";
+  exportButton.style.padding = "8px 12px";
+  exportButton.style.cursor = "pointer";
+  exportButton.style.backgroundColor = "#f44336";
+  exportButton.style.color = "#fff";
+  exportButton.style.border = "none";
+  exportButton.style.borderRadius = "4px";
+  exportButton.onclick = () => {
+    this.downloadJson(textarea.value, `${defaultKey}_defaults.json`);
+  };
+  buttonRow.appendChild(exportButton);
+
+  // 6) Import button
+  const importButton = document.createElement("button");
+  importButton.textContent = "Import";
+  importButton.style.padding = "8px 12px";
+  importButton.style.cursor = "pointer";
+  importButton.style.backgroundColor = "#4CAF50";
+  importButton.style.color = "#fff";
+  importButton.style.border = "none";
+  importButton.style.borderRadius = "4px";
+  importButton.onclick = () => {
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "application/json";
+    fileInput.style.display = "none";
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files && fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            if (typeof reader.result !== "string") {
+              throw new Error("File content is not a string.");
+            }
+            // Put contents into the textarea
+            textarea.value = reader.result;
+          } catch (err: any) {
+            this.showNotification(
+              "Failed to read defaults file: " + err.message,
+              "error"
+            );
+          }
+        };
+        reader.readAsText(file);
+      }
+    });
+    fileInput.click();
+  };
+  buttonRow.appendChild(importButton);
+
+  // 7) Save button
+  const saveButton = document.createElement("button");
+  saveButton.textContent = "Save";
+  saveButton.style.padding = "8px 12px";
+  saveButton.style.cursor = "pointer";
+  saveButton.style.backgroundColor = "#008CBA";
+  saveButton.style.color = "#fff";
+  saveButton.style.border = "none";
+  saveButton.style.borderRadius = "4px";
+  saveButton.onclick = () => {
+    // Parse the JSON from the textarea
+    try {
+      const newData = JSON.parse(textarea.value);
+      // Update the manager
+      defaultsManager.set(defaultKey, newData);
+      this.showNotification(`Defaults for "${defaultKey}" saved successfully.`, "success");
+    } catch (error: any) {
+      this.showNotification("Failed to save defaults: " + error.message, "error");
+    }
+  };
+  buttonRow.appendChild(saveButton);
+
+  // 8) Cancel/Close button
+  const cancelButton = document.createElement("button");
+  cancelButton.textContent = "Cancel";
+  cancelButton.style.padding = "8px 12px";
+  cancelButton.style.cursor = "pointer";
+  cancelButton.style.backgroundColor = "#444";
+  cancelButton.style.color = "#fff";
+  cancelButton.style.border = "none";
+  cancelButton.style.borderRadius = "4px";
+  cancelButton.onclick = () => {
+    this.close(modalOverlay, handleKeyDown);
+  };
+  buttonRow.appendChild(cancelButton);
+
+  modalContent.appendChild(buttonRow);
+  modalOverlay.appendChild(modalContent);
+  this.container.appendChild(modalOverlay);
+}
+
+}
+

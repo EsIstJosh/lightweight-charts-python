@@ -87,7 +87,7 @@ export class Handler {
 
     public currentMouseEventParams: MouseEventParams<any> | null = null;
 
-    private defaultsManager: DefaultOptionsManager;
+    public defaultsManager: DefaultOptionsManager;
 
     // TODO find a better solution rather than the 'position' parameter
     constructor(
@@ -862,5 +862,5 @@ public toJSON(): {
   
 
   public _type: string = "chart"
-  public title: string = "Lightweight-Charts"
+  public title: string = "chart"
 }
