@@ -57,7 +57,7 @@ export class ToolBox {
         this._handlerID = handlerID;
         this._commandFunctions = commandFunctions;
         this._drawingTool = new DrawingTool(chart, series, () => this.removeActiveAndSave());
-        this.div = this._makeToolBox();
+        this.div = this._makeToggleToolBox();
         this.handler = handler;
         this.handler.ContextMenu.setupDrawingTools(this.saveDrawings, this._drawingTool);
 
@@ -76,32 +76,93 @@ export class ToolBox {
         const { ...serialized} = this;
         return serialized;
     }
-
-    private _makeToolBox() {
-        let div = document.createElement('div')
-        div.classList.add('toolbox');
-        this.buttons.push(this._makeToolBoxElement(TrendLine, 'KeyT', ToolBox.TREND_SVG))
+    
+    private _makeToggleToolBox(): HTMLDivElement {
+        const outerDiv = document.createElement('div');
+        outerDiv.classList.add('flyout-toolbox');
+        
+        // Position the container absolutely at the top center.
+        outerDiv.style.position = 'absolute';
+        outerDiv.style.top = '0';
+        outerDiv.style.left = '50%';
+        outerDiv.style.transform = 'translateX(-50%)';
+        outerDiv.style.zIndex = '1000';
+        outerDiv.style.overflow = 'hidden';
+        outerDiv.style.transition = 'height 0.3s ease';
+      
+        // Create the container for the toolbox content (the buttons).
+        const contentDiv = document.createElement('div');
+        contentDiv.classList.add('toolbox-content');
+        // Use inline-flex so its width is determined by its content.
+        contentDiv.style.display = 'inline-flex';
+        contentDiv.style.flexDirection = 'row';
+        contentDiv.style.justifyContent = 'center';
+        contentDiv.style.alignItems = 'center';
+        contentDiv.style.padding = '5px';
+        contentDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        // Initially, content is hidden.
+        contentDiv.style.display = 'none';
+      
+        // Create toolbox buttons using your existing method.
+        this.buttons = [];
+        this.buttons.push(this._makeToolBoxElement(TrendLine, 'KeyT', ToolBox.TREND_SVG));
         this.buttons.push(this._makeToolBoxElement(HorizontalLine, 'KeyH', ToolBox.HORZ_SVG));
         this.buttons.push(this._makeToolBoxElement(RayLine, 'KeyR', ToolBox.RAY_SVG));
         this.buttons.push(this._makeToolBoxElement(Box, 'KeyB', ToolBox.BOX_SVG));
         this.buttons.push(this._makeToolBoxElement(VerticalLine, 'KeyV', ToolBox.VERT_SVG, true));
-        // Add the four pitchfork tools:
         this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyP', ToolBox.PITCHFORK_SVG));
-        //this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyS', ToolBox.SCHIFF_PITCHFORK_SVG));
-        //this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyM', ToolBox.MODIFIED_SCHIFF_PITCHFORK_SVG));
-        //this.buttons.push(this._makeToolBoxElement(PitchFork, 'KeyI', ToolBox.INSIDE_PITCHFORK_SVG));
-        //// New Fibonacci Tools
-        //this.buttons.push(this._makeToolBoxElement(FibonacciSegmentDrawing, "KeyS", ToolBox.SEGMENT_SVG));
-        //this.buttons.push(this._makeToolBoxElement(FibonacciExtensionDrawing, "KeyE", ToolBox.EXTENSION_SVG));
-        //this.buttons.push(this._makeToolBoxElement(FibonacciCircleDrawing, "KeyC", ToolBox.CIRCLE_SVG));
-        //this.buttons.push(this._makeToolBoxElement(FibonacciSpiralDrawing, "KeyP", ToolBox.SPIRAL_SVG));
-        //this.buttons.push(this._makeToolBoxElement(GannBoxDrawing, "KeyG", ToolBox.GANN_SVG));
-
+      
+        // Append each button to the content container.
         for (const button of this.buttons) {
-            div.appendChild(button);
+          contentDiv.appendChild(button);
         }
-        return div
-    }
+        
+        // Create the toggle tab that will always be visible and is attached to the bottom.
+        const toggleTab = document.createElement('div');
+        toggleTab.textContent = '▼'; // Down arrow for collapsed state.
+        toggleTab.style.width = '15px';
+        toggleTab.style.height = '10px';
+        toggleTab.style.backgroundColor = 'rgba(0, 0, 0, 0)'
+        toggleTab.style.color = '#fff';
+        toggleTab.style.textAlign = 'center';
+        toggleTab.style.lineHeight = '15px';
+        toggleTab.style.cursor = 'pointer';
+        // No extra margin needed since we want it attached.
+        
+        // Append both content and toggle tab to the outer container.
+        outerDiv.appendChild(contentDiv);
+        outerDiv.appendChild(toggleTab);
+      
+        // Define heights.
+        const tabHeight = 15;  // Height of the toggle tab.
+        let expanded = false;
+        
+        // When collapsed, outerDiv's height is exactly the toggle tab's height.
+        outerDiv.style.height = `${tabHeight}px`;
+        
+        // Toggle behavior: clicking the tab shows or hides the content.
+        toggleTab.onclick = () => {
+          expanded = !expanded;
+          if (expanded) {
+            // Show content.
+            contentDiv.style.display = 'inline-flex';
+            // Force reflow to measure the content height.
+            const contentHeight = contentDiv.scrollHeight;
+            // Set the outer container's height to content + tab height.
+            outerDiv.style.height = `${tabHeight + contentHeight}px`;
+            toggleTab.textContent = '▲';  // Up arrow indicates expanded.
+          } else {
+            // Hide content.
+            contentDiv.style.display = 'none';
+            outerDiv.style.height = `${tabHeight}px`;
+            toggleTab.textContent = '▼';  // Down arrow indicates collapsed.
+          }
+        };
+      
+        return outerDiv;
+      }
+      
+    
 
     private _makeToolBoxElement(DrawingType: new (...args: any[]) => Drawing, keyCmd: string, paths: string, rotate=false) {
         const elem = document.createElement('div')

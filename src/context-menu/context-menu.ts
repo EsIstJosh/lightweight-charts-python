@@ -93,6 +93,7 @@ import { ForkLine, PitchFork, PitchForkOptions } from "../pitchfork/pitchfork";
 import { ThreePointDrawing } from "../drawing/three-point-drawing";
 import { OffsetPoint } from "../helpers/general";
 import { DataMenu } from "./data-menu";
+import { SettingsModal } from "./settings-menu";
 
 // ----------------------------------
 // If you have actual code referencing commented-out or removed imports,
@@ -131,7 +132,7 @@ export class ContextMenu {
   private drawingTool: DrawingTool | null = null;
   public recentSeries: ISeriesApiExtended | null = null;
   public recentDrawing: Drawing | null = null;
-
+  public SettingsModal: SettingsModal|null= null  
   private volumeProfile: VolumeProfile | null = null;
   public dataMenu: DataMenu | null 
   constructor(
@@ -153,6 +154,7 @@ export class ContextMenu {
     //  this.handleCrosshairMove(param);
     //});
     this.dataMenu = new DataMenu({contextMenu: this, handler: this.handler})
+    this.SettingsModal = new SettingsModal(this.handler);
     this.setupMenu();
   }
   private constraints: Record<
@@ -1707,53 +1709,6 @@ this.addMenuItem(
     this.div.innerHTML = "";
     console.log(`Displaying Menu Options: Chart`);
     this.addResetViewOption();
-
-    this.addMenuItem(
-      " ~ Series List",
-      () => {
-        this.populateSeriesListMenu(
-          event,
-          false,
-          (destinationSeries: ISeriesApiExtended) => {
-            this.populateSeriesMenu(destinationSeries, event);
-          }
-        );
-      },
-      false,
-      true
-    );
-
-    // Layout menu
-    this.addMenuItem(
-      "⌯ Layout Options        ",
-      () => this.populateLayoutMenu(event),
-      false,
-      true
-    );
-    this.addMenuItem(
-      "⌗ Grid Options          ",
-      () => this.populateGridMenu(event),
-      false,
-      true
-    );
-    this.addMenuItem(
-      "⊹ Crosshair Options     ",
-      () => this.populateCrosshairOptionsMenu(event),
-      false,
-      true
-    );
-    this.addMenuItem(
-      "ⴵ Time Scale Options    ",
-      () => this.populateTimeScaleMenu(event),
-      false,
-      true
-    );
-    this.addMenuItem(
-      "$ Price Scale Options   ",
-      () => this.populatePriceScaleMenu(event, "right"),
-      false,
-      true
-    );
     this.addMenuInput(this.div, {
       type: "hybrid",
       label: "Display Volume Profile",
@@ -1793,20 +1748,68 @@ this.addMenuItem(
         ],
       },
     });
-  // ***** NEW: Add a menu item for exporting/importing the handler's state *****
-  this.addMenuItem(
-    "Export/Import Handler Data ▸",
-    () => {
-      if (!this.dataMenu) {
-        this.dataMenu = new DataMenu({ contextMenu: this, handler: this.handler });
-      }
-      // Open the DataMenu with the handler as the target.
-      // Pass "Handler" as the override type so that the exported JSON uses this label.
-      this.dataMenu.openMenu(this.handler, event, "Handler");
-    },
-    false
-  );
+    this.addMenuItem(
+      " ~ Series List",
+      () => {
+        this.populateSeriesListMenu(
+          event,
+          false,
+          (destinationSeries: ISeriesApiExtended) => {
+            this.populateSeriesMenu(destinationSeries, event);
+          }
+        );
+      },
+      false,
+      true
+    );
 
+    //// Layout menu
+    //this.addMenuItem(
+    //  "⌯ Layout Options        ",
+    //  () => this.populateLayoutMenu(event),
+    //  false,
+    //  true
+    //);
+    //this.addMenuItem(
+    //  "⌗ Grid Options          ",
+    //  () => this.populateGridMenu(event),
+    //  false,
+    //  true
+    //);
+    //this.addMenuItem(
+    //  "⊹ Crosshair Options     ",
+    //  () => this.populateCrosshairOptionsMenu(event),
+    //  false,
+    //  true
+    //);
+    //this.addMenuItem(
+    //  "ⴵ Time Scale Options    ",
+    //  () => this.populateTimeScaleMenu(event),
+    //  false,
+    //  true
+    //);
+    //this.addMenuItem(
+    //  "$ Price Scale Options   ",
+    //  () => this.populatePriceScaleMenu(event, "right"),
+    //  false,
+    //  true
+    //);
+   
+  // ***** NEW: Add a menu item for exporting/importing the handler's state *****
+  //this.addMenuItem(
+  //  "Export/Import Chart Config ▸",
+  //  () => {
+  //    if (!this.dataMenu) {
+  //      this.dataMenu = new DataMenu({ contextMenu: this, handler: this.handler });
+  //    }
+//
+  //    this.dataMenu.openMenu(this.handler, event, "Handler");
+  //  },
+  //  false
+  //);
+this.addMenuItem("Settings...", () => {
+  this.SettingsModal!.open();
+}, false);
   this.showMenu(event);
 }
 
@@ -2174,7 +2177,7 @@ this.addMenuItem(
             series,
             this.handler,
             type,
-            {}
+            this.handler.defaultsManager.defaults.get(type.toLowerCase()) || {}
           );
           if (clonedSeries) {
             console.log(`Cloned series as ${type}:`, clonedSeries);
