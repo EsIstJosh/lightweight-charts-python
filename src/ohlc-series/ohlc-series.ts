@@ -26,13 +26,14 @@ export interface ohlcSeriesOptions
 	lineStyle: LineStyle;
 	lineWidth: LineWidth;
 	enableVolumeOpacity:boolean;
+	volumeOpacityMode: "/ max"|"> previous"| "> average";
 	volumeOpacityPeriod:number;
 	maxOpacity:number;
 	dynamicCandles:boolean;
 	volumeMALength?: number;    // e.g. 20 (default if not provided)
 	volumeMultiplier?: number;  // e.g. 1.0 (default if not provided)
 	dynamicTrigger?: () => { newBar: boolean }; // Corrected function signature
-
+			
 		}
 	//upperUpColor: string|undefined
 	//upperDownColor: string|undefined
@@ -57,6 +58,7 @@ export const ohlcdefaultOptions: ohlcSeriesOptions = {
 	lineStyle: 0 as LineStyle,
 	lineWidth: 2 as  LineWidth,
 	enableVolumeOpacity: true,
+	volumeOpacityMode: '> previous',
 	volumeOpacityPeriod: 21,
 	maxOpacity:0.3,
 	dynamicCandles: false,

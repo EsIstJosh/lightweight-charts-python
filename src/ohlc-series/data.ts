@@ -31,7 +31,8 @@ export enum CandleShape {
 	Arrow = 'Arrow',
 	Cube =  '3d',
 	Polygon = 'Polygon',
-	Bar = 'Bar'
+	Bar = 'Bar',
+	Slanted = "Slanted"
   }
   
   /**
@@ -100,6 +101,9 @@ export enum CandleShape {
 			return CandleShape.Polygon;
 		case 'bar':
 			return CandleShape.Bar;
+
+		case 'slanted':
+			return CandleShape.Slanted;
 		default:
 			console.warn(`Unknown CandleShape: ${input}`);
 			return CandleShape.Rectangle;

@@ -9,11 +9,12 @@ export class Menu {
 
     constructor(
         private makeButton: Function,
-        private callbackName: string,
         items: string[],
         activeItem: string,
         separator: boolean,
-        align: 'right'|'left') {
+        align: 'right'|'left',
+        private callbackName?: string|null,
+    ) {
 
         this.div = document.createElement('div')
         this.div.classList.add('topbar-menu');
@@ -56,7 +57,7 @@ export class Menu {
     
     private _clickHandler(name: string) {
         this.widget.elem.innerText = name+' ↓'
-        window.callbackFunction(`${this.callbackName}_~_${name}`)
+        window.callbackFunction(`${this.callbackName??'undefined'}_~_${name}`)
         this.div.style.display = 'none'
         this.isOpen = false
     }

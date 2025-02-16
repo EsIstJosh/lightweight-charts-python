@@ -270,9 +270,9 @@ export class Handler {
             priceScaleId: "volume_scale",
         });
         volumeSeries.priceScale().applyOptions({
-            scaleMargins: { top: 0.2, bottom: 0 },
+            scaleMargins: { top:0, bottom: 0.2 },
         });
-        volumeSeries.moveToPane(1)
+        //volumeSeries.moveToPane(1)
 
         const decorated = decorateSeries(volumeSeries, this.legend);
         decorated.applyOptions({ title: "Volume" });
@@ -281,8 +281,9 @@ export class Handler {
     /**
      * Creates a line series using merged options.
      */
-    createLineSeries(name: string, options: LineSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<LineSeriesOptions>("Line", options);
+    createLineSeries(name: string, options?: LineSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        
+        const mergedOptions = this.mergeSeriesOptions<LineSeriesOptions>("Line", options??{});
 
         const symbol = (() => {
             switch (mergedOptions.lineStyle) {
@@ -323,8 +324,8 @@ export class Handler {
     /**
      * Creates a histogram series using merged options.
      */
-    createHistogramSeries(name: string, options: HistogramSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<HistogramSeriesOptions>("Histogram", options);
+    createHistogramSeries(name: string, options?: HistogramSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<HistogramSeriesOptions>("Histogram", options??{});
         const { group, legendSymbol = "▨", ...histogramOptions } = mergedOptions;
         const histogram = this.chart.addSeries(HistogramSeries, histogramOptions);
 
@@ -353,8 +354,8 @@ export class Handler {
     /**
      * Creates an area series using merged options.
      */
-    createAreaSeries(name: string, options: AreaSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<AreaSeriesOptions>("Area", options);
+    createAreaSeries(name: string, options?: AreaSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<AreaSeriesOptions>("Area", options??{});
         const { group, legendSymbol = "▨", ...areaOptions } = mergedOptions;
         const area = this.chart.addSeries(AreaSeries, areaOptions);
 
@@ -382,8 +383,8 @@ export class Handler {
     /**
      * Creates a bar series using merged options.
      */
-    createBarSeries(name: string, options: BarSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<BarSeriesOptions>("Bar", options);
+    createBarSeries(name: string, options?: BarSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
+        const mergedOptions = this.mergeSeriesOptions<BarSeriesOptions>("Bar", options??{});
         const { group, legendSymbol = ['┌', '└'], ...barOptions } = mergedOptions;
         const bar = this.chart.addSeries(BarSeries, barOptions);
 
@@ -411,18 +412,19 @@ export class Handler {
     /**
      * Creates a custom OHLC series using merged options.
      */
-    createCustomOHLCSeries(name: string, options: Partial<ohlcSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
+    createCustomOHLCSeries(name: string, options?: Partial<ohlcSeriesOptions> ): { name: string; series: ISeriesApi<SeriesType> } {
         // Merge built–in defaults, file defaults, and explicit options for "Ohlc"
         const base = ohlcdefaultOptions;
         const fileDefaults = this.defaultsManager.defaults.get("ohlc") || {};
+        
         const mergedOptions: ohlcSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] } = {
             ...base,
             ...fileDefaults,
             ...options,
             seriesType: 'Ohlc',
         };
-
-        const { group, legendSymbol = ['⑃', '⑂'], seriesType: _, chandelierSize = 1, ...filteredOptions } = mergedOptions;
+    
+        const { group, legendSymbol = ['⑃', '⑂'], seriesType: _, chandelierSize, ...filteredOptions } = mergedOptions;
 
         const Instance = new ohlcSeries();
         const ohlcCustomSeries = this.chart.addCustomSeries(Instance, {
@@ -454,45 +456,45 @@ export class Handler {
         return { name, series: ohlcCustomSeries };
     }
 
-    /**
-     * Creates a trade series using merged options.
-     */
-    createTradeSeries(name: string, options: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
-            ...tradeDefaultOptions,
-            ...this.defaultsManager.defaults.get("trade"),
-            ...options,
-            seriesType: 'Trade',
-        };
-
-        const { group, legendSymbol = ['$'], seriesType: _, ...filteredOptions } = mergedOptions;
-
-        const instance = new TradeSeries();
-        const tradeCustomSeries = this.chart.addCustomSeries(instance, filteredOptions);
-
-        const decorated = decorateSeries(tradeCustomSeries, this.legend);
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name ?? 'Trade', decorated);
-
-        const colorsArray = [
-            mergedOptions.backgroundColorStop,
-            mergedOptions.backgroundColorTarget
-        ];
-        const finalLegendSymbol = Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol];
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: colorsArray,
-            legendSymbol: finalLegendSymbol,
-            seriesType: 'Trade',
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-
-        return { name, series: tradeCustomSeries };
-    }
+   // /**
+   //  * Creates a trade series using merged options.
+   //  */
+   // createTradeSeries(name: string, options?: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
+   //     const mergedoptions?: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
+   //         ...tradeDefaultOptions,
+   //         ...this.defaultsManager.defaults.get("trade"),
+   //         ...options,
+   //         seriesType: 'Trade',
+   //     };
+//
+   //     const { group, legendSymbol = ['$'], seriesType: _, ...filteredOptions } = mergedOptions;
+//
+   //     const instance = new TradeSeries();
+   //     const tradeCustomSeries = this.chart.addCustomSeries(instance, filteredOptions);
+//
+   //     const decorated = decorateSeries(tradeCustomSeries, this.legend);
+   //     this._seriesList.push(decorated);
+   //     this.seriesMap.set(name ?? 'Trade', decorated);
+//
+   //     const colorsArray = [
+   //         mergedOptions.backgroundColorStop,
+   //         mergedOptions.backgroundColorTarget
+   //     ];
+   //     const finalLegendSymbol = Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol];
+//
+   //     const legendItem: LegendItem = {
+   //         name,
+   //         series: decorated,
+   //         colors: colorsArray,
+   //         legendSymbol: finalLegendSymbol,
+   //         seriesType: 'Trade',
+   //         group,
+   //     };
+//
+   //     this.legend.addLegendItem(legendItem);
+//
+   //     return { name, series: tradeCustomSeries };
+   // }
 
     /**
      * Creates a fill area between two series.

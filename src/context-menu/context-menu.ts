@@ -18,6 +18,7 @@ import {
   CustomSeriesOptions,
   LineWidth,
   OhlcData,
+  CandlestickData,
 } from "lightweight-charts";
 // ----------------------------------
 // Internal Helpers and Types
@@ -333,17 +334,17 @@ export class ContextMenu {
       console.warn("No mouse event parameters or series data available.");
       return null;
     }
-
+ 
     if (!param.point) {
       console.warn("No point data in MouseEventParams.");
       return null;
     }
-
-    const cursorY = param.point.y;
+  
+    const cursorY: number = param.point.y;
     let sourceSeries: ISeriesApiExtended | null = null;
-    const referenceSeries = this.handler._seriesList[0] as ISeriesApiExtended;
-
-    if (this.handler.series) {
+    const referenceSeries = this.handler.chart.panes()[param.paneIndex??0].getSeries()[0] as ISeriesApiExtended;
+  
+    if (this.handler.series && this.handler.series.getPane().paneIndex() === param.paneIndex) {
       sourceSeries = this.handler.series;
       console.log(`Using handler.series for coordinate conversion.`);
     } else if (referenceSeries) {
@@ -353,20 +354,22 @@ export class ContextMenu {
       console.warn("No handler.series or referenceSeries available.");
       return null;
     }
-
+  
+    // If the pane index from the event doesn't match the source series' pane,
+    // update sourceSeries based on the pane index from the event.
+    if (param.paneIndex !== sourceSeries.getPane().paneIndex()) {
+      sourceSeries = this.handler.chart.panes()[param.paneIndex ?? 1].getSeries()[0] as ISeriesApiExtended;
+    }
     const cursorPrice = sourceSeries.coordinateToPrice(cursorY);
     console.log(`Converted chart Y (${cursorY}) to Price: ${cursorPrice}`);
-
+  
     if (cursorPrice === null) {
       console.warn("Cursor price is null. Unable to determine proximity.");
       return null;
     }
-
-    const seriesByDistance: {
-      distance: number;
-      series: ISeriesApiExtended;
-    }[] = [];
-
+  
+    const seriesByDistance: { distance: number; series: ISeriesApiExtended }[] = [];
+  
     param.seriesData.forEach((data, series) => {
       let refPrice: number | undefined;
       if (isSingleValueData(data)) {
@@ -374,32 +377,38 @@ export class ContextMenu {
       } else if (isOHLCData(data)) {
         refPrice = data.close;
       }
-
+      
       if (refPrice !== undefined && !isNaN(refPrice)) {
-        const distance = Math.abs(refPrice - cursorPrice);
-        const percentageDifference = (distance / cursorPrice) * 100;
 
-        if (percentageDifference <= 3.33) {
-          const extendedSeries = ensureExtendedSeries(
-            series,
-            this.handler.legend
-          );
-          seriesByDistance.push({ distance, series: extendedSeries });
+        const distance = Math.abs(refPrice - cursorPrice);
+
+        const paneSize = this.handler.chart.panes()[param.paneIndex!].getHeight();
+        const top = sourceSeries.coordinateToPrice(0);
+        const bottom =sourceSeries.coordinateToPrice(paneSize);
+        if (top === null || bottom === null) return null;
+        const percentageDifference = (distance / (top-bottom)) * 100;
+  
+        if (percentageDifference <= 3 && param.paneIndex === series.getPane().paneIndex()) {
+          seriesByDistance.push({ distance, series: series as ISeriesApiExtended });
         }
       }
     });
-
+  
     // Sort series by proximity (distance)
     seriesByDistance.sort((a, b) => a.distance - b.distance);
-
-    if (seriesByDistance.length > 0) {
+  
+    if (seriesByDistance.length > 1 && this.recentSeries === seriesByDistance[0].series) {
+      console.log("Multiple series found.");
+      return seriesByDistance[1].series;
+    } else if (seriesByDistance.length > 0) {
       console.log("Closest series found.");
       return seriesByDistance[0].series;
     }
-
+  
     console.log("No series found within the proximity threshold.");
     return null;
   }
+  
 
   public showMenu(event: MouseEvent): void {
     const x = event.clientX;
@@ -529,9 +538,8 @@ export class ContextMenu {
     const container = document.createElement("div");
     container.classList.add("context-menu-item");
     container.style.display = "flex";
-    container.style.alignItems = "center";
+    container.style.alignItems = "right";
     container.style.justifyContent = "space-around";
-    container.style.width = "90%";
 
     if (config.label) {
       const labelElem = document.createElement("label");
@@ -549,29 +557,76 @@ export class ContextMenu {
         if (!config.hybridConfig) {
           throw new Error("Hybrid type requires hybridConfig.");
         }
+      
+        // Container for the two side-by-side buttons (plus an optional dropdown).
+        const container = document.createElement("div");
+        container.classList.add("context-menu-item");
+        container.style.position = "relative";
+        container.style.display = "flex";
+        container.style.flexDirection = "row";
+        container.style.justifyContent = "flex-end";
+        container.style.alignItems = "right";
+      
+        // -------------------------------
+        // Shared Styling for Both Buttons
+        // -------------------------------
+        const baseButtonStyle: Partial<CSSStyleDeclaration> = {
+          backgroundColor: "#2b2b2b",
+          color: "#fff",
+          border: "1px solid #444",
+          padding: "2px 2px",         // Minimal padding so text is visible
+          textAlign: "center",
+          cursor: "pointer",
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "right",
+          justifyContent: "right",
+          // No fixed height; the button grows to fit text or symbols
+          // If you need a strict height, uncomment below and set as desired:
+          // height: "24px",
+          // lineHeight: "24px",
+        };
+      
+        // Helper function to apply shared styling.
+        function applyStyles(elem: HTMLElement, styles: Partial<CSSStyleDeclaration>): void {
+          for (const [key, value] of Object.entries(styles)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (elem.style as any)[key] = value;
+          }
+        }
+      
+        // -------------------------------
+        // Main Button (Left) - No Label
+        // -------------------------------
+        const mainButton = document.createElement("div");
+        applyStyles(mainButton, baseButtonStyle);
+        mainButton.style.borderRadius = "4px 0 0 4px"; // Rounded left corners
+        mainButton.innerText = config.sublabel??'▵';
 
-        const hybridContainer = document.createElement("div");
-        hybridContainer.classList.add("context-menu-item");
-        hybridContainer.style.position = "relative";
-        hybridContainer.style.cursor = "pointer";
-        hybridContainer.style.display = "flex";
-        hybridContainer.style.textAlign = "center";
-        hybridContainer.style.marginLeft = "auto";
-        hybridContainer.style.marginRight = "8px";
-
-        const labelElem = document.createElement("span");
-        labelElem.innerText = config.sublabel ?? "Action";
-        labelElem.style.flex = "1";
-        hybridContainer.appendChild(labelElem);
-
-        const dropdownIndicator = document.createElement("span");
-        dropdownIndicator.innerText = "▼";
-        dropdownIndicator.style.marginLeft = "8px";
-        dropdownIndicator.style.color = "#fff";
-        hybridContainer.appendChild(dropdownIndicator);
-
+        // No label or text in the main button
+        mainButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          config.hybridConfig!.defaultAction();
+        });
+      
+        // -------------------------------
+        // Dropdown Button (Right) - Displays ∷
+        // -------------------------------
+        const dropdownButton = document.createElement("div");
+        applyStyles(dropdownButton, baseButtonStyle);
+        // Remove left border to join seamlessly with mainButton
+        dropdownButton.style.borderLeft = "none";
+        dropdownButton.style.borderRadius = "0 4px 4px 0"; // Rounded right corners
+      
+        dropdownButton.innerText = "☷";
+      
+        // -------------------------------
+        // Dropdown Container (Shown if multiple options)
+        // -------------------------------
         const dropdown = document.createElement("div");
         dropdown.style.position = "absolute";
+        dropdown.style.top = "100%";  // or set to "0" and adjust left/right if needed
+        dropdown.style.right = "0";
         dropdown.style.backgroundColor = "#2b2b2b";
         dropdown.style.color = "#fff";
         dropdown.style.border = "1px solid #444";
@@ -580,63 +635,58 @@ export class ContextMenu {
         dropdown.style.boxShadow = "0px 2px 5px rgba(0, 0, 0, 0.5)";
         dropdown.style.zIndex = "10000";
         dropdown.style.display = "none";
-        hybridContainer.appendChild(dropdown);
-
-        // Populate dropdown with options
-        config.hybridConfig.options.forEach((option) => {
-          const optionElem = document.createElement("div");
-          optionElem.innerText = option.name;
-          optionElem.style.cursor = "pointer";
-          optionElem.style.padding = "5px 10px";
-
-          // Handle clicks on the dropdown options
-          optionElem.addEventListener("click", (event) => {
-            event.stopPropagation(); // Prevent propagation to the container
-            dropdown.style.display = "none"; // Close dropdown
-            option.action(); // Execute the action for the option
+      
+        // Decide single vs. multiple option behavior
+        if (config.hybridConfig.options.length === 1) {
+          // If there is exactly one option, clicking the dropdownButton calls that single action
+          const singleOption = config.hybridConfig.options[0];
+          dropdownButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            singleOption.action();
           });
-
-          optionElem.addEventListener("mouseenter", () => {
-            optionElem.style.backgroundColor = "#444";
+        } else {
+          // Multiple options => build and toggle the dropdown
+          config.hybridConfig.options.forEach((option) => {
+            const optionElem = document.createElement("div");
+            optionElem.innerText = option.name;
+            optionElem.style.cursor = "pointer";
+            optionElem.style.padding = "5px 10px";
+            optionElem.addEventListener("click", (event) => {
+              event.stopPropagation();
+              dropdown.style.display = "none";
+              option.action();
+            });
+            optionElem.addEventListener("mouseenter", () => {
+              optionElem.style.backgroundColor = "#444";
+            });
+            optionElem.addEventListener("mouseleave", () => {
+              optionElem.style.backgroundColor = "#2b2b2b";
+            });
+            dropdown.appendChild(optionElem);
           });
-
-          optionElem.addEventListener("mouseleave", () => {
-            optionElem.style.backgroundColor = "#2b2b2b";
+      
+          // Toggle dropdown by clicking the dropdownButton
+          dropdownButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            dropdown.style.display =
+              dropdown.style.display === "none" ? "block" : "none";
           });
-
-          dropdown.appendChild(optionElem);
-        });
-
-        // Clicking the hybrid container toggles the dropdown
-        hybridContainer.addEventListener("click", (event) => {
-          event.stopPropagation(); // Prevent triggering the default action
-          dropdown.style.display =
-            dropdown.style.display === "block" ? "none" : "block";
-        });
-
-        // Ensure the default action happens when clicking outside the hybrid container
-        const menuItem = document.createElement("div");
-        menuItem.classList.add("context-menu-item");
-        menuItem.style.display = "flex";
-        menuItem.style.alignItems = "center";
-        menuItem.style.justifyContent = "space-between";
-        menuItem.style.cursor = "pointer";
-
-        menuItem.addEventListener("click", () => {
-          config.hybridConfig!.defaultAction(); // Execute the default action
-        });
-
-        // Add the hybrid container to the menu item
-        menuItem.appendChild(hybridContainer);
-
-        // Close dropdown when clicking outside
-        document.addEventListener("click", () => {
-          dropdown.style.display = "none";
-        });
-
-        inputElem = menuItem;
+      
+          // Add the dropdown to the container so it appears below/right
+          container.appendChild(dropdown);
+        }
+      
+        // Add both buttons side by side to the container
+        container.appendChild(mainButton);
+        container.appendChild(dropdownButton);
+      
+        // Assign the final element reference
+        inputElem = container;
         break;
       }
+      
+      
+      
 
       case "number": {
         const input = document.createElement("input");
@@ -1094,6 +1144,7 @@ export class ContextMenu {
             "3d",
             "Polygon",
             "Bar",
+            "Slanted"
           ];
           if (predefinedShapes) {
             tempStyleOptions.push({
@@ -1151,18 +1202,12 @@ export class ContextMenu {
     // Otherwise (if the series is on any other pane), move it back to the main pane (pane 0).
     const defaultAction = () => {
       if (currentPaneIndex === 0) {
-        if (panes.length > 1) {
-          series.moveToPane(1);
-          console.log(
-            `Default: Moved series from pane ${currentPaneIndex} to pane 1.`
-          );
-        } else {
-          series.moveToPane(panes.length); // creates a new pane
+          series.moveToPane(panes.length);
           console.log(
             `Default: Moved series from pane ${currentPaneIndex} to a new pane at index ${panes.length}.`
           );
         }
-      } else {
+       else {
         series.moveToPane(0);
         console.log(
           `Default: Moved series from pane ${currentPaneIndex} back to main pane (0).`
@@ -1175,6 +1220,7 @@ export class ContextMenu {
     // Then add an extra option for a "New Pane".
     const options: { name: string; action: () => void }[] = [];
     for (let i = 0; i < panes.length; i++) {
+      if (i === currentPaneIndex) {continue}
       options.push({
         name: `Pane ${i}`,
         action: () => {
@@ -1196,7 +1242,7 @@ export class ContextMenu {
     this.addMenuInput(this.div, {
       type: "hybrid",
       label: "Move to pane",
-      sublabel: currentValue,
+      sublabel: currentPaneIndex === 0? 'New Pane':'Top',
       value: currentValue,
       onChange: (newValue: string) => {
         // When the user selects an option, look it up in the options array and execute its action.
@@ -1364,7 +1410,27 @@ export class ContextMenu {
       1     // Step value
     );
   }
-
+  if (seriesOptions.enableVolumeOpacity) {
+    // Define the allowed modes for volume opacity.
+    const allowedModes: string[] = ["/ max", "> previous", "> average"];
+    // Ensure the current mode is valid; default to "/ max" if not.
+    const currentMode: string | undefined = allowedModes.includes(seriesOptions.volumeOpacityMode as string)
+      ? seriesOptions.volumeOpacityMode
+      : "/ max";
+  
+    // Create a select input for volume opacity mode.
+    this.addSelectInput(
+      "Volume Opacity Mode",
+      currentMode?? '> previous',
+      allowedModes,
+      (newValue: string) => {
+        const options = { volumeOpacityMode: newValue };
+        series.applyOptions(options as Partial<OhlcSeriesOptions>);
+        console.log(`Updated Volume Opacity Mode to: ${newValue}`);
+      }
+    );
+  }
+  
 
     otherOptions.forEach((option) => {
       const optionLabel = camelToTitle(option.label); // Human-readable label
@@ -1709,10 +1775,86 @@ this.addMenuItem(
     this.div.innerHTML = "";
     console.log(`Displaying Menu Options: Chart`);
     this.addResetViewOption();
+    const params = this.getMouseEventParams()
+
+    // Retrieve current pane index of the series and the array of existing panes.
+    const panes = this.handler.chart.panes();
+    const paneIndex = params?.paneIndex
+    const pane  = this.handler.chart.panes()[paneIndex??0]
+    // Determine the current value (label) for the hybrid input.
+
+    // Define the default action:
+    // If the series is in the main pane (pane 0), move it to the next existing pane (if available)
+    // or create a new pane if there isn’t one.
+    // Otherwise (if the series is on any other pane), move it back to the main pane (pane 0).
+    const defaultAction = () => {
+      (paneIndex??0 > 0?  pane.moveTo(0)    :pane.moveTo(panes.length -1))
+         
+      }
+  
+
+    // Build the list of options:
+    // For each existing pane, add an option labeled "Pane 0", "Pane 1", etc.
+    // Then add an extra option for a "New Pane".
+    const options: { name: string; action: () => void }[] = [];
+    
+      options.push({
+        name: `Top`,
+        action: () => {
+          pane.moveTo(0)          
+
+          console.log(`Moved pane to top`);
+        },
+      });
+    
+    if (panes.length > 2 && (paneIndex??0) > 1) {
+      options.push({
+        name: "Up",
+        action: () => {
+          pane.moveTo((paneIndex??2) -1)          
+          console.log(`Moved pane up`);
+        },
+      });}
+      if (panes.length > 2 && (paneIndex??0) < panes.length -2) {
+        options.push({
+          name: "Down",
+          action: () => {
+            pane.moveTo((paneIndex??0) + 1)          
+            console.log(`Moved pane down`);
+          },
+        });}
+      options.push({
+        name: `Bottom`,
+        action: () => {
+          pane.moveTo(panes.length -1)          
+          console.log(`Moved pane to bottom`);
+        },
+      });
+    
+
+
+
+    if (panes.length > 1) { 
+    // Create the hybrid input using your addMenuInput helper.
+    // This will render a dropdown that shows all options and executes the corresponding action on change.
+    this.addMenuInput(this.div, {
+      type: "hybrid",
+      label: "Move pane",
+      sublabel: (paneIndex??0 > 0? "Top":"Bottom"),
+      hybridConfig: {
+        defaultAction: defaultAction,
+        options: options.map((opt) => ({
+          name: opt.name,
+          action: opt.action,
+        })),
+      },
+    });
+  }
+
     this.addMenuInput(this.div, {
       type: "hybrid",
       label: "Display Volume Profile",
-      sublabel: "Settings",
+      sublabel: "≖",
       hybridConfig: {
         defaultAction: () => {
           if (!this.volumeProfile) {
@@ -3052,7 +3194,7 @@ this.addMenuItem("Settings...", () => {
         "Sparse Dotted",
       ],
       lineType: ["Simple", "WithSteps", "Curved"],
-      Shape: ["Rectangle", "Rounded", "Ellipse", "Arrow", "3d", "Polygon", "Bar"],
+      Shape: ["Rectangle", "Rounded", "Ellipse", "Arrow", "3d", "Polygon", "Bar","Slanted"],
       "Candle Shape": [
         "Rectangle",
         "Rounded",
@@ -3061,6 +3203,7 @@ this.addMenuItem("Settings...", () => {
         "3d",
         "Polygon",
         "Bar",
+        "Slanted"
       ],
     };
 
@@ -3176,7 +3319,7 @@ this.addMenuItem("Settings...", () => {
     const resetMenuItem = this.addMenuInput(this.div, {
       type: "hybrid",
       label: "∟ Reset",
-      sublabel: "Axis",
+      sublabel: "View",
       hybridConfig: {
         defaultAction: () => {
           this.handler.chart.timeScale().resetTimeScale();
@@ -3189,7 +3332,7 @@ this.addMenuItem("Settings...", () => {
           },
           {
             name: "⥘ Price Scale",
-            action: () => this.handler.chart.timeScale().fitContent(),
+            action: () => this.handler.chart.timeScale().fitContent,
           },
         ],
       },
@@ -3466,6 +3609,8 @@ this.addMenuItem("Settings...", () => {
             { label: "Arrow", value: CandleShape.Arrow },
             { label: "Polygon", value: CandleShape.Polygon },
             { label: "Bar", value: CandleShape.Bar },
+            { label: "Slanted", value: CandleShape.Slanted },
+
           ],
         },
         {

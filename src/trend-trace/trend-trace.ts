@@ -1039,6 +1039,13 @@ export class TrendTracePaneRenderer
     case CandleShape.Bar:
       ohlcBar(ctx, leftSide, rightSide, scaledHigh, scaledLow, scaledOpen, scaledClose);
       break;  
+
+    case 'Slanted':
+    // Add your newly created slanted candle.
+    ohlcSlantedCandle(ctx, leftSide, rightSide, barY, barVerticalSpan, bar.isUp
+    );
+    break;
+
     default:
       console.warn(`Unknown shape '${shape}', using default Rectangle`);
       ohlcRectangle(ctx, leftSide, rightSide, barY, barVerticalSpan);

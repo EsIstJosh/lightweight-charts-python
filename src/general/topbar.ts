@@ -1,3 +1,13 @@
+/*
+ * Portions of this file are derived from [lightweight-charts-python] and are
+ * licensed under the MIT License. The original copyright notice and license
+ * can be found in the LICENSE file.
+ *
+ * Modifications by [EsIstJosh] are licensed under the GNU AGPL v3.0.
+ * See <https://www.gnu.org/licenses/agpl-3.0.html> for the full license text.
+ */
+
+import { CodeEditor } from "../pineTS/code-editor";
 import { GlobalParams } from "./global-params";
 import { Handler } from "./handler";
 import { Menu } from "./menu";
@@ -6,8 +16,8 @@ declare const window: GlobalParams
 
 interface Widget {
     elem: HTMLDivElement;
-    callbackName: string;
-    intervalElements: HTMLButtonElement[];
+    callbackName?: string|null;
+    intervalElements?: HTMLButtonElement[];
     onItemClicked: Function;
 }
 
@@ -17,6 +27,7 @@ export class TopBar {
 
     private left: HTMLDivElement;
     private right: HTMLDivElement;
+    private codeEditor: CodeEditor;
 
     constructor(handler: Handler) {
         this._handler = handler;
@@ -25,16 +36,23 @@ export class TopBar {
         this._div.classList.add('topbar');
 
         const createTopBarContainer = (justification: string) => {
-            const div = document.createElement('div')
-            div.classList.add('topbar-container')
-            div.style.justifyContent = justification
-            this._div.appendChild(div)
-            return div
-        }
-        this.left = createTopBarContainer('flex-start')
-        this.right = createTopBarContainer('flex-end')
+            const div = document.createElement('div');
+            div.classList.add('topbar-container');
+            div.style.justifyContent = justification;
+            this._div.appendChild(div);
+            return div;
+        };
+        this.left = createTopBarContainer('flex-start');
+        this.right = createTopBarContainer('flex-end');
+
+
+        this.codeEditor = new CodeEditor(this._handler); // ✅ Instantiate the Monaco Editor
+
+        // ✅ Add a button to open the editor
+        this.makeButton("()=> ƒ", true, true, "right", false,undefined,() =>
+            this.codeEditor.open()
+        );
     }
-    
     makeSwitcher(items: string[], defaultItem: string, callbackName: string, align='left') {
         const switcherElement = document.createElement('div');
         switcherElement.style.margin = '4px 12px'
@@ -55,7 +73,7 @@ export class TopBar {
 
             const buttonWidth = TopBar.getClientWidth(button)
             button.style.minWidth = buttonWidth + 1 + 'px'
-            button.addEventListener('click', () => widget.onItemClicked(button))
+            button.addEventListener('click', () => widget.onItemClicked!(button))
 
             switcherElement.appendChild(button);
             return button;
@@ -111,44 +129,53 @@ export class TopBar {
             return textBox
         }
     }
-
-    makeMenu(items: string[], activeItem: string, separator: boolean, callbackName: string, align: 'right'|'left') {
-        return new Menu(this.makeButton.bind(this), callbackName, items, activeItem, separator, align)
+    makeMenu(items: string[], activeItem: string, separator: boolean, align: 'right'|'left',callbackName?: string|null) {
+        return new Menu(this.makeButton.bind(this), items, activeItem, separator, align, callbackName)
     }
-
-    makeButton(defaultText: string, callbackName: string | null, separator: boolean, append=true, align='left', toggle=false) {
-        let button = document.createElement('button')
+    makeButton(
+        defaultText: string,
+        separator: boolean,
+        append = true,
+        align: 'left' | 'right' = 'left',
+        toggle = false,
+        callbackName?: string,
+        callable?: (() => void) | null
+    ) {
+        let button = document.createElement('button');
         button.classList.add('topbar-button');
-        // button.style.color = window.pane.color
         button.innerText = defaultText;
-        document.body.appendChild(button)
-        button.style.minWidth = button.clientWidth+1+'px'
-        document.body.removeChild(button)
-
-        let widget = {
-            elem: button,
-            callbackName: callbackName
-        }
-
-        if (callbackName) {
-            let handler;
+        
+        // Temporarily append to measure width
+        document.body.appendChild(button);
+        button.style.minWidth = `${button.clientWidth + 1}px`;
+        document.body.removeChild(button);
+    
+        let state = false;
+    
+        const onItemClicked = () => {
             if (toggle) {
-                let state = false;
-                handler = () => {
-                    state = !state
-                    window.callbackFunction(`${widget.callbackName}_~_${state}`)
-                    button.style.backgroundColor = state ? 'var(--active-bg-color)' : '';
-                    button.style.color = state ? 'var(--active-color)' : '';
+                state = !state;
+                button.style.backgroundColor = state ? 'var(--active-bg-color)' : '';
+                button.style.color = state ? 'var(--active-color)' : '';
+                if (callbackName) {
+                    window.callbackFunction(`${callbackName}_~_${state}`);
                 }
             } else {
-                handler = () => window.callbackFunction(`${widget.callbackName}_~_${button.innerText}`)
+                if (callbackName) {
+                    window.callbackFunction(`${callbackName}_~_${button.innerText}`);
+                }
             }
-            button.addEventListener('click', handler);
-        }
-        if (append) this.appendWidget(button, align, separator)
-        return widget
+    
+            if (callable) callable();
+        };
+    
+        button.addEventListener('click', onItemClicked);
+    
+        if (append) this.appendWidget(button, align, separator);
+    
+        return { elem: button, callbackName };
     }
-    makeSliderWidget(
+        makeSliderWidget(
         min: number,
         max: number,
         step: number,

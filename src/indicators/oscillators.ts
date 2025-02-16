@@ -5,14 +5,10 @@
 */
 
 import {
-  Time,
-  OhlcData,
-  BarData,
-  CandlestickData,
   HistogramData,
   SingleValueData
 } from 'lightweight-charts';
-import { getATR, getHighest, getLowest, getAvg, getRound, getSma, getLinreg, getEma, getRsi, getBarssince, getVwap, setHistogramColors, getParams, getNumericArray, pickParam } from './functions';
+import {  setHistogramColors, getParams, getNumericArray, pickParam, getSma, getRsi } from './functions';
 import { IndicatorDefinition, IndicatorFigure } from './indicators';
 
 
@@ -774,60 +770,67 @@ export const rateOfChange: IndicatorDefinition = {
 /* 13) Relative Strength Index (RSI)
    Parameters: p1, p2, p3
 */
-export const relativeStrengthIndex: IndicatorDefinition = {
-  name: "Relative Strength Index",
-  shortName: "RSI",
+export const relativeStrengthIndex: IndicatorDefinition ={
+  name: "RSI + SMA",
+  shortName: "RSI_SMA",
   shouldOhlc: true,
   paramMap: {
-    p1: { defaultValue: [6], type: "numberArray", min: 1 },
-    p2: { defaultValue: [12], type: "numberArray", min: 1 },
-    p3: { defaultValue: [24], type: "numberArray", min: 1 },
+    p1: { defaultValue: [14], type: "numberArray", min: 1 },  // RSI period
+    p2: { defaultValue: [21], type: "numberArray", min: 1 },  // SMA-of-RSI period
   },
+
   calc(dataList, overrideParams) {
-    const p1Arr = getNumericArray(overrideParams, "p1", [6]);
-    const p2Arr = getNumericArray(overrideParams, "p2", [12]);
-    const p3Arr = getNumericArray(overrideParams, "p3", [24]);
-    const figureCount = Math.max(p1Arr.length, p2Arr.length, p3Arr.length);
+    const p1Arr = getNumericArray(overrideParams, "p1", [14]); // RSI length
+    const p2Arr = getNumericArray(overrideParams, "p2", [10]); // SMA length
+    const figureCount = Math.max(p1Arr.length, p2Arr.length);
+
+    const closeArr = dataList.map(b => b.close);
     const figs: IndicatorFigure[] = [];
+
     for (let i = 0; i < figureCount; i++) {
-      const p1 = pickParam(p1Arr, i);
-      const p2 = pickParam(p2Arr, i);
-      const p3 = pickParam(p3Arr, i);
-      const arrP = [p1, p2, p3];
-      const upSums = arrP.map(() => 0);
-      const downSums = arrP.map(() => 0);
-      const lines: IndicatorFigure[] = arrP.map((val, j) => ({
-        key: `rsi${j + 1}` + (figureCount > 1 ? `_${i + 1}` : ""),
-        title: `RSI${val}` + (figureCount > 1 ? ` #${i + 1}` : ""),
-        type: "line",
-        data: [],
-        pane:1
-      }));
+      const p1 = pickParam(p1Arr, i);  
+      const p2 = pickParam(p2Arr, i);  
+
+      let rsiValues: number[] = [];
+      let smaValues: number[] = [];
+
+      const rsiData: SingleValueData[] = [];
+      const smaData: SingleValueData[] = [];
+
+      // Compute RSI iteratively and feed it into getSma step-by-step
       dataList.forEach((bar, idx) => {
-        const prev = idx - 1 >= 0 ? dataList[idx - 1] : bar;
-        const diff = bar.close - prev.close;
-        arrP.forEach((period, j) => {
-          if (diff > 0) {
-            upSums[j] += diff;
-          } else {
-            downSums[j] += Math.abs(diff);
-          }
-          if (idx >= period - 1) {
-            const rsiVal = downSums[j] !== 0 ? (100 - 100 / (1 + upSums[j] / downSums[j])) : 100;
-            lines[j].data.push({ time: bar.time, value: rsiVal });
-            const oldDiff = dataList[idx - (period - 1)].close - (dataList[idx - period]?.close || 0);
-            if (oldDiff > 0) {
-              upSums[j] -= oldDiff;
-            } else {
-              downSums[j] -= Math.abs(oldDiff);
-            }
-          } else {
-            lines[j].data.push({ time: bar.time, value: NaN });
-          }
-        });
+        const rsiVal = getRsi(closeArr.slice(0, idx + 1), p1); // Get latest RSI value
+        rsiValues.push(rsiVal);
+
+        const smaVal = getSma(rsiValues, p2); // Get latest SMA of RSI
+        smaValues.push(smaVal);
+
+        rsiData.push({ time: bar.time, value: rsiVal });
+        smaData.push({ time: bar.time, value: smaVal });
       });
-      figs.push(...lines);
+
+      // Build the indicator lines
+      const suffix = figureCount > 1 ? `_${i + 1}` : "";
+      const lineRsi: IndicatorFigure = {
+        key: `rsi${suffix}`,
+        title: `RSI(${p1})${suffix}`,
+        type: "line",
+        data: rsiData,
+        pane:1
+
+      };
+      const lineSma: IndicatorFigure = {
+        key: `smaOfRsi${suffix}`,
+        title: `SMA(${p2}) of RSI(${p1})${suffix}`,
+        type: "line",
+        data: smaData,
+        pane:1
+
+      };
+
+      figs.push(lineRsi, lineSma);
     }
+
     return figs;
   },
 };

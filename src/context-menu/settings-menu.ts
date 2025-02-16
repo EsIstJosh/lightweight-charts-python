@@ -1,8 +1,10 @@
-import { ColorType, LineStyle, PriceScaleMode } from "lightweight-charts";
-import { ColorPicker } from "./color-picker"; // Or wherever your color picker is
+import { ColorType, CrosshairMode, LineStyle, LineWidth, PriceScaleMode, VerticalGradientColor } from "lightweight-charts";
+import { ColorPicker } from "./color-picker_"; // Or wherever your color picker is
 import { GlobalParams } from "../general/global-params";
 import { Handler } from "../general";
-
+import { isOHLCData } from "../helpers/typeguards";
+import { setOpacity } from "../helpers/colors";
+import { DataMenu } from "./data-menu";
 declare const window: GlobalParams;
 
 /**
@@ -36,6 +38,8 @@ export class SettingsModal {
    */
   constructor(handler: any) {
     this.handler = handler;
+    this.colorPicker = new ColorPicker('#000000',(color)=> null)
+
 
     // Create the backdrop
     this.backdrop = document.createElement("div");
@@ -174,6 +178,12 @@ export class SettingsModal {
      ***************************************/
     this.categories = [
       {
+        id: "series-colors",  // The main tab for color editing across *all* series
+        label: "Series Colors",
+        buildContent: () => this.buildSeriesColorsTab(),
+      },
+      // Your other tabs ...
+      {
         id: "layout-options",
         label: "Layout Options",
         buildContent: () => this.buildLayoutOptionsTab(),
@@ -190,46 +200,48 @@ export class SettingsModal {
       },
       {
         id: "time-scale-options",
-        label: "Time Scale Options",
+        label: "Time Scale",
         buildContent: () => this.buildTimeScaleOptionsTab(),
       },
       {
         id: "price-scale-options",
-        label: "Price Scale Options",
+        label: "Price Scale",
         buildContent: () => this.buildPriceScaleOptionsTab(),
       },
-
-      {
-        id: "series-list",
-        label: "Series List",
-        buildContent: () => this.buildSeriesListTab(),
-      },
-
       {
         id: "defaults-list",
         label: "Defaults",
         buildContent: () => this.buildDefaultsListTab(),
       },
+      {
+        id: "source-code",
+        label: "source-code",
+        buildContent: () => this.buildSourceCodeTab(),
+      },
     ];
 
-
-    // Build left-nav buttons
+    // Build the left-nav buttons
     this.categories.forEach((cat) => {
       const catBtn = document.createElement("div");
       catBtn.innerText = cat.label;
-      catBtn.style.padding = "8px 16px";
-      catBtn.style.cursor = "pointer";
-      catBtn.style.borderBottom = "1px solid #3C3C3C";
+      Object.assign(catBtn.style, {
+        padding: "8px 16px",
+        cursor: "pointer",
+        borderBottom: "1px solid #3C3C3C",
+      });
       catBtn.addEventListener("click", () => this.switchCategory(cat.id));
       leftNav.appendChild(catBtn);
     });
 
-    // Start with the first category active.
+    // Start with the first category active
     if (this.categories.length > 0) {
       this.switchCategory(this.categories[0].id);
     }
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // 1) Show / Hide Modal
+  // ─────────────────────────────────────────────────────────────
   public open() {
     if (this.isOpen) return;
     this.isOpen = true;
@@ -252,10 +264,10 @@ export class SettingsModal {
     // If “Ok” was clicked, do final logic (like saving user changes).
     if (confirmed) {
       console.log("Settings Modal: OK clicked. Save changes here.");
-      // Save logic if needed.
+      // Implement real save logic if needed.
     } else {
       console.log("Settings Modal: Cancel clicked.");
-      // Rollback logic if needed.
+      // Implement rollback logic if needed.
     }
 
     this.isOpen = false;
@@ -271,9 +283,9 @@ export class SettingsModal {
     }, 300);
   }
 
-  /**
-   * Switches to a new category by ID, building content on the right side.
-   */
+  // ─────────────────────────────────────────────────────────────
+  // 2) Navigation / Category Switching
+  // ─────────────────────────────────────────────────────────────
   private switchCategory(catId: string) {
     this.activeCategoryId = catId;
     // Clear the content area
@@ -321,9 +333,11 @@ export class SettingsModal {
       });
     } else if (currentBackground && currentBackground.type === ColorType.VerticalGradient) {
       // Gradient background colors
-      const topColor = currentBackground.topColor || "rgba(255,0,0,0.33)";
-      const bottomColor = currentBackground.bottomColor || "rgba(0,255,0,0.33)";
+      let topColor = currentBackground.topColor || "rgba(255,0,0,0.33)";
+      let bottomColor = currentBackground.bottomColor || "rgba(0,255,0,0.33)";
       this.addColorPicker("Top Color", topColor, (color: string) => {
+        bottomColor = currentBackground.bottomColor || "rgba(0,255,0,0.33)";
+
         this.handler.chart.applyOptions({
           layout: {
             background: { type: ColorType.VerticalGradient, topColor: color, bottomColor },
@@ -331,6 +345,7 @@ export class SettingsModal {
         });
       });
       this.addColorPicker("Bottom Color", bottomColor, (color: string) => {
+        topColor = currentBackground.topColor || "rgba(255,0,0,0.33)";
         this.handler.chart.applyOptions({
           layout: {
             background: { type: ColorType.VerticalGradient, topColor, bottomColor: color },
@@ -381,6 +396,8 @@ const styleMapping: Record<string, LineStyle> = {
     "Dotted": LineStyle.Dotted,
     "Dashed": LineStyle.Dashed,
     "LargeDashed": LineStyle.LargeDashed,
+    "SparseDotted": LineStyle.SparseDotted,
+
   };
   
   // 2) When you handle the dropdown selection:
@@ -420,35 +437,105 @@ const styleMapping: Record<string, LineStyle> = {
       this.handler.chart.applyOptions({ grid: { horzLines: { visible } } });
     });
   }
+/**
+ * Crosshair Options Tab  
+ * Provides full customization controls for the crosshair:
+ * - Mode (Normal, Magnet, Hidden)
+ * - Vertical line: width, style, color, label background color
+ * - Horizontal line: style, color, label background color
+ */
+private buildCrosshairOptionsTab(): void {
+  // Create and append the title element
+  const title = document.createElement("div");
+  title.innerText = "Crosshair Options";
+  title.style.fontSize = "14px";
+  title.style.fontWeight = "bold";
+  title.style.marginBottom = "8px";
+  this.contentArea.appendChild(title);
 
-  /**
-   * Crosshair Options Tab  
-   * Provides controls for crosshair and its line colors.
-   */
-  private buildCrosshairOptionsTab(): void {
-    const title = document.createElement("div");
-    title.innerText = "Crosshair Options";
-    title.style.fontSize = "14px";
-    title.style.fontWeight = "bold";
-    title.style.marginBottom = "8px";
-    this.contentArea.appendChild(title);
-
-
-
-    // Vertical crosshair line color
-    const vertLineColor =
-      this.getCurrentOptionValue("crosshair.vertLine.color") || "#000000";
-    this.addColorPicker("Vertical Line Color", vertLineColor, (color: string) => {
-      this.handler.chart.applyOptions({ crosshair: { vertLine: { color } } });
+  // -------------------------------
+  // Crosshair Mode Dropdown
+  // -------------------------------
+  const crosshairModes: string[] = ["Normal", "Magnet", "Hidden"];
+  this.addDropdown("Crosshair Mode", crosshairModes, (selected: string | CrosshairMode) => {
+    this.handler.chart.applyOptions({
+      crosshair: { mode: selected as CrosshairMode},
     });
+  });
 
-    // Horizontal crosshair line color
-    const horzLineColor =
-      this.getCurrentOptionValue("crosshair.horzLine.color") || "#000000";
-    this.addColorPicker("Horizontal Line Color", horzLineColor, (color: string) => {
-      this.handler.chart.applyOptions({ crosshair: { horzLine: { color } } });
+  // -------------------------------
+  // Vertical Crosshair Line Options
+  // -------------------------------
+  // Vertical line width dropdown (values 1–10)
+  const widthOptions: string[] = Array.from({ length: 10 }, (_, i) => (i + 1).toString());
+  this.addDropdown("Vertical Line Width", widthOptions, (selected: string| LineWidth) => {
+    const newWidth = parseInt(selected as string , 10);
+    this.handler.chart.applyOptions({
+      crosshair: { vertLine: { width: newWidth as LineWidth } },
     });
-  }
+  });
+
+  // Vertical line style dropdown.
+  const lineStyleOptions: string[] = ["Solid", "Dotted", "Dashed", "LargeDashed", "SparseDotted"];
+  this.addDropdown("Vertical Line Style", lineStyleOptions, (selected: string | LineStyle) => {
+    this.handler.chart.applyOptions({
+      crosshair: { vertLine: { style: selected as LineStyle} },
+    });
+  });
+
+  // Vertical line color picker.
+  const vertLineColor: string = this.getCurrentOptionValue("crosshair.vertLine.color") || "#C3BCDB44";
+  this.addColorPicker("Vertical Line Color", vertLineColor, (newColor: string) => {
+    this.handler.chart.applyOptions({
+      crosshair: { vertLine: { color: newColor } },
+    });
+  });
+
+  // Vertical line label background color picker.
+  const vertLabelBg: string = this.getCurrentOptionValue("crosshair.vertLine.labelBackgroundColor") || "#9B7DFF";
+  this.addColorPicker("Vertical Label Background", vertLabelBg, (newColor: string) => {
+    this.handler.chart.applyOptions({
+      crosshair: { vertLine: { labelBackgroundColor: newColor } },
+    });
+  });
+
+  // -------------------------------
+  // Horizontal Crosshair Line Options
+  // -------------------------------
+
+  // Horizontal line width dropdown (values 1–10)
+  this.addDropdown("Horizontal Line Width", widthOptions, (selected: string| LineWidth) => {
+    const newWidth = parseInt(selected as string , 10);
+    this.handler.chart.applyOptions({
+      crosshair: { horzLine: { width: newWidth as LineWidth } },
+    });
+  });
+  // Horizontal line style dropdown.
+  this.addDropdown("Horizontal Line Style", lineStyleOptions, (selected: string | LineStyle) => {
+    this.handler.chart.applyOptions({
+      crosshair: { horzLine: { style: selected as LineStyle} },
+    });
+  });
+
+  // Horizontal line color picker.
+  const horzLineColor: string = this.getCurrentOptionValue("crosshair.horzLine.color") || "#9B7DFF";
+  this.addColorPicker("Horizontal Line Color", horzLineColor, (newColor: string) => {
+    this.handler.chart.applyOptions({
+      crosshair: { horzLine: { color: newColor } },
+    });
+  });
+
+  // Horizontal line label background color picker.
+  const horzLabelBg: string = this.getCurrentOptionValue("crosshair.horzLine.labelBackgroundColor") || "#9B7DFF";
+  this.addColorPicker("Horizontal Label Background", horzLabelBg, (newColor: string) => {
+    this.handler.chart.applyOptions({
+      crosshair: { horzLine: { labelBackgroundColor: newColor } },
+    });
+  });
+}
+
+
+
 
   /**
    * Time Scale Options Tab  
@@ -505,11 +592,13 @@ const styleMapping: Record<string, LineStyle> = {
     });
   }
 
-  /**
+
+
+/**
    * Price Scale Options Tab  
    * Provides a dropdown for mode and checkboxes for additional options.
    */
-  private buildPriceScaleOptionsTab(): void {
+private buildPriceScaleOptionsTab(): void {
     const title = document.createElement("div");
     title.innerText = "Price Scale Options";
     title.style.fontSize = "14px";
@@ -564,81 +653,250 @@ const styleMapping: Record<string, LineStyle> = {
     });
   }
 
-  // ── Series List Tab ──
-  // This new tab lists all series. Clicking on one “opens” a new page with series settings.
-  private buildSeriesListTab(): void {
-    const title = document.createElement("div");
-    title.innerText = "Series List";
-    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
-    this.contentArea.appendChild(title);
-
-  
-    // Get all series from handler.seriesMap.
-    const seriesEntries = Array.from(this.handler.seriesMap.entries()) as [string, any][];
-    seriesEntries.forEach(([seriesName, series]) => {
-      this.addButton(seriesName, () => this.buildSeriesMenuTab(series), {
-        backgroundColor: "#444",
-        borderRadius: "8px",
-      });
-    });
-  }
-  // ── Series Menu Tab ──
-  // When a series is selected, this method “opens” a new page with its settings.
-  private buildSeriesMenuTab(series: any): void {
-    // Clear content area to simulate a new page.
+/**
+ * Demonstrates how a sub-tab might be built for “Clone Series”.
+ */
+private buildCloneSeriesTab(series: any): void {
     this.contentArea.innerHTML = "";
     const title = document.createElement("div");
-    title.innerText = "Series Settings - " + (series.options().title || "Untitled");
+    title.innerText = `Clone Series - ${series.options().title || "Untitled"}`;
     Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
     this.contentArea.appendChild(title);
-
-    // Example: allow editing the series title.
-    this.addTextInput("Title", series.options().title || "", (newTitle: string) => {
-      series.applyOptions({ title: newTitle });
-      // Optionally update seriesMap.
-      if (this.handler.seriesMap.has(series.options().title)) {
-        this.handler.seriesMap.delete(series.options().title);
-      }
-      this.handler.seriesMap.set(newTitle, series);
-    });
-
-    // Stub buttons for additional series settings:
-    this.addButton("Clone Series ▸", () => {
-      alert("Clone Series functionality not implemented in modal demo.");
-    });
-    this.addButton("Visibility Options ▸", () => {
-      alert("Visibility Options not implemented in modal demo.");
-    });
-    this.addButton("Style Options ▸", () => {
-      alert("Style Options not implemented in modal demo.");
-    });
-    this.addButton("Width Options ▸", () => {
-      alert("Width Options not implemented in modal demo.");
-    });
-    this.addButton("Color Options ▸", () => {
-      alert("Color Options not implemented in modal demo.");
-    });
-    this.addButton("Price Scale Options ▸", () => {
-      alert("Price Scale Options not implemented in modal demo.");
-    });
-    this.addButton("Primitives ▸", () => {
-      alert("Primitives not implemented in modal demo.");
-    });
-    this.addButton("Indicators ▸", () => {
-      alert("Indicators not implemented in modal demo.");
-    });
-    this.addButton("Export/Import Series Data ▸", () => {
-      alert("Export/Import Series Data not implemented in modal demo.");
-    });
-
-    // Back button to return to Series List
-    this.addButton("⤝ Back to Series List", () => this.buildSeriesListTab(), {
+  
+    // TODO: Real logic for cloning the series
+    // E.g., ask user for a name, create a new series with same config, etc.
+    const msg = document.createElement("div");
+    msg.innerText = "(Clone Series logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    // Back button
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
       backgroundColor: "#444",
     });
   }
-  private buildDefaultsListTab(): void {
+  
+  private buildVisibilityOptionsTab(series: any): void {
+    this.contentArea.innerHTML = "";
     const title = document.createElement("div");
-    title.innerText = "Default Configurations";
+    title.innerText = `Visibility Options - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+    this.contentArea.appendChild(title);
+  
+    // TODO: e.g., checkboxes for “visible”, “markers visible”, etc.
+    const msg = document.createElement("div");
+    msg.innerText = "(Visibility Options logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    // Back button
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+  
+  // Same pattern for Style Options
+  private buildStyleOptionsTab(series: any): void {
+    this.contentArea.innerHTML = "";
+    const title = document.createElement("div");
+    title.innerText = `Style Options - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+    this.contentArea.appendChild(title);
+  
+    // TODO: real style config controls
+    const msg = document.createElement("div");
+    msg.innerText = "(Style Options logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+  
+  private buildWidthOptionsTab(series: any): void {
+    this.contentArea.innerHTML = "";
+    const title = document.createElement("div");
+    title.innerText = `Width Options - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+    this.contentArea.appendChild(title);
+  
+    // TODO: e.g., numeric field for line width, bar width, etc.
+    const msg = document.createElement("div");
+    msg.innerText = "(Width Options logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+  
+  // We can reuse your existing “Series Colors” logic or open that here
+  private buildColorOptionsTab(series: any): void {
+    this.contentArea.innerHTML = "";
+    const title = document.createElement("div");
+    title.innerText = `Color Options - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+    this.contentArea.appendChild(title);
+  
+    // Because you already have a dedicated approach for color pickers,
+    // you could replicate or integrate that logic here
+    const msg = document.createElement("div");
+    msg.innerText = "(Color Options logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+  
+  private buildPrimitivesTab(series: any): void {
+    this.contentArea.innerHTML = "";
+    const title = document.createElement("div");
+    title.innerText = `Primitives - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+    this.contentArea.appendChild(title);
+  
+    // e.g., shapes or overlays
+    const msg = document.createElement("div");
+    msg.innerText = "(Primitives logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+  
+  private buildIndicatorsTab(series: any): void {
+    this.contentArea.innerHTML = "";
+    const title = document.createElement("div");
+    title.innerText = `Indicators - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+    this.contentArea.appendChild(title);
+  
+    const msg = document.createElement("div");
+    msg.innerText = "(Indicators logic not yet implemented.)";
+    msg.style.color = "#ccc";
+    msg.style.marginBottom = "12px";
+    this.contentArea.appendChild(msg);
+  
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+
+ /**
+ * Builds a Source Code tab that displays the complete source code
+ * and provides a button to download it.
+ * Also includes links to the main project's source and your modified PineTS (AGPL) repository.
+ */
+private buildSourceCodeTab(): void {
+  // Clear the content area
+  this.contentArea.innerHTML = "";
+
+  // Title for the Source Code tab
+  const title = document.createElement("div");
+  title.innerText = "Source Code";
+  title.style.fontSize = "16px";
+  title.style.fontWeight = "bold";
+  title.style.marginBottom = "12px";
+  this.contentArea.appendChild(title);
+
+  // Informational text
+  const info = document.createElement("div");
+  info.innerText = "Below is the complete source code for this project. You can also view the repositories:";
+  info.style.marginBottom = "12px";
+  this.contentArea.appendChild(info);
+
+  // Links container
+  const linksContainer = document.createElement("div");
+  linksContainer.style.marginBottom = "12px";
+  linksContainer.style.fontSize = "14px";
+
+  // Main project link
+  const mainProjectLink = document.createElement("a");
+  mainProjectLink.href = "https://github.com/EsIstJosh/lightweight-charts-python/tree/main";
+  mainProjectLink.target = "_blank";
+  mainProjectLink.style.color = "#008CBA";
+  mainProjectLink.style.textDecoration = "underline";
+  mainProjectLink.innerText = "Main Project Source";
+
+  // Separator text
+  const separator = document.createTextNode(" | ");
+
+  // Modified PineTS link (AGPL)
+  const pineTSLink = document.createElement("a");
+  pineTSLink.href = "https://github.com/EsIstJosh/PineTS";
+  pineTSLink.target = "_blank";
+  pineTSLink.style.color = "#008CBA";
+  pineTSLink.style.textDecoration = "underline";
+  pineTSLink.innerText = "Modified PineTS Source (AGPL)";
+
+  // Append links to the container
+  linksContainer.appendChild(mainProjectLink);
+  linksContainer.appendChild(separator);
+  linksContainer.appendChild(pineTSLink);
+  this.contentArea.appendChild(linksContainer);
+
+  // Create a textarea for displaying source code (replace placeholder with actual source code if available)
+  const textarea = document.createElement("textarea");
+  textarea.style.width = "100%";
+  textarea.style.height = "400px";
+  textarea.style.backgroundColor = "#444";
+  textarea.style.color = "#fff";
+  textarea.style.border = "1px solid #555";
+  textarea.style.borderRadius = "4px";
+  textarea.style.resize = "vertical";
+  textarea.value = "/* Insert your complete source code here... */";
+  this.contentArea.appendChild(textarea);
+
+  // Download button to save the source code as a file
+  const downloadBtn = document.createElement("button");
+  downloadBtn.innerText = "Download Source Code";
+  Object.assign(downloadBtn.style, {
+    padding: "8px 12px",
+    backgroundColor: "#008CBA",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    marginTop: "12px",
+  });
+  downloadBtn.onclick = () => {
+    const blob = new Blob([textarea.value], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "source-code.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  this.contentArea.appendChild(downloadBtn);
+
+  // Back button to return to the default category (for example, the first category)
+  this.addButton("⤝ Back", () => this.switchCategory(this.categories[0].id), {
+    backgroundColor: "#444",
+  });
+}
+
+  private buildSeriesMenuTab(series: any): void {
+    // Clear content area
+    this.contentArea.innerHTML = "";
+  
+    // Title
+    const title = document.createElement("div");
+    title.innerText = `Series Settings - ${series.options().title ?? "Untitled"}`;
     Object.assign(title.style, {
       fontSize: "16px",
       fontWeight: "bold",
@@ -646,54 +904,408 @@ const styleMapping: Record<string, LineStyle> = {
     });
     this.contentArea.appendChild(title);
 
-    // Suppose your Handler has a property: handler.defaultsManager
-    const defaultsManager = this.handler?.defaultsManager;
-    if (!defaultsManager) {
-      const msg = document.createElement("div");
-      msg.innerText = "No defaults manager found.";
-      msg.style.color = "#ccc";
-      this.contentArea.appendChild(msg);
+    // Title input
+    this.addTextInput("Title", series.options().title || "", (newTitle: string) => {
+      series.applyOptions({ title: newTitle });
+      // Optionally update seriesMap
+      const oldTitle = series.options().title;
+      if (oldTitle && this.handler.seriesMap.has(oldTitle)) {
+        this.handler.seriesMap.delete(oldTitle);
+      }
+      this.handler.seriesMap.set(newTitle, series);
+    });
+
+    // Sub-tabs
+    this.addButton("Clone Series ▸",       () => this.buildCloneSeriesTab(series));
+    this.addButton("Visibility Options ▸", () => this.buildVisibilityOptionsTab(series));
+    this.addButton("Style Options ▸",      () => this.buildStyleOptionsTab(series));
+    this.addButton("Width Options ▸",      () => this.buildWidthOptionsTab(series));
+    this.addButton("Color Options ▸",      () => this.buildSeriesColorsTabSingle(series));
+    this.addButton("Price Scale Options ▸",() => this.buildPriceScaleOptionsTab());
+    this.addButton("Primitives ▸",         () => this.buildPrimitivesTab(series));
+    this.addButton("Indicators ▸",         () => this.buildIndicatorsTab(series));
+    this.addButton("Export/Import Series Data ▸", () => this.buildDataExportImportTab(series));
+
+ 
+  }
+
+
+  // ─────────────────────────────────────────────────────────────
+  // 3) TAB BUILDERS
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * "Series Colors" main tab: displays color pickers for *all* series side-by-side.
+   * This is in addition to the per-series color sub-tab accessible in “Series Menu.”
+   */
+  private buildSeriesColorsTab(): void {
+    this.contentArea.innerHTML = "";
+
+    const title = document.createElement("div");
+    title.innerText = "Series Colors (All Series)";
+    Object.assign(title.style, {
+      fontSize: "16px",
+      fontWeight: "bold",
+      marginBottom: "12px",
+    });
+    this.contentArea.appendChild(title);
+
+    // Retrieve all series from your handler.seriesMap
+    const seriesEntries = Array.from(this.handler.seriesMap.entries()) as [string, any][];
+
+    if (seriesEntries.length === 0) {
+      const noSeriesMsg = document.createElement("div");
+      noSeriesMsg.innerText = "No series found.";
+      noSeriesMsg.style.color = "#ccc";
+      this.contentArea.appendChild(noSeriesMsg);
       return;
     }
 
-    // Retrieve all defaults from the manager
-    const allDefaultsMap = defaultsManager.getAll(); // a Map<string, any>
-    const allKeys = Array.from(allDefaultsMap.keys());
-    if (allKeys.length === 0) {
-      const msg = document.createElement("div");
-      msg.innerText = "No default configurations found.";
-      msg.style.color = "#ccc";
-      this.contentArea.appendChild(msg);
-      return;
-    }
-
-    // For each key, add a button to open the default options editor
-    allKeys.forEach((key) => {
-      this.addButton(
-        `Edit "${key}" Defaults`,
-        () => {
-          // We assume there's a dataMenu in your handler with openDefaultOptions(key)
-          if (this.handler.ContextMenu.dataMenu && typeof this.handler.ContextMenu.dataMenu.openDefaultOptions === "function") {
-            this.handler.ContextMenu.dataMenu.openDefaultOptions(key);
-          } else {
-            console.warn("No dataMenu or openDefaultOptions method found on handler.");
-          }
-        },
-        {
-          backgroundColor: "#444",
-          borderRadius: "8px",
-          marginBottom: "8px",
-          display: "block",
-        }
-      );
+    // For each series, create a mini color section
+    seriesEntries.forEach(([seriesName, series]) => {
+      this.buildSeriesColorSection(seriesName, series);
     });
   }
 
-  /******************************
-   * HELPER METHODS (Modern Style)
-   ******************************/
 
-  private addColorPicker(label: string, defaultColor: string, onChange: (color: string) => void) {
+private buildSeriesColorSection(seriesName: string, series: any): void {
+ const container = document.createElement("div");
+ Object.assign(container.style, {
+   border: "1px solid #444",
+   marginBottom: "8px",
+   padding: "8px",
+   borderRadius: "4px",
+ });
+
+ const header = document.createElement("div");
+ header.innerText = `Series: ${seriesName}`;
+ Object.assign(header.style, {
+   fontSize: "14px",
+   fontWeight: "bold",
+   marginBottom: "6px",
+ });
+ container.appendChild(header);
+
+ const seriesType = series.seriesType?.();
+
+ // For OHLC or Candlestick-like data
+ if (seriesType === "Candlestick" || seriesType === "Bar"|| seriesType === "Custom") {
+
+  if ("upColor" in series.options()) {
+  // Body
+  this.addSideBySideColors(
+    "Body",
+    series.options().upColor,
+    series.options().downColor,
+    (upColor, downColor) => {
+      series.applyOptions({ upColor, downColor });
+    },
+    container
+  );
+}
+if ( 'borderUpColor' in series.options()) {
+  // Borders
+    this.addSideBySideColors(
+      "Borders",
+      series.options().borderUpColor,
+      series.options().borderDownColor,
+      (upColor, downColor) => {
+        series.applyOptions({
+          borderUpColor: upColor,
+          borderDownColor: downColor,
+        });
+      },
+      container
+    );
+
+    this.addSideBySideColors(
+      "Wick",
+      series.options().wickUpColor,
+      series.options().wickDownColor,
+      (upColor, downColor) => {
+        series.applyOptions({
+          wickUpColor: upColor,
+          wickDownColor: downColor,
+        });
+      },
+      container
+    );
+  
+} } else if (seriesType === "Line") {
+   // Single color
+   const currentLineColor = series.options().color || "#ffffff";
+   this.addColorPicker(
+     "Line Color",
+     currentLineColor,
+     (newCol) => series.applyOptions({ color: newCol }),
+     container
+   );
+ } else if (seriesType === "Area") {
+   const opts = series.options();
+   // lineColor, topColor, bottomColor
+   this.addColorPicker("Line Color", opts.lineColor || "#EEEEEE", (c) => {
+     series.applyOptions({ lineColor: c });
+   }, container);
+
+   this.addColorPicker("Top Fill", opts.topColor || "#008cff44", (c) => {
+     series.applyOptions({ topColor: c });
+   }, container);
+
+   this.addColorPicker("Bottom Fill", opts.bottomColor || "#008cff00", (c) => {
+     series.applyOptions({ bottomColor: c });
+   }, container);
+ } else {
+   const msg = document.createElement("div");
+   msg.innerText = `No color settings for series type: ${seriesType}`;
+   msg.style.color = "#bbb";
+   container.appendChild(msg);
+ }
+
+ // Finally, attach container to content area
+ this.contentArea.appendChild(container);
+}
+
+  
+  
+/**
+ * A single-series “Color Options” sub-tab
+ */
+private buildSeriesColorsTabSingle(series: any): void {
+    // Clear the content area
+    this.contentArea.innerHTML = "";
+  
+    // A container for everything on this tab
+    const container = document.createElement("div");
+    Object.assign(container.style, {
+      border: "1px solid #444",
+      marginBottom: "8px",
+      padding: "8px",
+      borderRadius: "4px",
+    });
+    this.contentArea.appendChild(container);
+  
+    // Title
+    const title = document.createElement("div");
+    title.innerText = `Color Options - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, {
+      fontSize: "16px",
+      fontWeight: "bold",
+      marginBottom: "12px",
+    });
+    container.appendChild(title);
+  
+    const seriesType = series.type?.();
+  
+    if (seriesType === "Candlestick" || seriesType === "Bar"|| seriesType === "Custom") {
+
+      if ("upColor" in series.options()) {
+      // Body
+      this.addSideBySideColors(
+        "Body",
+        series.options().upColor,
+        series.options().downColor,
+        (upColor, downColor) => {
+          series.applyOptions({ upColor, downColor });
+        },
+        container
+      );
+    }
+    if ('borderUpColor' in series.options()) {
+   
+      
+        this.addSideBySideColors(
+          "Borders",
+          series.options().borderUpColor,
+          series.options().borderDownColor,
+          (upColor, downColor) => {
+            series.applyOptions({
+              borderUpColor: upColor,
+              borderDownColor: downColor,
+            });
+          },
+          container
+        );
+  
+        this.addSideBySideColors(
+          "Wick",
+          series.options().wickUpColor,
+          series.options().wickDownColor,
+          (upColor, downColor) => {
+            series.applyOptions({
+              wickUpColor: upColor,
+              wickDownColor: downColor,
+            });
+          },
+          container
+        );
+      
+    } }else if (seriesType === "Line") {
+      const currentLineColor = series.options().color || "#FFFFFF";
+      this.addColorPicker("Line Color", currentLineColor, (newColor) => {
+        series.applyOptions({ color: newColor });
+      }, container);
+      // etc...
+    } else if (seriesType === "Area") {
+      const opts = series.options();
+      // ...
+      this.addColorPicker("Line Color", opts.lineColor || "#EEEEEE", (c) => {
+        series.applyOptions({ lineColor: c });
+      }, container);
+      // ...
+    } else {
+      const unknownMsg = document.createElement("div");
+      unknownMsg.innerText = `No color settings for series type: ${seriesType}`;
+      unknownMsg.style.color = "#bbb";
+      container.appendChild(unknownMsg);
+    }
+  
+    // Back button at the bottom
+    const backBtn = document.createElement("button");
+    backBtn.innerText = "⤝ Back";
+    Object.assign(backBtn.style, {
+      backgroundColor: "#444",
+      marginTop: "16px",
+      padding: "8px 12px",
+      color: "#fff",
+      border: "none",
+      borderRadius: "4px",
+      cursor: "pointer",
+    });
+    backBtn.onclick = () => this.buildSeriesMenuTab(series);
+    container.appendChild(backBtn);
+  }
+  
+  private buildDataExportImportTab(series: any): void {
+    this.subTabSkeleton("Export/Import", series, "(Export/Import logic not yet implemented.)");
+  }
+
+  /**
+   * Helper to quickly build a “placeholder” sub-tab.
+   */
+  private subTabSkeleton(tabName: string, series: any, message: string): void {
+    this.contentArea.innerHTML = "";
+    const title = document.createElement("div");
+    title.innerText = `${tabName} - ${series.options().title || "Untitled"}`;
+    Object.assign(title.style, {
+      fontSize: "16px",
+      fontWeight: "bold",
+      marginBottom: "12px",
+    });
+    this.contentArea.appendChild(title);
+
+    const msg = document.createElement("div");
+    msg.innerText = message;
+    Object.assign(msg.style, {
+      color: "#ccc",
+      marginBottom: "12px",
+    });
+    this.contentArea.appendChild(msg);
+
+    this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
+      backgroundColor: "#444",
+    });
+  }
+
+ private buildDefaultsListTab(): void {
+  // Clear content area
+  this.contentArea.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.innerText = "Default Configurations";
+  Object.assign(title.style, {
+    fontSize: "16px",
+    fontWeight: "bold",
+    marginBottom: "12px",
+  });
+  this.contentArea.appendChild(title);
+
+  // Suppose your Handler has a property: handler.defaultsManager
+  const defaultsManager = this.handler?.defaultsManager;
+  if (!defaultsManager) {
+    const msg = document.createElement("div");
+    msg.innerText = "No defaults manager found.";
+    msg.style.color = "#ccc";
+    this.contentArea.appendChild(msg);
+    return;
+  }
+
+  // Retrieve all defaults from the manager
+  const allDefaultsMap = defaultsManager.getAll(); // a Map<string, any>
+  const allKeys = Array.from(allDefaultsMap.keys());
+  if (allKeys.length === 0) {
+    const msg = document.createElement("div");
+    msg.innerText = "No default configurations found.";
+    msg.style.color = "#ccc";
+    this.contentArea.appendChild(msg);
+    return;
+  }
+  // Add a new button for Export/Import of the chart config
+  this.addButton(
+    "Current Chart Config ▸",
+    (evt) => {
+      // You can place your logic here; for example:
+      // 1. If dataMenu is not instantiated, create it
+      if (!this.handler.ContextMenu.dataMenu) {
+        // dataMenu is hypothetical—replace with your own menu or logic
+        this.handler.ContextMenu.dataMenu = new DataMenu({
+          contextMenu: this.handler.ContextMenu,
+          handler: this.handler,
+        });
+      }
+
+      // 2. Then open the menu or export logic
+      // “Handler” is a label or ID you can pass along, depending on your needs
+      this.handler.ContextMenu.dataMenu!.openMenu(this.handler, evt, "Handler");
+    },
+    {
+      backgroundColor: "#444",
+      borderRadius: "8px",
+      marginBottom: "8px",
+      display: "block",
+    }
+  );
+  // For each key, add a button to open the default options editor
+  allKeys.forEach((key) => {
+    this.addButton(
+      `Edit "${key}" Defaults`,
+      () => {
+        // We assume there's a dataMenu in your handler with openDefaultOptions(key)
+        if (
+          this.handler.ContextMenu?.dataMenu &&
+          typeof this.handler.ContextMenu.dataMenu.openDefaultOptions === "function"
+        ) {
+          this.handler.ContextMenu.dataMenu.openDefaultOptions(key);
+        } else {
+          console.warn("No dataMenu or openDefaultOptions method found on handler.");
+        }
+      },
+      {
+        backgroundColor: "#444",
+        borderRadius: "8px",
+        marginBottom: "8px",
+        display: "block",
+      }
+    );
+  });
+
+
+}
+
+  
+
+  // ─────────────────────────────────────────────────────────────
+  // 6) HELPER METHODS
+  // ─────────────────────────────────────────────────────────────
+/**
+ * Adds a color “swatch” button that, when clicked, opens our *reusable* colorPicker menu.
+ */
+private addColorPicker(
+    label: string,
+    defaultColor: string,
+    onChange: (color: string) => void,
+    parent: HTMLElement = this.contentArea
+  ): void {
+    // Container row
     const container = document.createElement("div");
     Object.assign(container.style, {
       display: "flex",
@@ -703,25 +1315,44 @@ const styleMapping: Record<string, LineStyle> = {
       fontFamily: "sans-serif",
       fontSize: "14px",
     });
+  
+    // Label
     const lbl = document.createElement("span");
     lbl.innerText = label;
     container.appendChild(lbl);
-
-    const input = document.createElement("input");
-    input.type = "color";
-    input.value = defaultColor;
-    Object.assign(input.style, {
-      border: "none",
-      borderRadius: "8px",
-      width: "32px",
-      height: "32px",
+  
+    // Swatch (div) that shows the currently selected color
+    const swatch = document.createElement("div");
+    Object.assign(swatch.style, {
+      width: "26px",
+      height: "26px",
+      borderRadius: "4px",
       cursor: "pointer",
-      padding: "2px",
+      border: "1px solid #999",
+      backgroundColor: defaultColor,
     });
-    input.oninput = () => onChange(input.value);
-    container.appendChild(input);
-    this.contentArea.appendChild(container);
+    container.appendChild(swatch);
+  
+    // When user clicks the swatch, open the REUSABLE colorPicker
+    swatch.addEventListener("click", (ev: MouseEvent) => {
+      // 1) Update the colorPicker's current color and callback
+      this.colorPicker!.update(swatch.style.backgroundColor, (newColor) => {
+        // We'll also set the swatch's background to the newly chosen color
+        swatch.style.backgroundColor = newColor;
+        onChange(newColor);
+      });
+  
+      // 2) Open the colorPicker near the clicked swatch
+      this.colorPicker!.openMenu(ev, swatch.offsetWidth, (newColor) => {
+        // This "applySelection" callback is also triggered whenever the user picks a color
+        swatch.style.backgroundColor = newColor;
+        onChange(newColor);
+      });
+    });
+  
+    parent.appendChild(container);
   }
+  
   /**
    * Adds a dropdown (select) control.
    */
@@ -754,7 +1385,7 @@ const styleMapping: Record<string, LineStyle> = {
     container.appendChild(select);
     this.contentArea.appendChild(container);
   }
-  private addButton(label: string, onClick: () => void, customStyle?: Partial<CSSStyleDeclaration>) {
+  private addButton(label: string, onClick: (event?:MouseEvent) => void, customStyle?: Partial<CSSStyleDeclaration>) {
     const button = document.createElement("button");
     button.innerText = label;
     Object.assign(button.style, {
@@ -846,32 +1477,82 @@ const styleMapping: Record<string, LineStyle> = {
     return options;
   }
 
-  /**
-   * Toggles the chart’s background type between solid and vertical-gradient.
-   */
-  private toggleBackgroundType(): void {
-    const currentBackground = this.handler.chart.options().layout?.background;
-    let updatedBackground: any;
-
-    if (currentBackground && currentBackground.type === "solid") {
-      updatedBackground = {
-        type: ColorType.VerticalGradient,
-        topColor: "rgba(255,0,0,0.2)",
-        bottomColor: "rgba(0,255,0,0.2)",
-      };
-    } else {
-      updatedBackground = {
-        type: "solid",
-        color: "#000000",
-      };
+ /**
+ * Toggles the chart’s background type between solid and vertical-gradient.
+ */
+private toggleBackgroundType(): void {
+    // Get the current background settings
+    const currentBg = this.handler.chart.options().layout?.background;
+  
+    // If there's no background at all, define a fallback
+    if (!currentBg) {
+      // Example: default to solid white
+      this.handler.chart.applyOptions({
+        layout: {
+          background: {
+            type: ColorType.Solid,
+            color: "#FFFFFF",
+          },
+        },
+      });
+      this.buildLayoutOptionsTab();
+      return;
     }
-
-    this.handler.chart.applyOptions({
-      layout: { background: updatedBackground },
-    });
-    // Refresh the Layout Options tab so the new colors become current.
+  
+    // Check what the current background type is
+    if (currentBg.type === ColorType.Solid) {
+      // We are going from SOLID => VERTICAL GRADIENT
+  
+      // Use the current solid color as the topColor, or fallback
+      const existingSolidColor = currentBg.color || "#FFFFFF";
+  
+      // Optionally, if you previously stored a bottom color somewhere,
+      // you can retrieve that. Otherwise, pick a fallback:
+      const defaultBottom = "rgba(0,255,0,0.33)";
+  
+      const updatedBackground = {
+        type: ColorType.VerticalGradient,
+        topColor: existingSolidColor,
+        bottomColor: defaultBottom,
+      };
+  
+      this.handler.chart.applyOptions({
+        layout: { background: updatedBackground },
+      });
+    } else if (currentBg.type === ColorType.VerticalGradient) {
+      // We are going from VERTICAL GRADIENT => SOLID
+  
+      // Choose which gradient color to adopt as your new "solid" color.
+      // Often the top color is used, but you could pick bottom if you prefer.
+      const currentTop = currentBg.topColor || "#FFFFFF";
+  
+      const updatedBackground = {
+        type: ColorType.Solid,
+        color: currentTop,
+      };
+  
+      this.handler.chart.applyOptions({
+        layout: { background: updatedBackground },
+      });
+    } else {
+      // If it's some other background type or missing fields,
+      // fallback to a default
+      console.warn("Unknown background type. Falling back to solid #FFFFFF.");
+  
+      this.handler.chart.applyOptions({
+        layout: {
+          background: {
+            type: ColorType.Solid,
+            color: "#FFFFFF",
+          },
+        },
+      });
+    }
+  
+    // Finally, refresh the Layout Options tab so the new colors become current.
     this.buildLayoutOptionsTab();
   }
+  
 
    /***********************************************************
      * 4. Helper Methods for UI Controls
@@ -908,4 +1589,239 @@ const styleMapping: Record<string, LineStyle> = {
         container.appendChild(input);
         this.contentArea.appendChild(container);
       }
+
+  /**
+   * Adds two color swatches for “Up” and “Down” colors, plus a checkbox
+   * that toggles both to alpha=0. Uses the single ColorPicker instance.
+   */
+  private addSideBySideColors(
+    label: string,
+    defaultUpColor: string,
+    defaultDownColor: string,
+    onChange: (upColor: string, downColor: string) => void,
+    parent: HTMLElement = this.contentArea
+  ): void {
+    // 1) Create row container for checkbox, label, and swatches
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      alignItems: "center",
+      marginBottom: "8px",
+      gap: "12px",
+    });
+    
+    // 2) Checkbox to enable/disable alpha=0
+    const enabledCheck = document.createElement("input");
+    enabledCheck.type = "checkbox";
+    enabledCheck.checked = true; // Start “enabled”
+    row.appendChild(enabledCheck);
+
+    // 3) Label
+    const lbl = document.createElement("span");
+    lbl.innerText = label;
+    Object.assign(lbl.style, { minWidth: "60px" });
+    row.appendChild(lbl);
+
+    // 4) Container for the up/down swatches
+    const pickersContainer = document.createElement("div");
+    Object.assign(pickersContainer.style, {
+      display: "flex",
+      gap: "8px",
+    });
+    row.appendChild(pickersContainer);
+
+    // Track the “current” colors
+    let currentUpColor = defaultUpColor;
+    let currentDownColor = defaultDownColor;
+
+    // Track the “saved” real colors (we restore these if user re-checks)
+    let savedUpColor = defaultUpColor;
+    let savedDownColor = defaultDownColor;
+
+    // 5) Create the two swatches (Up and Down)
+    const upSwatch = document.createElement("div");
+    Object.assign(upSwatch.style, {
+      width: "32px",
+      height: "32px",
+      borderRadius: "4px",
+      cursor: "pointer",
+      border: "1px solid #999",
+      backgroundColor: currentUpColor,
+    });
+
+    const downSwatch = document.createElement("div");
+    Object.assign(downSwatch.style, {
+      width: "32px",
+      height: "32px",
+      borderRadius: "4px",
+      cursor: "pointer",
+      border: "1px solid #999",
+      backgroundColor: currentDownColor,
+    });
+
+    pickersContainer.appendChild(upSwatch);
+    pickersContainer.appendChild(downSwatch);
+
+    // Helper: notify the outside world about color changes
+    const fireChange = () => {
+      onChange(currentUpColor, currentDownColor);
+    };
+
+    // 6) Checkbox logic: alpha=0 when unchecked, restore when checked
+    enabledCheck.addEventListener("change", () => {
+      if (enabledCheck.checked) {
+        // Re-enabling -> restore saved colors
+        currentUpColor = savedUpColor;
+        currentDownColor = savedDownColor;
+      } else {
+        // Disabling -> remember real colors, set alpha=0
+        savedUpColor = currentUpColor;
+        savedDownColor = currentDownColor;
+
+        // If you want to use your setOpacity(...) function:
+        currentUpColor = setOpacity(currentUpColor, 0);
+        currentDownColor = setOpacity(currentDownColor, 0);
+        
+        // Or if you'd prefer to use the colorPicker's logic, you'd replicate it here.
+      }
+
+      upSwatch.style.backgroundColor = currentUpColor;
+      downSwatch.style.backgroundColor = currentDownColor;
+      fireChange();
+    });
+
+    // 7) Using the single ColorPicker each time user clicks a swatch
+    //    We'll show an example for the "Up" swatch
+    upSwatch.addEventListener("click", (evt: MouseEvent) => {
+      // If user clicks while disabled, let's re-enable first
+      if (!enabledCheck.checked) {
+        enabledCheck.checked = true;
+        enabledCheck.dispatchEvent(new Event("change")); 
+        // triggers the logic above to restore alpha
+      }
+
+      // Now open the color picker with the current color
+      this.colorPicker!.update(currentUpColor, (newColor) => {
+        // Called as the user picks a color
+        currentUpColor = newColor;
+        upSwatch.style.backgroundColor = newColor;
+        fireChange();
+      });
+
+      // Position the color picker near the swatch
+      this.colorPicker!.openMenu(evt, upSwatch.offsetWidth, (finalColor) => {
+        // "applySelection" final callback
+        currentUpColor = finalColor;
+        upSwatch.style.backgroundColor = finalColor;
+        fireChange();
+      });
+    });
+
+    // 8) Similarly for the "Down" swatch
+    downSwatch.addEventListener("click", (evt: MouseEvent) => {
+      if (!enabledCheck.checked) {
+        enabledCheck.checked = true;
+        enabledCheck.dispatchEvent(new Event("change"));
+      }
+
+      this.colorPicker!.update(currentDownColor, (newColor) => {
+        currentDownColor = newColor;
+        downSwatch.style.backgroundColor = newColor;
+        fireChange();
+      });
+      this.colorPicker!.openMenu(evt, downSwatch.offsetWidth, (finalColor) => {
+        currentDownColor = finalColor;
+        downSwatch.style.backgroundColor = finalColor;
+        fireChange();
+      });
+    });
+
+    // 9) Finally, append the row to the parent
+    parent.appendChild(row);
+  }
+      
+    }
+
+
+/**
+ * Recursively walk through an object, looking for any key that includes "color".
+ * When found, invoke a callback with the key path and value.
+ *
+ * @param obj The object to inspect (e.g., a series's options object).
+ * @param callback A function to call whenever a property name has "color".
+ * @param parentKey Internal use: tracks the current path (e.g. "candles.border").
+ */
+function findColorOptions(
+    obj: Record<string, any>,
+    callback: (fullPath: string, value: any) => void,
+    parentKey: string = ""
+): void {
+    for (const key of Object.keys(obj)) {
+        const fullPath = parentKey ? `${parentKey}.${key}` : key;
+        const value = obj[key];
+
+        // If the value is another object, recurse deeper
+        if (typeof value === "object" && value !== null) {
+            findColorOptions(value, callback, fullPath);
+        } else {
+            // If the key itself contains "color", report it
+            if (key.toLowerCase().includes("color")) {
+                callback(fullPath, value);
+            }
+        }
+    }
 }
+
+/**
+ * Iterates through each series in handler.seriesMap.
+ * For each series, walks through its .options(), searching for property keys containing "color".
+ */
+function logSeriesColorsFromMap(this: any): void {
+    // Make sure seriesMap exists
+    if (!this.handler || !this.handler.seriesMap) {
+        console.warn("No seriesMap found on handler.");
+        return;
+    }
+
+    // Convert the Map to an array of [seriesName, seriesObject]
+    const seriesEntries = Array.from(this.handler.seriesMap.entries()) as [string, any][];
+
+    if (seriesEntries.length === 0) {
+        console.warn("Series map is empty. No series found.");
+        return;
+    }
+
+    // Loop over each series
+    for (const [seriesName, series] of seriesEntries) {
+        const seriesOptions = series.options?.();
+        // If .options() doesn’t exist, skip
+        if (!seriesOptions) {
+            console.warn(`Series "${seriesName}" has no options() method.`);
+            continue;
+        }
+
+        console.group(`Color keys for Series: "${seriesName}"`);
+        
+        // Recursively find any property that has "color" in its key
+        findColorOptions(seriesOptions, (path, val) => {
+            console.log(`Found color: ${path} =`, val);
+        });
+
+        console.groupEnd();
+    }
+}
+
+/* 
+  Example usage somewhere in your code:
+  
+  logSeriesColorsFromMap.call(this);
+
+  This will print to the console something like:
+
+    > Color keys for Series: "MyCandles"
+      Found color: upColor = "#1565C0"
+      Found color: downColor = "#8B4513"
+      Found color: borderUpColor = "#00FF00"
+      Found color: borderDownColor = "#FF0000"
+      ...
+*/
