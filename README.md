@@ -95,10 +95,13 @@
 
 
 
+## License
 
+Unless otherwise stated, all code in this repository is licensed under the MIT License.
 
+Additional license: See the [AGPL License](./AGPL_LICENSE) for specific components covered under AGPL.
 
-    
+For full details, refer to the [MIT License](./MIT_LICENSE).
 ---####################################################################################---
 ## Original 
 
