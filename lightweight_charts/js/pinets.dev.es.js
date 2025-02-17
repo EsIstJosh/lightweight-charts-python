@@ -18,26 +18,25 @@
 import * as acorn from 'acorn';
 import * as walk from 'acorn-walk';
 import * as astring from 'astring';
-import yahooFinance from 'yahoo-finance2';
 
-var __defProp$8 = Object.defineProperty;
-var __defNormalProp$8 = (obj, key, value) => key in obj ? __defProp$8(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$8 = (obj, key, value) => __defNormalProp$8(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$7 = Object.defineProperty;
+var __defNormalProp$7 = (obj, key, value) => key in obj ? __defProp$7(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$7 = (obj, key, value) => __defNormalProp$7(obj, typeof key !== "symbol" ? key + "" : key, value);
 class ScopeManager {
   constructor() {
-    __publicField$8(this, "scopes", []);
-    __publicField$8(this, "scopeTypes", []);
-    __publicField$8(this, "scopeCounts", /* @__PURE__ */ new Map());
-    __publicField$8(this, "contextBoundVars", /* @__PURE__ */ new Set());
-    __publicField$8(this, "arrayPatternElements", /* @__PURE__ */ new Set());
-    __publicField$8(this, "rootParams", /* @__PURE__ */ new Set());
-    __publicField$8(this, "varKinds", /* @__PURE__ */ new Map());
-    __publicField$8(this, "loopVars", /* @__PURE__ */ new Set());
-    __publicField$8(this, "loopVarNames", /* @__PURE__ */ new Map());
+    __publicField$7(this, "scopes", []);
+    __publicField$7(this, "scopeTypes", []);
+    __publicField$7(this, "scopeCounts", /* @__PURE__ */ new Map());
+    __publicField$7(this, "contextBoundVars", /* @__PURE__ */ new Set());
+    __publicField$7(this, "arrayPatternElements", /* @__PURE__ */ new Set());
+    __publicField$7(this, "rootParams", /* @__PURE__ */ new Set());
+    __publicField$7(this, "varKinds", /* @__PURE__ */ new Map());
+    __publicField$7(this, "loopVars", /* @__PURE__ */ new Set());
+    __publicField$7(this, "loopVarNames", /* @__PURE__ */ new Map());
     // Map original names to transformed names
-    __publicField$8(this, "paramIdCounter", 0);
-    __publicField$8(this, "cacheIdCounter", 0);
-    __publicField$8(this, "tempVarCounter", 0);
+    __publicField$7(this, "paramIdCounter", 0);
+    __publicField$7(this, "cacheIdCounter", 0);
+    __publicField$7(this, "tempVarCounter", 0);
     this.pushScope("glb");
   }
   get nextParamIdArg() {
@@ -1496,9 +1495,9 @@ function transpile(fn) {
   return _wraperFunction(this);
 }
 
-var __defProp$7 = Object.defineProperty;
-var __defNormalProp$7 = (obj, key, value) => key in obj ? __defProp$7(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$7 = (obj, key, value) => __defNormalProp$7(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$6 = Object.defineProperty;
+var __defNormalProp$6 = (obj, key, value) => key in obj ? __defProp$6(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$6 = (obj, key, value) => __defNormalProp$6(obj, typeof key !== "symbol" ? key + "" : key, value);
 class PineTS {
   constructor(source, tickerId, timeframe, limit, sDate, eDate) {
     this.source = source;
@@ -1507,25 +1506,25 @@ class PineTS {
     this.limit = limit;
     this.sDate = sDate;
     this.eDate = eDate;
-    __publicField$7(this, "data", []);
+    __publicField$6(this, "data", []);
     //#region [Pine Script built-in variables]
-    __publicField$7(this, "open", []);
-    __publicField$7(this, "high", []);
-    __publicField$7(this, "low", []);
-    __publicField$7(this, "close", []);
-    __publicField$7(this, "volume", []);
-    __publicField$7(this, "hl2", []);
-    __publicField$7(this, "hlc3", []);
-    __publicField$7(this, "ohlc4", []);
-    __publicField$7(this, "openTime", []);
-    __publicField$7(this, "closeTime", []);
+    __publicField$6(this, "open", []);
+    __publicField$6(this, "high", []);
+    __publicField$6(this, "low", []);
+    __publicField$6(this, "close", []);
+    __publicField$6(this, "volume", []);
+    __publicField$6(this, "hl2", []);
+    __publicField$6(this, "hlc3", []);
+    __publicField$6(this, "ohlc4", []);
+    __publicField$6(this, "openTime", []);
+    __publicField$6(this, "closeTime", []);
     //#endregion
     //#region run context
-    __publicField$7(this, "_periods");
+    __publicField$6(this, "_periods");
     //#endregion
     //public fn: Function;
-    __publicField$7(this, "_readyPromise", null);
-    __publicField$7(this, "_ready", false);
+    __publicField$6(this, "_readyPromise", null);
+    __publicField$6(this, "_ready", false);
     this._readyPromise = new Promise((resolve) => {
       this.loadMarketData(source, tickerId, timeframe, limit, sDate, eDate).then((data) => {
         const marketData = data.reverse();
@@ -1631,13 +1630,13 @@ class PineTS {
   }
 }
 
-var __defProp$6 = Object.defineProperty;
-var __defNormalProp$6 = (obj, key, value) => key in obj ? __defProp$6(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$6 = (obj, key, value) => __defNormalProp$6(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$5 = Object.defineProperty;
+var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, typeof key !== "symbol" ? key + "" : key, value);
 class Core {
   constructor(context) {
     this.context = context;
-    __publicField$6(this, "color", {
+    __publicField$5(this, "color", {
       param: (source, index = 0) => {
         if (Array.isArray(source)) {
           return source[index];
@@ -1763,13 +1762,13 @@ class Input {
   }
 }
 
-var __defProp$5 = Object.defineProperty;
-var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$4 = Object.defineProperty;
+var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, typeof key !== "symbol" ? key + "" : key, value);
 class PineMath {
   constructor(context) {
     this.context = context;
-    __publicField$5(this, "_cache", {});
+    __publicField$4(this, "_cache", {});
   }
   param(source, index, name) {
     if (!this.context.params[name]) this.context.params[name] = [];
@@ -1860,14 +1859,14 @@ class PineMath {
   }
 }
 
-var __defProp$4 = Object.defineProperty;
-var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$3 = Object.defineProperty;
+var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, typeof key !== "symbol" ? key + "" : key, value);
 const TIMEFRAMES = ["1", "3", "5", "15", "30", "45", "60", "120", "180", "240", "D", "W", "M"];
 class PineRequest {
   constructor(context) {
     this.context = context;
-    __publicField$4(this, "_cache", {});
+    __publicField$3(this, "_cache", {});
   }
   param(source, index, name) {
     if (!this.context.params[name]) this.context.params[name] = [];
@@ -2425,9 +2424,9 @@ function calculateSupertrend(high, low, close, factor, atrPeriod) {
   return [supertrend, direction];
 }
 
-var __defProp$3 = Object.defineProperty;
-var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$2 = Object.defineProperty;
+var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, typeof key !== "symbol" ? key + "" : key, value);
 class PineArrayObject {
   constructor(array) {
     this.array = array;
@@ -2436,7 +2435,7 @@ class PineArrayObject {
 class PineArray {
   constructor(context) {
     this.context = context;
-    __publicField$3(this, "_cache", {});
+    __publicField$2(this, "_cache", {});
   }
   param(source, index = 0) {
     if (Array.isArray(source)) {
@@ -2617,9 +2616,9 @@ class PineArray {
   }
 }
 
-var __defProp$2 = Object.defineProperty;
-var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp$1 = Object.defineProperty;
+var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, typeof key !== "symbol" ? key + "" : key, value);
 class Context {
   constructor({
     marketData,
@@ -2630,7 +2629,7 @@ class Context {
     sDate,
     eDate
   }) {
-    __publicField$2(this, "data", {
+    __publicField$1(this, "data", {
       open: [],
       high: [],
       low: [],
@@ -2640,31 +2639,31 @@ class Context {
       hlc3: [],
       ohlc4: []
     });
-    __publicField$2(this, "cache", {});
-    __publicField$2(this, "useTACache", false);
-    __publicField$2(this, "NA", NaN);
-    __publicField$2(this, "math");
-    __publicField$2(this, "ta");
-    __publicField$2(this, "input");
-    __publicField$2(this, "request");
-    __publicField$2(this, "array");
-    __publicField$2(this, "core");
-    __publicField$2(this, "lang");
-    __publicField$2(this, "idx", 0);
-    __publicField$2(this, "params", {});
-    __publicField$2(this, "const", {});
-    __publicField$2(this, "var", {});
-    __publicField$2(this, "let", {});
-    __publicField$2(this, "result");
-    __publicField$2(this, "plots", {});
-    __publicField$2(this, "marketData");
-    __publicField$2(this, "source");
-    __publicField$2(this, "tickerId");
-    __publicField$2(this, "timeframe", "");
-    __publicField$2(this, "limit");
-    __publicField$2(this, "sDate");
-    __publicField$2(this, "eDate");
-    __publicField$2(this, "pineTSCode");
+    __publicField$1(this, "cache", {});
+    __publicField$1(this, "useTACache", false);
+    __publicField$1(this, "NA", NaN);
+    __publicField$1(this, "math");
+    __publicField$1(this, "ta");
+    __publicField$1(this, "input");
+    __publicField$1(this, "request");
+    __publicField$1(this, "array");
+    __publicField$1(this, "core");
+    __publicField$1(this, "lang");
+    __publicField$1(this, "idx", 0);
+    __publicField$1(this, "params", {});
+    __publicField$1(this, "const", {});
+    __publicField$1(this, "var", {});
+    __publicField$1(this, "let", {});
+    __publicField$1(this, "result");
+    __publicField$1(this, "plots", {});
+    __publicField$1(this, "marketData");
+    __publicField$1(this, "source");
+    __publicField$1(this, "tickerId");
+    __publicField$1(this, "timeframe", "");
+    __publicField$1(this, "limit");
+    __publicField$1(this, "sDate");
+    __publicField$1(this, "eDate");
+    __publicField$1(this, "pineTSCode");
     this.marketData = marketData;
     this.source = source;
     this.tickerId = tickerId;
@@ -2750,9 +2749,9 @@ class Context {
   //#endregion
 }
 
-var __defProp$1 = Object.defineProperty;
-var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 const BINANCE_API_URL = "https://api.binance.com/api/v3";
 const timeframe_to_binance = {
   "1": "1m",
@@ -2790,10 +2789,10 @@ const timeframe_to_binance = {
   M: "1M"
   // 1 month
 };
-class CacheManager$1 {
+class CacheManager {
   constructor(cacheDuration = 5 * 60 * 1e3) {
-    __publicField$1(this, "cache");
-    __publicField$1(this, "cacheDuration");
+    __publicField(this, "cache");
+    __publicField(this, "cacheDuration");
     this.cache = /* @__PURE__ */ new Map();
     this.cacheDuration = cacheDuration;
   }
@@ -2832,8 +2831,8 @@ class CacheManager$1 {
 }
 class BinanceProvider {
   constructor() {
-    __publicField$1(this, "cacheManager");
-    this.cacheManager = new CacheManager$1(5 * 60 * 1e3);
+    __publicField(this, "cacheManager");
+    this.cacheManager = new CacheManager(5 * 60 * 1e3);
   }
   async getMarketDataInterval(tickerId, timeframe, sDate, eDate) {
     try {
@@ -2942,197 +2941,9 @@ class BinanceProvider {
   }
 }
 
-var __defProp = Object.defineProperty;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-class CacheManager {
-  constructor(cacheDuration = 5 * 60 * 1e3) {
-    __publicField(this, "cache");
-    __publicField(this, "cacheDuration");
-    this.cache = /* @__PURE__ */ new Map();
-    this.cacheDuration = cacheDuration;
-  }
-  generateKey(params) {
-    return Object.entries(params).filter(([_, value]) => value !== void 0).map(([key, value]) => `${key}:${value}`).join("|");
-  }
-  get(params) {
-    const key = this.generateKey(params);
-    const cached = this.cache.get(key);
-    if (!cached) return null;
-    if (Date.now() - cached.timestamp > this.cacheDuration) {
-      this.cache.delete(key);
-      return null;
-    }
-    return cached.data;
-  }
-  set(params, data) {
-    const key = this.generateKey(params);
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now()
-    });
-  }
-  clear() {
-    this.cache.clear();
-  }
-  /**
-   * Optional: Remove expired entries.
-   */
-  cleanup() {
-    const now = Date.now();
-    for (const [key, entry] of this.cache.entries()) {
-      if (now - entry.timestamp > this.cacheDuration) {
-        this.cache.delete(key);
-      }
-    }
-  }
-}
-const timeframe_to_yfinance = {
-  "1": "1m",
-  "3": "2m",
-  // Yahoo Finance doesn't support a 3-minute interval directly
-  "5": "5m",
-  "15": "15m",
-  "30": "30m",
-  "60": "1h",
-  "1H": "1h",
-  "1D": "1d",
-  "D": "1d",
-  "1W": "1wk",
-  "W": "1wk",
-  "1M": "1mo",
-  "M": "1mo"
-};
-class YFinanceProvider {
-  constructor() {
-    __publicField(this, "cacheManager");
-    this.cacheManager = new CacheManager(5 * 60 * 1e3);
-  }
-  /**
-   * Retrieves market data for the given ticker and timeframe.
-   *
-   * If start (sDate) and end (eDate) dates are provided, they are used to limit the data;
-   * otherwise, a default range (1 month) is used.
-   *
-   * @param tickerId - The ticker symbol (e.g., "AAPL").
-   * @param timeframe - The timeframe identifier (e.g., "1", "5", "1D").
-   * @param limit - Optional limit (ignored if sDate and eDate are provided).
-   * @param sDate - Optional start date in milliseconds.
-   * @param eDate - Optional end date in milliseconds.
-   * @returns A promise that resolves to an array of market data objects.
-   */
-  async getMarketData(tickerId, timeframe, limit, sDate, eDate) {
-    try {
-      const cacheParams = { tickerId, timeframe, limit, sDate, eDate };
-      const cachedData = this.cacheManager.get(cacheParams);
-      if (cachedData) {
-        console.log("YFinance cache hit:", tickerId, timeframe, limit, sDate, eDate);
-        return cachedData;
-      }
-      const queryOptions = {};
-      const interval = timeframe_to_yfinance[timeframe.toUpperCase()];
-      if (!interval) {
-        console.error(`Unsupported timeframe for YFinance: ${timeframe}`);
-        return [];
-      }
-      queryOptions.interval = interval;
-      if (sDate && eDate) {
-        queryOptions.period1 = Math.floor(sDate / 1e3);
-        queryOptions.period2 = Math.floor(eDate / 1e3);
-      } else {
-        queryOptions.range = "1mo";
-      }
-      const result = await yahooFinance.historical(tickerId, queryOptions);
-      const data = result.map((item) => ({
-        time: new Date(item.date).getTime(),
-        // Convert date to milliseconds
-        open: item.open,
-        high: item.high,
-        low: item.low,
-        close: item.close,
-        volume: item.volume
-      }));
-      this.cacheManager.set(cacheParams, data);
-      return data;
-    } catch (error) {
-      console.error("Error in YFinanceProvider.getMarketData:", error);
-      return [];
-    }
-  }
-}
-
-class CSVProvider {
-  async getMarketData(tickerId, timeframe, limit, sDate, eDate) {
-    try {
-      const fileInput = document.createElement("input");
-      fileInput.type = "file";
-      fileInput.accept = ".csv";
-      fileInput.style.display = "none";
-      document.body.appendChild(fileInput);
-      const file = await new Promise((resolve, reject) => {
-        fileInput.addEventListener("change", () => {
-          if (fileInput.files && fileInput.files.length > 0) {
-            resolve(fileInput.files[0]);
-          } else {
-            reject(new Error("No file selected."));
-          }
-        });
-        fileInput.click();
-      });
-      document.body.removeChild(fileInput);
-      const csvText = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === "string") {
-            resolve(reader.result);
-          } else {
-            reject(new Error("File content is not a string."));
-          }
-        };
-        reader.onerror = (error) => reject(error);
-        reader.readAsText(file);
-      });
-      const parsedData = parseCSV(csvText);
-      const filteredData = parsedData.filter((row) => {
-        const time = Number(row.time);
-        if (sDate && time < sDate) return false;
-        if (eDate && time > eDate) return false;
-        return true;
-      });
-      return filteredData;
-    } catch (error) {
-      console.error("Error in CSVProvider.getMarketData:", error);
-      return [];
-    }
-  }
-}
-function parseCSV(csvText) {
-  const lines = csvText.split(/\r?\n/).filter((line) => line.trim() !== "");
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim());
-  const data = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(",").map((v) => v.trim());
-    if (values.length !== headers.length) continue;
-    const row = {};
-    headers.forEach((header, index) => {
-      row[header] = values[index];
-    });
-    if (row.time) row.time = Number(row.time);
-    if (row.open) row.open = Number(row.open);
-    if (row.high) row.high = Number(row.high);
-    if (row.low) row.low = Number(row.low);
-    if (row.close) row.close = Number(row.close);
-    if (row.volume) row.volume = Number(row.volume);
-    data.push(row);
-  }
-  return data;
-}
-
 const Provider = {
-  Binance: new BinanceProvider(),
-  yFinance: new YFinanceProvider(),
-  CSVProvider: new CSVProvider()
+  Binance: new BinanceProvider()
+  //TODO : add other providers (polygon, etc.)
 };
 
 export { Context, PineTS, Provider };

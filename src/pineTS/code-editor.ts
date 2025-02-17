@@ -11,8 +11,11 @@
 
 
 import * as monaco from "monaco-editor";
-import {PineTS, Provider} from "pinets"
+import {PineTS, Context} from "pinets"
 import { Handler } from "../general/handler";
+import { convertTime, formattedDateAndTime } from "../helpers/time";
+import { ISeriesApi } from "lightweight-charts";
+
 
 /**
  * CodeEditor creates a bottom-docked pane-style Monaco Editor.
@@ -116,21 +119,8 @@ export class CodeEditor {
     };
     actionsContainer.appendChild(executeButton);
 
-    // Add to Chart button.
-    const addToChartButton = document.createElement("button");
-    addToChartButton.innerText = "Add to Chart";
-    Object.assign(addToChartButton.style, {
-      backgroundColor: "#2196f3",
-      color: "white",
-      border: "none",
-      padding: "5px 10px",
-      cursor: "pointer",
-    });
-    addToChartButton.onclick = () => {
-      // Call the integrated add-to-chart method.
-      this.addPineTSToChart();
-    };
-    actionsContainer.appendChild(addToChartButton);
+
+ 
 
     // Append left container (title + actions) and then the close button.
     leftContainer.appendChild(actionsContainer);
@@ -174,7 +164,20 @@ export class CodeEditor {
    */
   private initializeMonaco(): void {
     this.editorInstance = monaco.editor.create(this.editorDiv, {
-      value: "Feature not implemented yet",
+      value: `
+/*
+ * @EsIstJosh
+ * This feature implements a variation of PineTS, source : <https://github.com/alaa-eddine/PineTS> and is 
+ * licensed under the GNU AGPL v3.0. V
+ * 
+ * Note: This file imports modules that remain under the MIT license (e.g., from the original project).
+ * The original MIT license text is included in the MIT_LICENSE file in the repository.
+ *
+ * For the full text of the GNU AGPL v3.0, see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+//-----------------Work in Progress, Not Functional Yet-------------------//
+
+      `,
       language: "typescript",
       theme: "vs-dark",
       automaticLayout: true,
@@ -214,57 +217,74 @@ export class CodeEditor {
     return this.editorInstance?.getValue() || "";
   }
 
-  /**
-   * Executes the PineTS code from the editor.
-   * It compiles the code into a function that accepts 'context', runs it via PineTS,
-   * and then adds the resulting plots to the chart using the global Handler instance.
-   */
   public async executePineTS(): Promise<void> {
     try {
-      const code = this.getValue();
-      const userCallback = new Function('context', code) as (context: any) => any;
-      
-      // Create a new PineTS instance (adjust parameters as needed).
-      const pineTS = new PineTS(Provider.yFinance, 'BTCUSDT', 'D', 100);
-      
-      // Run the indicator code.
-      const { result, plots } = await pineTS.run(userCallback);
-      console.log("PineTS execution result:", result);
-      
-      // Use the Handler passed via constructor.
-      for (const plotName in plots) {
-        if (plots.hasOwnProperty(plotName)) {
-          addPlotToHandler(this.handler, plotName, plots[plotName]);
-        }
-      }
-    } catch (error) {
-      console.error("Error executing PineTS code:", error);
-    }
-  }
+        const code = this.getValue(); // Code as a string from the editor.
+        // If you need to create a dynamic userCallback, you can uncomment and adapt the following lines:
+        /*
+        const userCallback = new Function(
+            'context',
+            `return (async () => { 
+                console.log("Received context:", context);
+                const { close, high, low } = context.data; // import OHLCV data
+                const { plot, plotchar, nz, color } = context.core; // import core functions
+                const ta = context.ta; // import technical analysis namespace
+                const math = context.math; // import math namespace
+                const input = context.input; // import input namespace
+                ${code}
+            })();`
+        ) as (context: any) => Promise<any>;
+        */
 
-  /**
-   * Adds or updates the chart series using the PineTS code from the editor.
-   * The logic is similar to executePineTS; you can modify it to update existing series if desired.
-   */
-  public async addPineTSToChart(): Promise<void> {
-    try {
-      const code = this.getValue();
-      const userCallback = new Function('context', code) as (context: any) => any;
-      const pineTS = new PineTS(Provider.yFinance, 'BTCUSDT', 'D', 100);
-      const { result, plots } = await pineTS.run(userCallback);
-      console.log("PineTS run (Add to Chart) result:", result);
-      
-      for (const plotName in plots) {
-        if (plots.hasOwnProperty(plotName)) {
-          // For simplicity, we're adding a new series.
-          // You can add logic to check for an existing series and update it.
-          addPlotToHandler(this.handler, plotName, plots[plotName]);
+        // Prepare data
+        const data = [...this.handler.series.data()];
+        const sDate = data[0].time;
+        const eDate = data[data.length - 1].time;
+
+        // Instantiate PineTS
+        const pineTS = new PineTS(
+            [...transformDataToArray([...this.handler.series.data()], [...this.handler.volumeSeries.data()])],
+            this.handler.series.options().title,
+            '1D',
+            400,
+            convertTime(sDate),
+            convertTime(eDate)
+        );
+
+        // Run your indicator exactly once
+        const { plots } = await pineTS.run((context: Context) => {
+            try {
+                const { close, high, low } = context.data;
+
+                const ta = context.ta;
+                const math = context.math;
+                const input = context.input;
+                const { plot, plotchar, nz, color } = context.core;
+                //-------------------------------------------------//
+                const ema = ta.ema(close,21)
+                plot(ema,{ color:#ff0000, style: "line", linewidth: 2 })
+                
+
+            } catch (error) {
+                console.error('Error inside Squeeze Momentum logic:', error);
+            }
+        });
+        console.log(plots)
+
+
+        // Update the chart with the resulting plots
+        for (const plotName in plots) {
+            if (plots.hasOwnProperty(plotName)) {
+                addPlotToHandler(this.handler, plotName, plots[plotName]);
+            }
         }
-      }
+
     } catch (error) {
-      console.error("Error executing PineTS code (Add to Chart):", error);
+        console.error('Error executing PineTS code:', error);
     }
-  }
+}
+
+
 
   /**
    * Handler for the start of a drag event on the resizer.
@@ -346,11 +366,11 @@ export function addPlotToHandler(handler: Handler, plotName: string, plotObj: an
         createdSeries = handler.createLineSeries(plotName, baseOptions);
         break;
     }
-  
+    const baseData : any[] = [...(handler.series as ISeriesApi<'Candlestick'>).data()] 
     // 3) Convert PineTS data into a format Lightweight Charts expects: { time, value, color? }
     //    PineTS often uses milliseconds. Lightweight Charts expects 'time' in seconds or a Date-like object.
-    const seriesData = data.map((pt: any) => ({
-      time: Math.floor(pt.time / 1000), // convert ms -> seconds
+    const seriesData = data.map((pt: any,idx:number) => ({
+      time: baseData[idx].time, // convert ms -> seconds
       value: pt.value,
       // If you want per-point color, pass 'color' here. The series must support it (e.g. histogram).
       color: pt.color ?? options?.color,
@@ -359,4 +379,38 @@ export function addPlotToHandler(handler: Handler, plotName: string, plotObj: an
     // 4) Set data on the newly created series
     createdSeries.series.setData(seriesData);
   }
-  
+
+/**
+ * Transforms an array of data objects (each containing at least a "time" field and OHLCV values)
+ * into an array of objects with added "openTime" and "closeTime" fields.
+ * If volume is missing on an item, it attempts to use a corresponding value from volumeData.
+ *
+ * @param data Array of data objects.
+ * @param volumeData Array of volume data objects (optional).
+ * @returns An array of transformed data objects.
+ */
+function transformDataToArray(data: any[], volumeData: any[] = []): any[] {
+  return data.map((item, idx) => {
+    // Parse the "time" field into a timestamp.
+    let parsedTime: number;
+    if (typeof item.time === "number") {
+      parsedTime = item.time;
+    } else {
+      parsedTime = new Date(item.time).getTime();
+    }
+    if (isNaN(parsedTime)) {
+      console.warn(`Invalid time format: ${item.time}`);
+      return null; // Skip this item if time is invalid.
+    }
+
+    return {
+      ...item,
+      openTime: parsedTime,
+      closeTime: parsedTime + 86400, // 1 second (1000ms) before openTime.
+      // Parse volume; if missing, try to use volumeData.
+      volume: item.volume !== undefined 
+        ? Number(item.volume) 
+        : (volumeData[idx] !== undefined ? Number(volumeData[idx].value) : 0)
+    };
+  }).filter(item => item !== null);
+}

@@ -17,12 +17,9 @@ import { LegendItem, LegendSeries, LegendGroup, openEye, closedEye, LegendPrimit
 import { ISeriesApiExtended } from "../helpers/series";
 import { ContextMenu } from "../context-menu/context-menu";
 import { LegendMenu } from "../context-menu/legend-menu";
-import { isISeriesApi, isLegendPrimitive } from "../helpers/typeguards";
+import { isISeriesApi } from "../helpers/typeguards";
 
 type LegendEntry = LegendSeries | LegendGroup | LegendPrimitive;
-
-// Cache to store the last data point for each series
-const lastSeriesDataCache = new Map<ISeriesApi<SeriesType>, any>();
 
 function getLastData(series: ISeriesApi<SeriesType>) {
     return series.data()[series.data().length - 1]
@@ -32,13 +29,8 @@ export class Legend {
     public div: HTMLDivElement;
     public seriesContainer: HTMLDivElement;
     public legendMenu: LegendMenu;
-
-    private ohlcEnabled: boolean = false;
-    private percentEnabled: boolean = false;
     private linesEnabled: boolean = false;
-    private colorBasedOnCandle: boolean = false;
     private contextMenu: ContextMenu;
-
     private text: HTMLSpanElement;
     public _items: LegendEntry[] = [];
     public _lines: LegendSeries[] = [];
@@ -387,8 +379,6 @@ makeSeriesRow(line: LegendSeries, container: HTMLDivElement): HTMLDivElement {
     actionButton.style.background = 'none'; // Remove default background
     actionButton.style.cursor = 'pointer'; // Indicate it's clickable
 
-    // **Set Action Button Color to Match Series Color**
-    const seriesColor = line.colors[0] || '#000'; // Default to black if no color specified
     actionButton.style.color = '#ffffff';
 
     // **Attach Click Listener to Action Button**
@@ -497,16 +487,7 @@ makeSeriesRow(line: LegendSeries, container: HTMLDivElement): HTMLDivElement {
 
     
     
-      /** Type guard to detect a LegendGroup. */
-      private isLegendGroup(entry: any): entry is LegendGroup {
-        return (entry as LegendGroup).seriesList !== undefined;
-    }
 
-    /** Type guard to detect a LegendSeries. */
-    private isLegendSeries(entry: any): entry is LegendSeries {
-        return (entry as LegendSeries).series !== undefined 
-            || (entry as LegendSeries).primitives !== undefined;
-    }
 
     /** Type guard to detect a LegendPrimitive. */
     private isLegendPrimitive(entry: any): entry is LegendPrimitive {
@@ -951,7 +932,6 @@ private renderGroup(group: LegendGroup, container: HTMLDivElement): void {
 
     // **Set Group Action Button Color to Match Group Color**
     // Use the first series' primary color or default to black
-    const groupColor = group.seriesList[0]?.colors[0] || '#000';
     groupActionButton.style.color = '#ffffff';
 
     // **Attach Click Listener to Group Action Button**

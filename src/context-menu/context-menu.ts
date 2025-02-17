@@ -125,10 +125,7 @@ export class ContextMenu {
   public div: HTMLDivElement;
   private hoverItem: Item | null;
   private items: HTMLElement[] = [];
-  private colorPicker: seriesColorPicker = new seriesColorPicker(
-    "#ff0000",
-    () => null
-  );
+  private colorPicker: seriesColorPicker | null 
   private saveDrawings: Function | null = null;
   private drawingTool: DrawingTool | null = null;
   public recentSeries: ISeriesApiExtended | null = null;
@@ -151,12 +148,19 @@ export class ContextMenu {
       this._onRightClick.bind(this)
     );
     document.body.addEventListener("click", this._onClick.bind(this));
+    const defaultColors: string[] = Array.isArray(this.handler.defaultsManager.get('colors'))? [...this.handler.defaultsManager.get('colors')]: [];        
+   this.colorPicker = new seriesColorPicker(
+      "#ff0000",
+      () => null,
+      defaultColors && defaultColors.length !== 0? defaultColors:undefined     );
+    
     //this.handler.chart.subscribeCrosshairMove((param: MouseEventParams) => {
     //  this.handleCrosshairMove(param);
     //});
     this.dataMenu = new DataMenu({contextMenu: this, handler: this.handler})
     this.SettingsModal = new SettingsModal(this.handler);
     this.setupMenu();
+
   }
   private constraints: Record<
     string,
@@ -246,15 +250,13 @@ export class ContextMenu {
   }
 
   private _onClick(ev: MouseEvent) {
-    const target = ev.target as Node;
-    const menus = [this.colorPicker];
-
-    menus.forEach((menu) => {
-      if (!menu.getElement().contains(target)) {
-        menu.closeMenu();
+      const target = ev.target as Node;
+    
+      if (this.colorPicker && !this.colorPicker.getElement().contains(target)) {
+        this.colorPicker.closeMenu();
       }
-    });
-  }
+    }
+  
 
   // series-context-menu.ts
 
@@ -1951,7 +1953,7 @@ this.addMenuItem(
   //);
 this.addMenuItem("Settings...", () => {
   this.SettingsModal!.open();
-}, false);
+}, true);
   this.showMenu(event);
 }
 

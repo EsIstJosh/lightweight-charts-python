@@ -26,32 +26,21 @@ export function isOHLCData(
   return "close" in data && "open" in data && "high" in data && "low" in data;
 }
 
-
-export function isWhitespaceData(
-  data: any
-): data is WhitespaceData<Time> {
+export function isWhitespaceData(data: any): data is WhitespaceData<Time> {
   if (!data || typeof data !== "object") {
     return false;
   }
-
   // Must have time
   if (!("time" in data)) {
     return false;
   }
-
-  // Must NOT have single-value or OHLC fields
-  if (
-    "value" in data ||
-    "open" in data ||
-    "close" in data ||
-    "high" in data ||
-    "low" in data
-  ) {
+ 
+  if ("value" in data || "open" in data || "close" in data || "high" in data || "low" in data) {
     return false;
   }
-
   return true;
 }
+
 export function hasColorOption(series: ISeriesApi<SeriesType>): boolean {
     const seriesOptions = series.options() as any;
     return 'lineColor' in seriesOptions || 'color' in seriesOptions;

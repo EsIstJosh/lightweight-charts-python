@@ -1,4 +1,4 @@
-var Lib = (function (exports, lightweightCharts, monaco, url) {
+var Lib = (function (exports, lightweightCharts, monaco) {
     'use strict';
 
     function _interopNamespaceDefault(e) {
@@ -270,6 +270,30 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         }
         return alpha;
     }
+    /**
+    * Recursively walk through an object, looking for any key that includes "color".
+    * When found, invoke a callback with the key path and value.
+    *
+    * @param obj The object to inspect (e.g., a series's options object).
+    * @param callback A function to call whenever a property name has "color".
+    * @param parentKey Internal use: tracks the current path (e.g. "candles.border").
+    */
+    function findColorOptions(obj, callback, parentKey = "") {
+        for (const key of Object.keys(obj)) {
+            const fullPath = parentKey ? `${parentKey}.${key}` : key;
+            const value = obj[key];
+            // If the value is another object, recurse deeper
+            if (typeof value === "object" && value !== null) {
+                findColorOptions(value, callback, fullPath);
+            }
+            else {
+                // If the key itself contains "color", report it
+                if (key.toLowerCase().includes("color")) {
+                    callback(fullPath, value);
+                }
+            }
+        }
+    }
 
     class ClosestTimeIndexFinder {
         numbers;
@@ -370,12 +394,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         if (!("time" in data)) {
             return false;
         }
-        // Must NOT have single-value or OHLC fields
-        if ("value" in data ||
-            "open" in data ||
-            "close" in data ||
-            "high" in data ||
-            "low" in data) {
+        if ("value" in data || "open" in data || "close" in data || "high" in data || "low" in data) {
             return false;
         }
         return true;
@@ -1018,10 +1037,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         div;
         seriesContainer;
         legendMenu;
-        ohlcEnabled = false;
-        percentEnabled = false;
         linesEnabled = false;
-        colorBasedOnCandle = false;
         contextMenu;
         text;
         _items = [];
@@ -1312,8 +1328,6 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             actionButton.style.border = 'none'; // Remove default border
             actionButton.style.background = 'none'; // Remove default background
             actionButton.style.cursor = 'pointer'; // Indicate it's clickable
-            // **Set Action Button Color to Match Series Color**
-            line.colors[0] || '#000'; // Default to black if no color specified
             actionButton.style.color = '#ffffff';
             // **Attach Click Listener to Action Button**
             actionButton.addEventListener('click', (event) => {
@@ -1400,15 +1414,6 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this._lines.push(legendSeries);
             this._items.push(legendSeries);
             return row;
-        }
-        /** Type guard to detect a LegendGroup. */
-        isLegendGroup(entry) {
-            return entry.seriesList !== undefined;
-        }
-        /** Type guard to detect a LegendSeries. */
-        isLegendSeries(entry) {
-            return entry.series !== undefined
-                || entry.primitives !== undefined;
         }
         /** Type guard to detect a LegendPrimitive. */
         isLegendPrimitive(entry) {
@@ -1804,7 +1809,6 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             groupActionButton.style.cursor = 'pointer'; // Indicate it's clickable
             // **Set Group Action Button Color to Match Group Color**
             // Use the first series' primary color or default to black
-            group.seriesList[0]?.colors[0] || '#000';
             groupActionButton.style.color = '#ffffff';
             // **Attach Click Listener to Group Action Button**
             groupActionButton.addEventListener('click', (event) => {
@@ -2770,6 +2774,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
          */
         const _type = original.seriesType();
         const title = original.options().title;
+        // Implement a pane function that moves the series to a specified pane.
+        // We add it as a property on the decorated object.
         function sync(series) {
             // 1) Determine the type from the series’ own options
             //    (Ensure "seriesType" is indeed on the options, otherwise provide fallback)
@@ -3140,61 +3146,120 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         return null;
     }
     /**
+     * Returns true if the given dot-separated key path exists in the defaults.
+     * Special case: if the key is "color" or "lineColor", and either exists in defaults,
+     * the function returns true.
+     *
+     * @param path The dot-separated key path.
+     * @param defaults The defaults object.
+     */
+    function isOptionInDefaults(path, defaults) {
+        const keys = path.split(".");
+        let obj = defaults;
+        for (const key of keys) {
+            if (!(key in obj)) {
+                // Check the interchangeable case for color vs lineColor.
+                if ((key === "color" || key === "lineColor") && ("color" in obj || "lineColor" in obj)) {
+                    return true;
+                }
+                return false;
+            }
+            obj = obj[key];
+        }
+        return true;
+    }
+    /**
      * Clones an existing series into a new series of a specified type.
      *
      * @param series - The series to clone.
+     * @param handler - The chart handler.
      * @param type - The target type for the cloned series.
      * @param options - Additional options to merge with default options.
      * @returns The cloned series, or null if cloning fails.
      */
     function cloneSeriesAsType(series, handler, type, options) {
         try {
+            // Get current series options.
+            const seriesOptions = series.options();
+            // Get default options for the specified type.
             const defaultOptions = getDefaultSeriesOptions(type);
+            // Merge with any extra provided options.
             const mergedOptions = { ...defaultOptions, ...options };
+            const name = series.options().title ?? type;
             let clonedSeries;
             console.log(`Cloning ${series.seriesType()} as ${type}...`);
-            // Create the new series using a handler pattern you already have
+            // Create the new series using the handler.
             switch (type) {
                 case 'Line':
-                    clonedSeries = handler.createLineSeries(type, mergedOptions);
+                    clonedSeries = handler.createLineSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
                     break;
                 case 'Histogram':
-                    clonedSeries = handler.createHistogramSeries(type, mergedOptions);
+                    clonedSeries = handler.createHistogramSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
                     break;
                 case 'Area':
-                    clonedSeries = handler.createAreaSeries(type, mergedOptions);
+                    clonedSeries = handler.createAreaSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
                     break;
                 case 'Bar':
-                    clonedSeries = handler.createBarSeries(type, mergedOptions);
+                    clonedSeries = handler.createBarSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
                     break;
                 case 'Candlestick':
                     clonedSeries = {
-                        name: options.name,
+                        name: `${name}<${type}>`,
                         series: handler.createCandlestickSeries(),
                     };
                     break;
                 case 'Ohlc':
-                    clonedSeries = handler.createCustomOHLCSeries(type, mergedOptions);
+                    clonedSeries = handler.createCustomOHLCSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
                     break;
                 default:
                     console.error(`Unsupported series type: ${type}`);
                     return null;
             }
-            // ---------------------------
-            // Use convertDataItem() to transform the existing data
-            // ---------------------------
+            // Convert and set data on the cloned series.
             const originalData = series.data();
-            // Convert each bar in the original series
             let transformedData = originalData
                 .map((_, i) => convertDataItem(series, type, i))
                 .filter((item) => item !== null);
-            // Apply the transformed data to the newly created series
             clonedSeries.series.setData(transformedData);
-            // Hide the original series
-            series.applyOptions({ visible: false });
-            // ---------------------------
-            // Subscribe to data changes on the original to keep the clone updated
-            // ---------------------------
+            // Transfer color options iteratively.
+            findColorOptions(seriesOptions, (fullPath, value) => {
+                // Only update the cloned series if the default options contain this key.
+                if (isOptionInDefaults(fullPath, defaultOptions)) {
+                    if (fullPath === "lineColor" || fullPath === "color") {
+                        // Handle the interchangeable case.
+                        const hasLineColor = "lineColor" in defaultOptions || "lineColor" in mergedOptions;
+                        const hasColor = "color" in defaultOptions || "color" in mergedOptions;
+                        if (hasLineColor && hasColor) {
+                            setOptionByPath(clonedSeries.series, "lineColor", value);
+                            setOptionByPath(clonedSeries.series, "color", value);
+                        }
+                        else if (hasLineColor) {
+                            setOptionByPath(clonedSeries.series, "lineColor", value);
+                        }
+                        else if (hasColor) {
+                            setOptionByPath(clonedSeries.series, "color", value);
+                        }
+                    }
+                    else {
+                        // For any other color option, simply update the cloned series.
+                        setOptionByPath(clonedSeries.series, fullPath, value);
+                    }
+                }
+            });
+            // Iterate over all keys of mergedOptions
+            Object.keys(mergedOptions).forEach((key) => {
+                // Only process keys that include "color"
+                if (key.toString().toLowerCase().includes("color")) {
+                    // Create a small object containing only this key/value pair
+                    const optionObj = { [key]: mergedOptions[key] };
+                    // Use findColorOptions to process this object
+                    findColorOptions(optionObj, (fullPath, value) => {
+                        console.log(`Found color option: ${fullPath} = ${value}`);
+                        // Here you could call setOptionByPath or any other function as needed.
+                    });
+                }
+            });
+            // Subscribe to data changes on the original series to keep the clone updated.
             series.subscribeDataChanged(() => {
                 const updatedData = series.data();
                 const newTransformed = updatedData
@@ -3206,9 +3271,22 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             return clonedSeries.series;
         }
         catch (error) {
-            console.error('Error cloning series:', error);
+            console.error("Error cloning series:", error);
             return null;
         }
+    }
+    function setOptionByPath(target, path, value) {
+        const currentOptions = target.options();
+        const keys = path.split(".");
+        let obj = currentOptions; // cast to any so we can index by string
+        for (let i = 0; i < keys.length - 1; i++) {
+            if (!(keys[i] in obj)) {
+                obj[keys[i]] = {};
+            }
+            obj = obj[keys[i]];
+        }
+        obj[keys[keys.length - 1]] = value;
+        target.applyOptions(currentOptions);
     }
     // series-types.ts
     var SeriesTypeEnum;
@@ -12564,11 +12642,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
     // [walk]: util/walk.js
 
 
-    var version$2 = "8.14.0";
+    var version = "8.14.0";
 
     Parser.acorn = {
       Parser: Parser,
-      version: version$2,
+      version: version,
       defaultOptions: defaultOptions$2,
       Position: Position,
       SourceLocation: SourceLocation,
@@ -12617,7 +12695,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
     // state.
 
     function simple(node, visitors, baseVisitor, state, override) {
-      if (!baseVisitor) { baseVisitor = base$1
+      if (!baseVisitor) { baseVisitor = base
       ; }(function c(node, st, override) {
         var type = override || node.type;
         baseVisitor[type](node, st, c);
@@ -12640,7 +12718,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
     // Used to create a custom walker. Will fill in all missing node
     // type properties with the defaults.
     function make(funcs, baseVisitor) {
-      var visitor = Object.create(base$1);
+      var visitor = Object.create(base);
       for (var type in funcs) { visitor[type] = funcs[type]; }
       return visitor
     }
@@ -12650,9 +12728,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
 
     // Node walkers.
 
-    var base$1 = {};
+    var base = {};
 
-    base$1.Program = base$1.BlockStatement = base$1.StaticBlock = function (node, st, c) {
+    base.Program = base.BlockStatement = base.StaticBlock = function (node, st, c) {
       for (var i = 0, list = node.body; i < list.length; i += 1)
         {
         var stmt = list[i];
@@ -12660,22 +12738,22 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(stmt, st, "Statement");
       }
     };
-    base$1.Statement = skipThrough;
-    base$1.EmptyStatement = ignore;
-    base$1.ExpressionStatement = base$1.ParenthesizedExpression = base$1.ChainExpression =
+    base.Statement = skipThrough;
+    base.EmptyStatement = ignore;
+    base.ExpressionStatement = base.ParenthesizedExpression = base.ChainExpression =
       function (node, st, c) { return c(node.expression, st, "Expression"); };
-    base$1.IfStatement = function (node, st, c) {
+    base.IfStatement = function (node, st, c) {
       c(node.test, st, "Expression");
       c(node.consequent, st, "Statement");
       if (node.alternate) { c(node.alternate, st, "Statement"); }
     };
-    base$1.LabeledStatement = function (node, st, c) { return c(node.body, st, "Statement"); };
-    base$1.BreakStatement = base$1.ContinueStatement = ignore;
-    base$1.WithStatement = function (node, st, c) {
+    base.LabeledStatement = function (node, st, c) { return c(node.body, st, "Statement"); };
+    base.BreakStatement = base.ContinueStatement = ignore;
+    base.WithStatement = function (node, st, c) {
       c(node.object, st, "Expression");
       c(node.body, st, "Statement");
     };
-    base$1.SwitchStatement = function (node, st, c) {
+    base.SwitchStatement = function (node, st, c) {
       c(node.discriminant, st, "Expression");
       for (var i = 0, list = node.cases; i < list.length; i += 1) {
         var cs = list[i];
@@ -12683,7 +12761,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(cs, st);
       }
     };
-    base$1.SwitchCase = function (node, st, c) {
+    base.SwitchCase = function (node, st, c) {
       if (node.test) { c(node.test, st, "Expression"); }
       for (var i = 0, list = node.consequent; i < list.length; i += 1)
         {
@@ -12692,43 +12770,43 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(cons, st, "Statement");
       }
     };
-    base$1.ReturnStatement = base$1.YieldExpression = base$1.AwaitExpression = function (node, st, c) {
+    base.ReturnStatement = base.YieldExpression = base.AwaitExpression = function (node, st, c) {
       if (node.argument) { c(node.argument, st, "Expression"); }
     };
-    base$1.ThrowStatement = base$1.SpreadElement =
+    base.ThrowStatement = base.SpreadElement =
       function (node, st, c) { return c(node.argument, st, "Expression"); };
-    base$1.TryStatement = function (node, st, c) {
+    base.TryStatement = function (node, st, c) {
       c(node.block, st, "Statement");
       if (node.handler) { c(node.handler, st); }
       if (node.finalizer) { c(node.finalizer, st, "Statement"); }
     };
-    base$1.CatchClause = function (node, st, c) {
+    base.CatchClause = function (node, st, c) {
       if (node.param) { c(node.param, st, "Pattern"); }
       c(node.body, st, "Statement");
     };
-    base$1.WhileStatement = base$1.DoWhileStatement = function (node, st, c) {
+    base.WhileStatement = base.DoWhileStatement = function (node, st, c) {
       c(node.test, st, "Expression");
       c(node.body, st, "Statement");
     };
-    base$1.ForStatement = function (node, st, c) {
+    base.ForStatement = function (node, st, c) {
       if (node.init) { c(node.init, st, "ForInit"); }
       if (node.test) { c(node.test, st, "Expression"); }
       if (node.update) { c(node.update, st, "Expression"); }
       c(node.body, st, "Statement");
     };
-    base$1.ForInStatement = base$1.ForOfStatement = function (node, st, c) {
+    base.ForInStatement = base.ForOfStatement = function (node, st, c) {
       c(node.left, st, "ForInit");
       c(node.right, st, "Expression");
       c(node.body, st, "Statement");
     };
-    base$1.ForInit = function (node, st, c) {
+    base.ForInit = function (node, st, c) {
       if (node.type === "VariableDeclaration") { c(node, st); }
       else { c(node, st, "Expression"); }
     };
-    base$1.DebuggerStatement = ignore;
+    base.DebuggerStatement = ignore;
 
-    base$1.FunctionDeclaration = function (node, st, c) { return c(node, st, "Function"); };
-    base$1.VariableDeclaration = function (node, st, c) {
+    base.FunctionDeclaration = function (node, st, c) { return c(node, st, "Function"); };
+    base.VariableDeclaration = function (node, st, c) {
       for (var i = 0, list = node.declarations; i < list.length; i += 1)
         {
         var decl = list[i];
@@ -12736,12 +12814,12 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(decl, st);
       }
     };
-    base$1.VariableDeclarator = function (node, st, c) {
+    base.VariableDeclarator = function (node, st, c) {
       c(node.id, st, "Pattern");
       if (node.init) { c(node.init, st, "Expression"); }
     };
 
-    base$1.Function = function (node, st, c) {
+    base.Function = function (node, st, c) {
       if (node.id) { c(node.id, st, "Pattern"); }
       for (var i = 0, list = node.params; i < list.length; i += 1)
         {
@@ -12752,7 +12830,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       c(node.body, st, node.expression ? "Expression" : "Statement");
     };
 
-    base$1.Pattern = function (node, st, c) {
+    base.Pattern = function (node, st, c) {
       if (node.type === "Identifier")
         { c(node, st, "VariablePattern"); }
       else if (node.type === "MemberExpression")
@@ -12760,17 +12838,17 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       else
         { c(node, st); }
     };
-    base$1.VariablePattern = ignore;
-    base$1.MemberPattern = skipThrough;
-    base$1.RestElement = function (node, st, c) { return c(node.argument, st, "Pattern"); };
-    base$1.ArrayPattern = function (node, st, c) {
+    base.VariablePattern = ignore;
+    base.MemberPattern = skipThrough;
+    base.RestElement = function (node, st, c) { return c(node.argument, st, "Pattern"); };
+    base.ArrayPattern = function (node, st, c) {
       for (var i = 0, list = node.elements; i < list.length; i += 1) {
         var elt = list[i];
 
         if (elt) { c(elt, st, "Pattern"); }
       }
     };
-    base$1.ObjectPattern = function (node, st, c) {
+    base.ObjectPattern = function (node, st, c) {
       for (var i = 0, list = node.properties; i < list.length; i += 1) {
         var prop = list[i];
 
@@ -12783,16 +12861,16 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
     };
 
-    base$1.Expression = skipThrough;
-    base$1.ThisExpression = base$1.Super = base$1.MetaProperty = ignore;
-    base$1.ArrayExpression = function (node, st, c) {
+    base.Expression = skipThrough;
+    base.ThisExpression = base.Super = base.MetaProperty = ignore;
+    base.ArrayExpression = function (node, st, c) {
       for (var i = 0, list = node.elements; i < list.length; i += 1) {
         var elt = list[i];
 
         if (elt) { c(elt, st, "Expression"); }
       }
     };
-    base$1.ObjectExpression = function (node, st, c) {
+    base.ObjectExpression = function (node, st, c) {
       for (var i = 0, list = node.properties; i < list.length; i += 1)
         {
         var prop = list[i];
@@ -12800,8 +12878,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(prop, st);
       }
     };
-    base$1.FunctionExpression = base$1.ArrowFunctionExpression = base$1.FunctionDeclaration;
-    base$1.SequenceExpression = function (node, st, c) {
+    base.FunctionExpression = base.ArrowFunctionExpression = base.FunctionDeclaration;
+    base.SequenceExpression = function (node, st, c) {
       for (var i = 0, list = node.expressions; i < list.length; i += 1)
         {
         var expr = list[i];
@@ -12809,7 +12887,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(expr, st, "Expression");
       }
     };
-    base$1.TemplateLiteral = function (node, st, c) {
+    base.TemplateLiteral = function (node, st, c) {
       for (var i = 0, list = node.quasis; i < list.length; i += 1)
         {
         var quasi = list[i];
@@ -12824,24 +12902,24 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(expr, st, "Expression");
       }
     };
-    base$1.TemplateElement = ignore;
-    base$1.UnaryExpression = base$1.UpdateExpression = function (node, st, c) {
+    base.TemplateElement = ignore;
+    base.UnaryExpression = base.UpdateExpression = function (node, st, c) {
       c(node.argument, st, "Expression");
     };
-    base$1.BinaryExpression = base$1.LogicalExpression = function (node, st, c) {
+    base.BinaryExpression = base.LogicalExpression = function (node, st, c) {
       c(node.left, st, "Expression");
       c(node.right, st, "Expression");
     };
-    base$1.AssignmentExpression = base$1.AssignmentPattern = function (node, st, c) {
+    base.AssignmentExpression = base.AssignmentPattern = function (node, st, c) {
       c(node.left, st, "Pattern");
       c(node.right, st, "Expression");
     };
-    base$1.ConditionalExpression = function (node, st, c) {
+    base.ConditionalExpression = function (node, st, c) {
       c(node.test, st, "Expression");
       c(node.consequent, st, "Expression");
       c(node.alternate, st, "Expression");
     };
-    base$1.NewExpression = base$1.CallExpression = function (node, st, c) {
+    base.NewExpression = base.CallExpression = function (node, st, c) {
       c(node.callee, st, "Expression");
       if (node.arguments)
         { for (var i = 0, list = node.arguments; i < list.length; i += 1)
@@ -12851,21 +12929,21 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             c(arg, st, "Expression");
           } }
     };
-    base$1.MemberExpression = function (node, st, c) {
+    base.MemberExpression = function (node, st, c) {
       c(node.object, st, "Expression");
       if (node.computed) { c(node.property, st, "Expression"); }
     };
-    base$1.ExportNamedDeclaration = base$1.ExportDefaultDeclaration = function (node, st, c) {
+    base.ExportNamedDeclaration = base.ExportDefaultDeclaration = function (node, st, c) {
       if (node.declaration)
         { c(node.declaration, st, node.type === "ExportNamedDeclaration" || node.declaration.id ? "Statement" : "Expression"); }
       if (node.source) { c(node.source, st, "Expression"); }
     };
-    base$1.ExportAllDeclaration = function (node, st, c) {
+    base.ExportAllDeclaration = function (node, st, c) {
       if (node.exported)
         { c(node.exported, st); }
       c(node.source, st, "Expression");
     };
-    base$1.ImportDeclaration = function (node, st, c) {
+    base.ImportDeclaration = function (node, st, c) {
       for (var i = 0, list = node.specifiers; i < list.length; i += 1)
         {
         var spec = list[i];
@@ -12874,22 +12952,22 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
       c(node.source, st, "Expression");
     };
-    base$1.ImportExpression = function (node, st, c) {
+    base.ImportExpression = function (node, st, c) {
       c(node.source, st, "Expression");
     };
-    base$1.ImportSpecifier = base$1.ImportDefaultSpecifier = base$1.ImportNamespaceSpecifier = base$1.Identifier = base$1.PrivateIdentifier = base$1.Literal = ignore;
+    base.ImportSpecifier = base.ImportDefaultSpecifier = base.ImportNamespaceSpecifier = base.Identifier = base.PrivateIdentifier = base.Literal = ignore;
 
-    base$1.TaggedTemplateExpression = function (node, st, c) {
+    base.TaggedTemplateExpression = function (node, st, c) {
       c(node.tag, st, "Expression");
       c(node.quasi, st, "Expression");
     };
-    base$1.ClassDeclaration = base$1.ClassExpression = function (node, st, c) { return c(node, st, "Class"); };
-    base$1.Class = function (node, st, c) {
+    base.ClassDeclaration = base.ClassExpression = function (node, st, c) { return c(node, st, "Class"); };
+    base.Class = function (node, st, c) {
       if (node.id) { c(node.id, st, "Pattern"); }
       if (node.superClass) { c(node.superClass, st, "Expression"); }
       c(node.body, st);
     };
-    base$1.ClassBody = function (node, st, c) {
+    base.ClassBody = function (node, st, c) {
       for (var i = 0, list = node.body; i < list.length; i += 1)
         {
         var elt = list[i];
@@ -12897,7 +12975,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         c(elt, st);
       }
     };
-    base$1.MethodDefinition = base$1.PropertyDefinition = base$1.Property = function (node, st, c) {
+    base.MethodDefinition = base.PropertyDefinition = base.Property = function (node, st, c) {
       if (node.computed) { c(node.key, st, "Expression"); }
       if (node.value) { c(node.value, st, "Expression"); }
     };
@@ -14123,14267 +14201,24 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       return state.output
     }
 
-    /** Returns true if this value is an async iterator */
-    function IsAsyncIterator$3(value) {
-        return IsObject$3(value) && !IsArray$3(value) && !IsUint8Array$3(value) && Symbol.asyncIterator in value;
-    }
-    /** Returns true if this value is an array */
-    function IsArray$3(value) {
-        return Array.isArray(value);
-    }
-    /** Returns true if this value is bigint */
-    function IsBigInt$3(value) {
-        return typeof value === 'bigint';
-    }
-    /** Returns true if this value is a boolean */
-    function IsBoolean$3(value) {
-        return typeof value === 'boolean';
-    }
-    /** Returns true if this value is a Date object */
-    function IsDate$3(value) {
-        return value instanceof globalThis.Date;
-    }
-    /** Returns true if this value is a function */
-    function IsFunction$3(value) {
-        return typeof value === 'function';
-    }
-    /** Returns true if this value is an iterator */
-    function IsIterator$3(value) {
-        return IsObject$3(value) && !IsArray$3(value) && !IsUint8Array$3(value) && Symbol.iterator in value;
-    }
-    /** Returns true if this value is null */
-    function IsNull$3(value) {
-        return value === null;
-    }
-    /** Returns true if this value is number */
-    function IsNumber$3(value) {
-        return typeof value === 'number';
-    }
-    /** Returns true if this value is an object */
-    function IsObject$3(value) {
-        return typeof value === 'object' && value !== null;
-    }
-    /** Returns true if this value is RegExp */
-    function IsRegExp$2(value) {
-        return value instanceof globalThis.RegExp;
-    }
-    /** Returns true if this value is string */
-    function IsString$3(value) {
-        return typeof value === 'string';
-    }
-    /** Returns true if this value is symbol */
-    function IsSymbol$3(value) {
-        return typeof value === 'symbol';
-    }
-    /** Returns true if this value is a Uint8Array */
-    function IsUint8Array$3(value) {
-        return value instanceof globalThis.Uint8Array;
-    }
-    /** Returns true if this value is undefined */
-    function IsUndefined$3(value) {
-        return value === undefined;
-    }
-
-    function ArrayType$1(value) {
-        return value.map((value) => Visit$8(value));
-    }
-    function DateType$1(value) {
-        return new Date(value.getTime());
-    }
-    function Uint8ArrayType$1(value) {
-        return new Uint8Array(value);
-    }
-    function RegExpType(value) {
-        return new RegExp(value.source, value.flags);
-    }
-    function ObjectType$1(value) {
-        const result = {};
-        for (const key of Object.getOwnPropertyNames(value)) {
-            result[key] = Visit$8(value[key]);
-        }
-        for (const key of Object.getOwnPropertySymbols(value)) {
-            result[key] = Visit$8(value[key]);
-        }
-        return result;
-    }
-    // prettier-ignore
-    function Visit$8(value) {
-        return (IsArray$3(value) ? ArrayType$1(value) :
-            IsDate$3(value) ? DateType$1(value) :
-                IsUint8Array$3(value) ? Uint8ArrayType$1(value) :
-                    IsRegExp$2(value) ? RegExpType(value) :
-                        IsObject$3(value) ? ObjectType$1(value) :
-                            value);
-    }
-    /** Clones a value */
-    function Clone(value) {
-        return Visit$8(value);
-    }
-
-    /** Clones a Rest */
-    function CloneRest(schemas) {
-        return schemas.map((schema) => CloneType(schema));
-    }
-    /** Clones a Type */
-    function CloneType(schema, options = {}) {
-        return { ...Clone(schema), ...options };
-    }
-
-    /** The base Error type thrown for all TypeBox exceptions  */
-    class TypeBoxError extends Error {
-        constructor(message) {
-            super(message);
-        }
-    }
-
-    /** Symbol key applied to transform types */
-    const TransformKind = Symbol.for('TypeBox.Transform');
-    /** Symbol key applied to readonly types */
-    const ReadonlyKind = Symbol.for('TypeBox.Readonly');
-    /** Symbol key applied to optional types */
-    const OptionalKind = Symbol.for('TypeBox.Optional');
-    /** Symbol key applied to types */
-    const Hint = Symbol.for('TypeBox.Hint');
-    /** Symbol key applied to types */
-    const Kind = Symbol.for('TypeBox.Kind');
-
-    /** `[Kind-Only]` Returns true if this value has a Readonly symbol */
-    function IsReadonly(value) {
-        return IsObject$3(value) && value[ReadonlyKind] === 'Readonly';
-    }
-    /** `[Kind-Only]` Returns true if this value has a Optional symbol */
-    function IsOptional$1(value) {
-        return IsObject$3(value) && value[OptionalKind] === 'Optional';
-    }
-    /** `[Kind-Only]` Returns true if the given value is TAny */
-    function IsAny$1(value) {
-        return IsKindOf$1(value, 'Any');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TArray */
-    function IsArray$2(value) {
-        return IsKindOf$1(value, 'Array');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TAsyncIterator */
-    function IsAsyncIterator$2(value) {
-        return IsKindOf$1(value, 'AsyncIterator');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TBigInt */
-    function IsBigInt$2(value) {
-        return IsKindOf$1(value, 'BigInt');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TBoolean */
-    function IsBoolean$2(value) {
-        return IsKindOf$1(value, 'Boolean');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TConstructor */
-    function IsConstructor$1(value) {
-        return IsKindOf$1(value, 'Constructor');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TDate */
-    function IsDate$2(value) {
-        return IsKindOf$1(value, 'Date');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TFunction */
-    function IsFunction$2(value) {
-        return IsKindOf$1(value, 'Function');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TInteger */
-    function IsInteger$2(value) {
-        return IsKindOf$1(value, 'Integer');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TIntersect */
-    function IsIntersect$1(value) {
-        return IsKindOf$1(value, 'Intersect');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TIterator */
-    function IsIterator$2(value) {
-        return IsKindOf$1(value, 'Iterator');
-    }
-    /** `[Kind-Only]` Returns true if the given value is a TKind with the given name. */
-    function IsKindOf$1(value, kind) {
-        return IsObject$3(value) && Kind in value && value[Kind] === kind;
-    }
-    /** `[Kind-Only]` Returns true if the given value is TLiteral */
-    function IsLiteral$1(value) {
-        return IsKindOf$1(value, 'Literal');
-    }
-    /** `[Kind-Only]` Returns true if the given value is a TMappedKey */
-    function IsMappedKey$1(value) {
-        return IsKindOf$1(value, 'MappedKey');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TMappedResult */
-    function IsMappedResult$1(value) {
-        return IsKindOf$1(value, 'MappedResult');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TNever */
-    function IsNever$1(value) {
-        return IsKindOf$1(value, 'Never');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TNot */
-    function IsNot$1(value) {
-        return IsKindOf$1(value, 'Not');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TNull */
-    function IsNull$2(value) {
-        return IsKindOf$1(value, 'Null');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TNumber */
-    function IsNumber$2(value) {
-        return IsKindOf$1(value, 'Number');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TObject */
-    function IsObject$2(value) {
-        return IsKindOf$1(value, 'Object');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TPromise */
-    function IsPromise$2(value) {
-        return IsKindOf$1(value, 'Promise');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TRecord */
-    function IsRecord$1(value) {
-        return IsKindOf$1(value, 'Record');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TRef */
-    function IsRef$1(value) {
-        return IsKindOf$1(value, 'Ref');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TRegExp */
-    function IsRegExp$1(value) {
-        return IsKindOf$1(value, 'RegExp');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TString */
-    function IsString$2(value) {
-        return IsKindOf$1(value, 'String');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TSymbol */
-    function IsSymbol$2(value) {
-        return IsKindOf$1(value, 'Symbol');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TTemplateLiteral */
-    function IsTemplateLiteral$1(value) {
-        return IsKindOf$1(value, 'TemplateLiteral');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TThis */
-    function IsThis$1(value) {
-        return IsKindOf$1(value, 'This');
-    }
-    /** `[Kind-Only]` Returns true of this value is TTransform */
-    function IsTransform$1(value) {
-        return IsObject$3(value) && TransformKind in value;
-    }
-    /** `[Kind-Only]` Returns true if the given value is TTuple */
-    function IsTuple$1(value) {
-        return IsKindOf$1(value, 'Tuple');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TUndefined */
-    function IsUndefined$2(value) {
-        return IsKindOf$1(value, 'Undefined');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TUnion */
-    function IsUnion$1(value) {
-        return IsKindOf$1(value, 'Union');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TUint8Array */
-    function IsUint8Array$2(value) {
-        return IsKindOf$1(value, 'Uint8Array');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TUnknown */
-    function IsUnknown$1(value) {
-        return IsKindOf$1(value, 'Unknown');
-    }
-    /** `[Kind-Only]` Returns true if the given value is a raw TUnsafe */
-    function IsUnsafe$1(value) {
-        return IsKindOf$1(value, 'Unsafe');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TVoid */
-    function IsVoid$1(value) {
-        return IsKindOf$1(value, 'Void');
-    }
-    /** `[Kind-Only]` Returns true if the given value is TKind */
-    function IsKind$1(value) {
-        return IsObject$3(value) && Kind in value && IsString$3(value[Kind]);
-    }
-    /** `[Kind-Only]` Returns true if the given value is TSchema */
-    function IsSchema$1(value) {
-        // prettier-ignore
-        return (IsAny$1(value) ||
-            IsArray$2(value) ||
-            IsBoolean$2(value) ||
-            IsBigInt$2(value) ||
-            IsAsyncIterator$2(value) ||
-            IsConstructor$1(value) ||
-            IsDate$2(value) ||
-            IsFunction$2(value) ||
-            IsInteger$2(value) ||
-            IsIntersect$1(value) ||
-            IsIterator$2(value) ||
-            IsLiteral$1(value) ||
-            IsMappedKey$1(value) ||
-            IsMappedResult$1(value) ||
-            IsNever$1(value) ||
-            IsNot$1(value) ||
-            IsNull$2(value) ||
-            IsNumber$2(value) ||
-            IsObject$2(value) ||
-            IsPromise$2(value) ||
-            IsRecord$1(value) ||
-            IsRef$1(value) ||
-            IsRegExp$1(value) ||
-            IsString$2(value) ||
-            IsSymbol$2(value) ||
-            IsTemplateLiteral$1(value) ||
-            IsThis$1(value) ||
-            IsTuple$1(value) ||
-            IsUndefined$2(value) ||
-            IsUnion$1(value) ||
-            IsUint8Array$2(value) ||
-            IsUnknown$1(value) ||
-            IsUnsafe$1(value) ||
-            IsVoid$1(value) ||
-            IsKind$1(value));
-    }
-
-    const KnownTypes = [
-        'Any',
-        'Array',
-        'AsyncIterator',
-        'BigInt',
-        'Boolean',
-        'Constructor',
-        'Date',
-        'Enum',
-        'Function',
-        'Integer',
-        'Intersect',
-        'Iterator',
-        'Literal',
-        'MappedKey',
-        'MappedResult',
-        'Not',
-        'Null',
-        'Number',
-        'Object',
-        'Promise',
-        'Record',
-        'Ref',
-        'RegExp',
-        'String',
-        'Symbol',
-        'TemplateLiteral',
-        'This',
-        'Tuple',
-        'Undefined',
-        'Union',
-        'Uint8Array',
-        'Unknown',
-        'Void',
-    ];
-    function IsPattern(value) {
-        try {
-            new RegExp(value);
-            return true;
-        }
-        catch {
-            return false;
-        }
-    }
-    function IsControlCharacterFree(value) {
-        if (!IsString$3(value))
-            return false;
-        for (let i = 0; i < value.length; i++) {
-            const code = value.charCodeAt(i);
-            if ((code >= 7 && code <= 13) || code === 27 || code === 127) {
-                return false;
-            }
-        }
-        return true;
-    }
-    function IsAdditionalProperties(value) {
-        return IsOptionalBoolean(value) || IsSchema(value);
-    }
-    function IsOptionalBigInt(value) {
-        return IsUndefined$3(value) || IsBigInt$3(value);
-    }
-    function IsOptionalNumber(value) {
-        return IsUndefined$3(value) || IsNumber$3(value);
-    }
-    function IsOptionalBoolean(value) {
-        return IsUndefined$3(value) || IsBoolean$3(value);
-    }
-    function IsOptionalString(value) {
-        return IsUndefined$3(value) || IsString$3(value);
-    }
-    function IsOptionalPattern(value) {
-        return IsUndefined$3(value) || (IsString$3(value) && IsControlCharacterFree(value) && IsPattern(value));
-    }
-    function IsOptionalFormat(value) {
-        return IsUndefined$3(value) || (IsString$3(value) && IsControlCharacterFree(value));
-    }
-    function IsOptionalSchema(value) {
-        return IsUndefined$3(value) || IsSchema(value);
-    }
-    /** Returns true if this value has a Optional symbol */
-    function IsOptional(value) {
-        return IsObject$3(value) && value[OptionalKind] === 'Optional';
-    }
-    // ------------------------------------------------------------------
-    // Types
-    // ------------------------------------------------------------------
-    /** Returns true if the given value is TAny */
-    function IsAny(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Any') &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TArray */
-    function IsArray$1(value) {
-        return (IsKindOf(value, 'Array') &&
-            value.type === 'array' &&
-            IsOptionalString(value.$id) &&
-            IsSchema(value.items) &&
-            IsOptionalNumber(value.minItems) &&
-            IsOptionalNumber(value.maxItems) &&
-            IsOptionalBoolean(value.uniqueItems) &&
-            IsOptionalSchema(value.contains) &&
-            IsOptionalNumber(value.minContains) &&
-            IsOptionalNumber(value.maxContains));
-    }
-    /** Returns true if the given value is TAsyncIterator */
-    function IsAsyncIterator$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'AsyncIterator') &&
-            value.type === 'AsyncIterator' &&
-            IsOptionalString(value.$id) &&
-            IsSchema(value.items));
-    }
-    /** Returns true if the given value is TBigInt */
-    function IsBigInt$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'BigInt') &&
-            value.type === 'bigint' &&
-            IsOptionalString(value.$id) &&
-            IsOptionalBigInt(value.exclusiveMaximum) &&
-            IsOptionalBigInt(value.exclusiveMinimum) &&
-            IsOptionalBigInt(value.maximum) &&
-            IsOptionalBigInt(value.minimum) &&
-            IsOptionalBigInt(value.multipleOf));
-    }
-    /** Returns true if the given value is TBoolean */
-    function IsBoolean$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Boolean') &&
-            value.type === 'boolean' &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TConstructor */
-    function IsConstructor(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Constructor') &&
-            value.type === 'Constructor' &&
-            IsOptionalString(value.$id) &&
-            IsArray$3(value.parameters) &&
-            value.parameters.every(schema => IsSchema(schema)) &&
-            IsSchema(value.returns));
-    }
-    /** Returns true if the given value is TDate */
-    function IsDate$1(value) {
-        return (IsKindOf(value, 'Date') &&
-            value.type === 'Date' &&
-            IsOptionalString(value.$id) &&
-            IsOptionalNumber(value.exclusiveMaximumTimestamp) &&
-            IsOptionalNumber(value.exclusiveMinimumTimestamp) &&
-            IsOptionalNumber(value.maximumTimestamp) &&
-            IsOptionalNumber(value.minimumTimestamp) &&
-            IsOptionalNumber(value.multipleOfTimestamp));
-    }
-    /** Returns true if the given value is TFunction */
-    function IsFunction$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Function') &&
-            value.type === 'Function' &&
-            IsOptionalString(value.$id) &&
-            IsArray$3(value.parameters) &&
-            value.parameters.every(schema => IsSchema(schema)) &&
-            IsSchema(value.returns));
-    }
-    /** Returns true if the given value is TInteger */
-    function IsInteger$1(value) {
-        return (IsKindOf(value, 'Integer') &&
-            value.type === 'integer' &&
-            IsOptionalString(value.$id) &&
-            IsOptionalNumber(value.exclusiveMaximum) &&
-            IsOptionalNumber(value.exclusiveMinimum) &&
-            IsOptionalNumber(value.maximum) &&
-            IsOptionalNumber(value.minimum) &&
-            IsOptionalNumber(value.multipleOf));
-    }
-    /** Returns true if the given schema is TProperties */
-    function IsProperties(value) {
-        // prettier-ignore
-        return (IsObject$3(value) &&
-            Object.entries(value).every(([key, schema]) => IsControlCharacterFree(key) && IsSchema(schema)));
-    }
-    /** Returns true if the given value is TIntersect */
-    function IsIntersect(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Intersect') &&
-            (IsString$3(value.type) && value.type !== 'object' ? false : true) &&
-            IsArray$3(value.allOf) &&
-            value.allOf.every(schema => IsSchema(schema) && !IsTransform(schema)) &&
-            IsOptionalString(value.type) &&
-            (IsOptionalBoolean(value.unevaluatedProperties) || IsOptionalSchema(value.unevaluatedProperties)) &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TIterator */
-    function IsIterator$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Iterator') &&
-            value.type === 'Iterator' &&
-            IsOptionalString(value.$id) &&
-            IsSchema(value.items));
-    }
-    /** Returns true if the given value is a TKind with the given name. */
-    function IsKindOf(value, kind) {
-        return IsObject$3(value) && Kind in value && value[Kind] === kind;
-    }
-    /** Returns true if the given value is TLiteral<string> */
-    function IsLiteralString(value) {
-        return IsLiteral(value) && IsString$3(value.const);
-    }
-    /** Returns true if the given value is TLiteral<number> */
-    function IsLiteralNumber(value) {
-        return IsLiteral(value) && IsNumber$3(value.const);
-    }
-    /** Returns true if the given value is TLiteral<boolean> */
-    function IsLiteralBoolean(value) {
-        return IsLiteral(value) && IsBoolean$3(value.const);
-    }
-    /** Returns true if the given value is TLiteral */
-    function IsLiteral(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Literal') &&
-            IsOptionalString(value.$id) && IsLiteralValue(value.const));
-    }
-    /** Returns true if the given value is a TLiteralValue */
-    function IsLiteralValue(value) {
-        return IsBoolean$3(value) || IsNumber$3(value) || IsString$3(value);
-    }
-    /** Returns true if the given value is a TMappedKey */
-    function IsMappedKey(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'MappedKey') &&
-            IsArray$3(value.keys) &&
-            value.keys.every(key => IsNumber$3(key) || IsString$3(key)));
-    }
-    /** Returns true if the given value is TMappedResult */
-    function IsMappedResult(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'MappedResult') &&
-            IsProperties(value.properties));
-    }
-    /** Returns true if the given value is TNever */
-    function IsNever(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Never') &&
-            IsObject$3(value.not) &&
-            Object.getOwnPropertyNames(value.not).length === 0);
-    }
-    /** Returns true if the given value is TNot */
-    function IsNot(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Not') &&
-            IsSchema(value.not));
-    }
-    /** Returns true if the given value is TNull */
-    function IsNull$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Null') &&
-            value.type === 'null' &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TNumber */
-    function IsNumber$1(value) {
-        return (IsKindOf(value, 'Number') &&
-            value.type === 'number' &&
-            IsOptionalString(value.$id) &&
-            IsOptionalNumber(value.exclusiveMaximum) &&
-            IsOptionalNumber(value.exclusiveMinimum) &&
-            IsOptionalNumber(value.maximum) &&
-            IsOptionalNumber(value.minimum) &&
-            IsOptionalNumber(value.multipleOf));
-    }
-    /** Returns true if the given value is TObject */
-    function IsObject$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Object') &&
-            value.type === 'object' &&
-            IsOptionalString(value.$id) &&
-            IsProperties(value.properties) &&
-            IsAdditionalProperties(value.additionalProperties) &&
-            IsOptionalNumber(value.minProperties) &&
-            IsOptionalNumber(value.maxProperties));
-    }
-    /** Returns true if the given value is TPromise */
-    function IsPromise$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Promise') &&
-            value.type === 'Promise' &&
-            IsOptionalString(value.$id) &&
-            IsSchema(value.item));
-    }
-    /** Returns true if the given value is TRecord */
-    function IsRecord(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Record') &&
-            value.type === 'object' &&
-            IsOptionalString(value.$id) &&
-            IsAdditionalProperties(value.additionalProperties) &&
-            IsObject$3(value.patternProperties) &&
-            ((schema) => {
-                const keys = Object.getOwnPropertyNames(schema.patternProperties);
-                return (keys.length === 1 &&
-                    IsPattern(keys[0]) &&
-                    IsObject$3(schema.patternProperties) &&
-                    IsSchema(schema.patternProperties[keys[0]]));
-            })(value));
-    }
-    /** Returns true if the given value is TRef */
-    function IsRef(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Ref') &&
-            IsOptionalString(value.$id) &&
-            IsString$3(value.$ref));
-    }
-    /** Returns true if the given value is TRegExp */
-    function IsRegExp(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'RegExp') &&
-            IsOptionalString(value.$id) &&
-            IsString$3(value.source) &&
-            IsString$3(value.flags) &&
-            IsOptionalNumber(value.maxLength) &&
-            IsOptionalNumber(value.minLength));
-    }
-    /** Returns true if the given value is TString */
-    function IsString$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'String') &&
-            value.type === 'string' &&
-            IsOptionalString(value.$id) &&
-            IsOptionalNumber(value.minLength) &&
-            IsOptionalNumber(value.maxLength) &&
-            IsOptionalPattern(value.pattern) &&
-            IsOptionalFormat(value.format));
-    }
-    /** Returns true if the given value is TSymbol */
-    function IsSymbol$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Symbol') &&
-            value.type === 'symbol' &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TTemplateLiteral */
-    function IsTemplateLiteral(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'TemplateLiteral') &&
-            value.type === 'string' &&
-            IsString$3(value.pattern) &&
-            value.pattern[0] === '^' &&
-            value.pattern[value.pattern.length - 1] === '$');
-    }
-    /** Returns true if the given value is TThis */
-    function IsThis(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'This') &&
-            IsOptionalString(value.$id) &&
-            IsString$3(value.$ref));
-    }
-    /** Returns true of this value is TTransform */
-    function IsTransform(value) {
-        return IsObject$3(value) && TransformKind in value;
-    }
-    /** Returns true if the given value is TTuple */
-    function IsTuple(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Tuple') &&
-            value.type === 'array' &&
-            IsOptionalString(value.$id) &&
-            IsNumber$3(value.minItems) &&
-            IsNumber$3(value.maxItems) &&
-            value.minItems === value.maxItems &&
-            (( // empty
-            IsUndefined$3(value.items) &&
-                IsUndefined$3(value.additionalItems) &&
-                value.minItems === 0) || (IsArray$3(value.items) &&
-                value.items.every(schema => IsSchema(schema)))));
-    }
-    /** Returns true if the given value is TUndefined */
-    function IsUndefined$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Undefined') &&
-            value.type === 'undefined' &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TUnion */
-    function IsUnion(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Union') &&
-            IsOptionalString(value.$id) &&
-            IsObject$3(value) &&
-            IsArray$3(value.anyOf) &&
-            value.anyOf.every(schema => IsSchema(schema)));
-    }
-    /** Returns true if the given value is TUint8Array */
-    function IsUint8Array$1(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Uint8Array') &&
-            value.type === 'Uint8Array' &&
-            IsOptionalString(value.$id) &&
-            IsOptionalNumber(value.minByteLength) &&
-            IsOptionalNumber(value.maxByteLength));
-    }
-    /** Returns true if the given value is TUnknown */
-    function IsUnknown(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Unknown') &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is a raw TUnsafe */
-    function IsUnsafe(value) {
-        return IsKindOf(value, 'Unsafe');
-    }
-    /** Returns true if the given value is TVoid */
-    function IsVoid(value) {
-        // prettier-ignore
-        return (IsKindOf(value, 'Void') &&
-            value.type === 'void' &&
-            IsOptionalString(value.$id));
-    }
-    /** Returns true if the given value is TKind */
-    function IsKind(value) {
-        return IsObject$3(value) && Kind in value && IsString$3(value[Kind]) && !KnownTypes.includes(value[Kind]);
-    }
-    /** Returns true if the given value is TSchema */
-    function IsSchema(value) {
-        // prettier-ignore
-        return (IsObject$3(value)) && (IsAny(value) ||
-            IsArray$1(value) ||
-            IsBoolean$1(value) ||
-            IsBigInt$1(value) ||
-            IsAsyncIterator$1(value) ||
-            IsConstructor(value) ||
-            IsDate$1(value) ||
-            IsFunction$1(value) ||
-            IsInteger$1(value) ||
-            IsIntersect(value) ||
-            IsIterator$1(value) ||
-            IsLiteral(value) ||
-            IsMappedKey(value) ||
-            IsMappedResult(value) ||
-            IsNever(value) ||
-            IsNot(value) ||
-            IsNull$1(value) ||
-            IsNumber$1(value) ||
-            IsObject$1(value) ||
-            IsPromise$1(value) ||
-            IsRecord(value) ||
-            IsRef(value) ||
-            IsRegExp(value) ||
-            IsString$1(value) ||
-            IsSymbol$1(value) ||
-            IsTemplateLiteral(value) ||
-            IsThis(value) ||
-            IsTuple(value) ||
-            IsUndefined$1(value) ||
-            IsUnion(value) ||
-            IsUint8Array$1(value) ||
-            IsUnknown(value) ||
-            IsUnsafe(value) ||
-            IsVoid(value) ||
-            IsKind(value));
-    }
-
-    const PatternBoolean = '(true|false)';
-    const PatternNumber = '(0|[1-9][0-9]*)';
-    const PatternString = '(.*)';
-    const PatternNever = '(?!.*)';
-    const PatternNumberExact = `^${PatternNumber}$`;
-    const PatternStringExact = `^${PatternString}$`;
-    const PatternNeverExact = `^${PatternNever}$`;
-
-    /** A registry for user defined string formats */
-    const map$2 = new Map();
-    /** Returns true if the user defined string format exists */
-    function Has$1(format) {
-        return map$2.has(format);
-    }
-    /** Sets a validation function for a user defined string format */
-    function Set$2(format, func) {
-        map$2.set(format, func);
-    }
-    /** Gets a validation function for a user defined string format */
-    function Get$1(format) {
-        return map$2.get(format);
-    }
-
-    /** A registry for user defined types */
-    const map$1 = new Map();
-    /** Returns true if this registry contains this kind */
-    function Has(kind) {
-        return map$1.has(kind);
-    }
-    /** Sets a validation function for a user defined type */
-    function Set$1(kind, func) {
-        map$1.set(kind, func);
-    }
-    /** Gets a custom validation function for a user defined type */
-    function Get(kind) {
-        return map$1.get(kind);
-    }
-
-    /** Returns true if element right is in the set of left */
-    // prettier-ignore
-    function SetIncludes(T, S) {
-        return T.includes(S);
-    }
-    /** Returns a distinct set of elements */
-    function SetDistinct(T) {
-        return [...new Set(T)];
-    }
-    /** Returns the Intersect of the given sets */
-    function SetIntersect(T, S) {
-        return T.filter((L) => S.includes(L));
-    }
-    // prettier-ignore
-    function SetIntersectManyResolve(T, Init) {
-        return T.reduce((Acc, L) => {
-            return SetIntersect(Acc, L);
-        }, Init);
-    }
-    // prettier-ignore
-    function SetIntersectMany(T) {
-        return (T.length === 1
-            ? T[0]
-            // Use left to initialize the accumulator for resolve
-            : T.length > 1
-                ? SetIntersectManyResolve(T.slice(1), T[0])
-                : []);
-    }
-    /** Returns the Union of multiple sets */
-    function SetUnionMany(T) {
-        const Acc = [];
-        for (const L of T)
-            Acc.push(...L);
-        return Acc;
-    }
-
-    /** `[Json]` Creates an Any type */
-    function Any(options = {}) {
-        return { ...options, [Kind]: 'Any' };
-    }
-
-    /** `[Json]` Creates an Array type */
-    function Array$1(schema, options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Array',
-            type: 'array',
-            items: CloneType(schema),
-        };
-    }
-
-    /** `[JavaScript]` Creates a AsyncIterator type */
-    function AsyncIterator(items, options = {}) {
-        return {
-            ...options,
-            [Kind]: 'AsyncIterator',
-            type: 'AsyncIterator',
-            items: CloneType(items),
-        };
-    }
-
-    function DiscardKey(value, key) {
-        const { [key]: _, ...rest } = value;
-        return rest;
-    }
-    function Discard(value, keys) {
-        return keys.reduce((acc, key) => DiscardKey(acc, key), value);
-    }
-
-    /** `[Json]` Creates a Never type */
-    function Never(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Never',
-            not: {},
-        };
-    }
-
-    // prettier-ignore
-    function MappedResult(properties) {
-        return {
-            [Kind]: 'MappedResult',
-            properties
-        };
-    }
-
-    /** `[JavaScript]` Creates a Constructor type */
-    function Constructor(parameters, returns, options) {
-        return {
-            ...options,
-            [Kind]: 'Constructor',
-            type: 'Constructor',
-            parameters: CloneRest(parameters),
-            returns: CloneType(returns),
-        };
-    }
-
-    /** `[JavaScript]` Creates a Function type */
-    function Function$1(parameters, returns, options) {
-        return {
-            ...options,
-            [Kind]: 'Function',
-            type: 'Function',
-            parameters: CloneRest(parameters),
-            returns: CloneType(returns),
-        };
-    }
-
-    function UnionCreate(T, options) {
-        return { ...options, [Kind]: 'Union', anyOf: CloneRest(T) };
-    }
-
-    // prettier-ignore
-    function IsUnionOptional(T) {
-        return T.some(L => IsOptional$1(L));
-    }
-    // prettier-ignore
-    function RemoveOptionalFromRest$1(T) {
-        return T.map(L => IsOptional$1(L) ? RemoveOptionalFromType$1(L) : L);
-    }
-    // prettier-ignore
-    function RemoveOptionalFromType$1(T) {
-        return (Discard(T, [OptionalKind]));
-    }
-    // prettier-ignore
-    function ResolveUnion(T, options) {
-        return (IsUnionOptional(T)
-            ? Optional(UnionCreate(RemoveOptionalFromRest$1(T), options))
-            : UnionCreate(RemoveOptionalFromRest$1(T), options));
-    }
-    /** `[Json]` Creates an evaluated Union type */
-    function UnionEvaluated(T, options = {}) {
-        // prettier-ignore
-        return (T.length === 0 ? Never(options) :
-            T.length === 1 ? CloneType(T[0], options) :
-                ResolveUnion(T, options));
-    }
-
-    /** `[Json]` Creates a Union type */
-    function Union$1(T, options = {}) {
-        // prettier-ignore
-        return (T.length === 0 ? Never(options) :
-            T.length === 1 ? CloneType(T[0], options) :
-                UnionCreate(T, options));
-    }
-
-    // ------------------------------------------------------------------
-    // TemplateLiteralParserError
-    // ------------------------------------------------------------------
-    class TemplateLiteralParserError extends TypeBoxError {
-    }
-    // -------------------------------------------------------------------
-    // Unescape
-    //
-    // Unescape for these control characters specifically. Note that this
-    // function is only called on non union group content, and where we
-    // still want to allow the user to embed control characters in that
-    // content. For review.
-    // -------------------------------------------------------------------
-    // prettier-ignore
-    function Unescape(pattern) {
-        return pattern
-            .replace(/\\\$/g, '$')
-            .replace(/\\\*/g, '*')
-            .replace(/\\\^/g, '^')
-            .replace(/\\\|/g, '|')
-            .replace(/\\\(/g, '(')
-            .replace(/\\\)/g, ')');
-    }
-    // -------------------------------------------------------------------
-    // Control Characters
-    // -------------------------------------------------------------------
-    function IsNonEscaped(pattern, index, char) {
-        return pattern[index] === char && pattern.charCodeAt(index - 1) !== 92;
-    }
-    function IsOpenParen(pattern, index) {
-        return IsNonEscaped(pattern, index, '(');
-    }
-    function IsCloseParen(pattern, index) {
-        return IsNonEscaped(pattern, index, ')');
-    }
-    function IsSeparator(pattern, index) {
-        return IsNonEscaped(pattern, index, '|');
-    }
-    // -------------------------------------------------------------------
-    // Control Groups
-    // -------------------------------------------------------------------
-    function IsGroup(pattern) {
-        if (!(IsOpenParen(pattern, 0) && IsCloseParen(pattern, pattern.length - 1)))
-            return false;
-        let count = 0;
-        for (let index = 0; index < pattern.length; index++) {
-            if (IsOpenParen(pattern, index))
-                count += 1;
-            if (IsCloseParen(pattern, index))
-                count -= 1;
-            if (count === 0 && index !== pattern.length - 1)
-                return false;
-        }
-        return true;
-    }
-    // prettier-ignore
-    function InGroup(pattern) {
-        return pattern.slice(1, pattern.length - 1);
-    }
-    // prettier-ignore
-    function IsPrecedenceOr(pattern) {
-        let count = 0;
-        for (let index = 0; index < pattern.length; index++) {
-            if (IsOpenParen(pattern, index))
-                count += 1;
-            if (IsCloseParen(pattern, index))
-                count -= 1;
-            if (IsSeparator(pattern, index) && count === 0)
-                return true;
-        }
-        return false;
-    }
-    // prettier-ignore
-    function IsPrecedenceAnd(pattern) {
-        for (let index = 0; index < pattern.length; index++) {
-            if (IsOpenParen(pattern, index))
-                return true;
-        }
-        return false;
-    }
-    // prettier-ignore
-    function Or(pattern) {
-        let [count, start] = [0, 0];
-        const expressions = [];
-        for (let index = 0; index < pattern.length; index++) {
-            if (IsOpenParen(pattern, index))
-                count += 1;
-            if (IsCloseParen(pattern, index))
-                count -= 1;
-            if (IsSeparator(pattern, index) && count === 0) {
-                const range = pattern.slice(start, index);
-                if (range.length > 0)
-                    expressions.push(TemplateLiteralParse(range));
-                start = index + 1;
-            }
-        }
-        const range = pattern.slice(start);
-        if (range.length > 0)
-            expressions.push(TemplateLiteralParse(range));
-        if (expressions.length === 0)
-            return { type: 'const', const: '' };
-        if (expressions.length === 1)
-            return expressions[0];
-        return { type: 'or', expr: expressions };
-    }
-    // prettier-ignore
-    function And(pattern) {
-        function Group(value, index) {
-            if (!IsOpenParen(value, index))
-                throw new TemplateLiteralParserError(`TemplateLiteralParser: Index must point to open parens`);
-            let count = 0;
-            for (let scan = index; scan < value.length; scan++) {
-                if (IsOpenParen(value, scan))
-                    count += 1;
-                if (IsCloseParen(value, scan))
-                    count -= 1;
-                if (count === 0)
-                    return [index, scan];
-            }
-            throw new TemplateLiteralParserError(`TemplateLiteralParser: Unclosed group parens in expression`);
-        }
-        function Range(pattern, index) {
-            for (let scan = index; scan < pattern.length; scan++) {
-                if (IsOpenParen(pattern, scan))
-                    return [index, scan];
-            }
-            return [index, pattern.length];
-        }
-        const expressions = [];
-        for (let index = 0; index < pattern.length; index++) {
-            if (IsOpenParen(pattern, index)) {
-                const [start, end] = Group(pattern, index);
-                const range = pattern.slice(start, end + 1);
-                expressions.push(TemplateLiteralParse(range));
-                index = end;
-            }
-            else {
-                const [start, end] = Range(pattern, index);
-                const range = pattern.slice(start, end);
-                if (range.length > 0)
-                    expressions.push(TemplateLiteralParse(range));
-                index = end - 1;
-            }
-        }
-        return ((expressions.length === 0) ? { type: 'const', const: '' } :
-            (expressions.length === 1) ? expressions[0] :
-                { type: 'and', expr: expressions });
-    }
-    // ------------------------------------------------------------------
-    // TemplateLiteralParse
-    // ------------------------------------------------------------------
-    /** Parses a pattern and returns an expression tree */
-    function TemplateLiteralParse(pattern) {
-        // prettier-ignore
-        return (IsGroup(pattern) ? TemplateLiteralParse(InGroup(pattern)) :
-            IsPrecedenceOr(pattern) ? Or(pattern) :
-                IsPrecedenceAnd(pattern) ? And(pattern) :
-                    { type: 'const', const: Unescape(pattern) });
-    }
-    // ------------------------------------------------------------------
-    // TemplateLiteralParseExact
-    // ------------------------------------------------------------------
-    /** Parses a pattern and strips forward and trailing ^ and $ */
-    function TemplateLiteralParseExact(pattern) {
-        return TemplateLiteralParse(pattern.slice(1, pattern.length - 1));
-    }
-
-    // ------------------------------------------------------------------
-    // TemplateLiteralFiniteError
-    // ------------------------------------------------------------------
-    class TemplateLiteralFiniteError extends TypeBoxError {
-    }
-    // ------------------------------------------------------------------
-    // IsTemplateLiteralFiniteCheck
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IsNumberExpression(expression) {
-        return (expression.type === 'or' &&
-            expression.expr.length === 2 &&
-            expression.expr[0].type === 'const' &&
-            expression.expr[0].const === '0' &&
-            expression.expr[1].type === 'const' &&
-            expression.expr[1].const === '[1-9][0-9]*');
-    }
-    // prettier-ignore
-    function IsBooleanExpression(expression) {
-        return (expression.type === 'or' &&
-            expression.expr.length === 2 &&
-            expression.expr[0].type === 'const' &&
-            expression.expr[0].const === 'true' &&
-            expression.expr[1].type === 'const' &&
-            expression.expr[1].const === 'false');
-    }
-    // prettier-ignore
-    function IsStringExpression(expression) {
-        return expression.type === 'const' && expression.const === '.*';
-    }
-    // ------------------------------------------------------------------
-    // IsTemplateLiteralExpressionFinite
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IsTemplateLiteralExpressionFinite(expression) {
-        return (IsNumberExpression(expression) || IsStringExpression(expression) ? false :
-            IsBooleanExpression(expression) ? true :
-                (expression.type === 'and') ? expression.expr.every((expr) => IsTemplateLiteralExpressionFinite(expr)) :
-                    (expression.type === 'or') ? expression.expr.every((expr) => IsTemplateLiteralExpressionFinite(expr)) :
-                        (expression.type === 'const') ? true :
-                            (() => { throw new TemplateLiteralFiniteError(`Unknown expression type`); })());
-    }
-    /** Returns true if this TemplateLiteral resolves to a finite set of values */
-    function IsTemplateLiteralFinite(schema) {
-        const expression = TemplateLiteralParseExact(schema.pattern);
-        return IsTemplateLiteralExpressionFinite(expression);
-    }
-
-    // ------------------------------------------------------------------
-    // TemplateLiteralGenerateError
-    // ------------------------------------------------------------------
-    class TemplateLiteralGenerateError extends TypeBoxError {
-    }
-    // ------------------------------------------------------------------
-    // TemplateLiteralExpressionGenerate
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function* GenerateReduce(buffer) {
-        if (buffer.length === 1)
-            return yield* buffer[0];
-        for (const left of buffer[0]) {
-            for (const right of GenerateReduce(buffer.slice(1))) {
-                yield `${left}${right}`;
-            }
-        }
-    }
-    // prettier-ignore
-    function* GenerateAnd(expression) {
-        return yield* GenerateReduce(expression.expr.map((expr) => [...TemplateLiteralExpressionGenerate(expr)]));
-    }
-    // prettier-ignore
-    function* GenerateOr(expression) {
-        for (const expr of expression.expr)
-            yield* TemplateLiteralExpressionGenerate(expr);
-    }
-    // prettier-ignore
-    function* GenerateConst(expression) {
-        return yield expression.const;
-    }
-    function* TemplateLiteralExpressionGenerate(expression) {
-        return expression.type === 'and'
-            ? yield* GenerateAnd(expression)
-            : expression.type === 'or'
-                ? yield* GenerateOr(expression)
-                : expression.type === 'const'
-                    ? yield* GenerateConst(expression)
-                    : (() => {
-                        throw new TemplateLiteralGenerateError('Unknown expression');
-                    })();
-    }
-    /** Generates a tuple of strings from the given TemplateLiteral. Returns an empty tuple if infinite. */
-    function TemplateLiteralGenerate(schema) {
-        const expression = TemplateLiteralParseExact(schema.pattern);
-        // prettier-ignore
-        return (IsTemplateLiteralExpressionFinite(expression)
-            ? [...TemplateLiteralExpressionGenerate(expression)]
-            : []);
-    }
-
-    /** `[Json]` Creates a Literal type */
-    function Literal(value, options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Literal',
-            const: value,
-            type: typeof value,
-        };
-    }
-
-    /** `[Json]` Creates a Boolean type */
-    function Boolean$1(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Boolean',
-            type: 'boolean',
-        };
-    }
-
-    /** `[JavaScript]` Creates a BigInt type */
-    function BigInt$1(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'BigInt',
-            type: 'bigint',
-        };
-    }
-
-    /** `[Json]` Creates a Number type */
-    function Number$1(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Number',
-            type: 'number',
-        };
-    }
-
-    /** `[Json]` Creates a String type */
-    function String$1(options = {}) {
-        return { ...options, [Kind]: 'String', type: 'string' };
-    }
-
-    // ------------------------------------------------------------------
-    // SyntaxParsers
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function* FromUnion$d(syntax) {
-        const trim = syntax.trim().replace(/"|'/g, '');
-        return (trim === 'boolean' ? yield Boolean$1() :
-            trim === 'number' ? yield Number$1() :
-                trim === 'bigint' ? yield BigInt$1() :
-                    trim === 'string' ? yield String$1() :
-                        yield (() => {
-                            const literals = trim.split('|').map((literal) => Literal(literal.trim()));
-                            return (literals.length === 0 ? Never() :
-                                literals.length === 1 ? literals[0] :
-                                    UnionEvaluated(literals));
-                        })());
-    }
-    // prettier-ignore
-    function* FromTerminal(syntax) {
-        if (syntax[1] !== '{') {
-            const L = Literal('$');
-            const R = FromSyntax(syntax.slice(1));
-            return yield* [L, ...R];
-        }
-        for (let i = 2; i < syntax.length; i++) {
-            if (syntax[i] === '}') {
-                const L = FromUnion$d(syntax.slice(2, i));
-                const R = FromSyntax(syntax.slice(i + 1));
-                return yield* [...L, ...R];
-            }
-        }
-        yield Literal(syntax);
-    }
-    // prettier-ignore
-    function* FromSyntax(syntax) {
-        for (let i = 0; i < syntax.length; i++) {
-            if (syntax[i] === '$') {
-                const L = Literal(syntax.slice(0, i));
-                const R = FromTerminal(syntax.slice(i));
-                return yield* [L, ...R];
-            }
-        }
-        yield Literal(syntax);
-    }
-    /** Parses TemplateLiteralSyntax and returns a tuple of TemplateLiteralKinds */
-    function TemplateLiteralSyntax(syntax) {
-        return [...FromSyntax(syntax)];
-    }
-
-    // ------------------------------------------------------------------
-    // TemplateLiteralPatternError
-    // ------------------------------------------------------------------
-    class TemplateLiteralPatternError extends TypeBoxError {
-    }
-    // ------------------------------------------------------------------
-    // TemplateLiteralPattern
-    // ------------------------------------------------------------------
-    function Escape(value) {
-        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-    // prettier-ignore
-    function Visit$7(schema, acc) {
-        return (IsTemplateLiteral$1(schema) ? schema.pattern.slice(1, schema.pattern.length - 1) :
-            IsUnion$1(schema) ? `(${schema.anyOf.map((schema) => Visit$7(schema, acc)).join('|')})` :
-                IsNumber$2(schema) ? `${acc}${PatternNumber}` :
-                    IsInteger$2(schema) ? `${acc}${PatternNumber}` :
-                        IsBigInt$2(schema) ? `${acc}${PatternNumber}` :
-                            IsString$2(schema) ? `${acc}${PatternString}` :
-                                IsLiteral$1(schema) ? `${acc}${Escape(schema.const.toString())}` :
-                                    IsBoolean$2(schema) ? `${acc}${PatternBoolean}` :
-                                        (() => { throw new TemplateLiteralPatternError(`Unexpected Kind '${schema[Kind]}'`); })());
-    }
-    function TemplateLiteralPattern(kinds) {
-        return `^${kinds.map((schema) => Visit$7(schema, '')).join('')}\$`;
-    }
-
-    /** Returns a Union from the given TemplateLiteral */
-    function TemplateLiteralToUnion(schema) {
-        const R = TemplateLiteralGenerate(schema);
-        const L = R.map((S) => Literal(S));
-        return UnionEvaluated(L);
-    }
-
-    /** `[Json]` Creates a TemplateLiteral type */
-    // prettier-ignore
-    function TemplateLiteral(unresolved, options = {}) {
-        const pattern = IsString$3(unresolved)
-            ? TemplateLiteralPattern(TemplateLiteralSyntax(unresolved))
-            : TemplateLiteralPattern(unresolved);
-        return { ...options, [Kind]: 'TemplateLiteral', type: 'string', pattern };
-    }
-
-    // prettier-ignore
-    function FromTemplateLiteral$4(T) {
-        const R = TemplateLiteralGenerate(T);
-        return R.map(S => S.toString());
-    }
-    // prettier-ignore
-    function FromUnion$c(T) {
-        const Acc = [];
-        for (const L of T)
-            Acc.push(...IndexPropertyKeys(L));
-        return Acc;
-    }
-    // prettier-ignore
-    function FromLiteral$3(T) {
-        return ([T.toString()] // TS 5.4 observes TLiteralValue as not having a toString()
-        );
-    }
-    /** Returns a tuple of PropertyKeys derived from the given TSchema */
-    // prettier-ignore
-    function IndexPropertyKeys(T) {
-        return [...new Set((IsTemplateLiteral$1(T) ? FromTemplateLiteral$4(T) :
-                IsUnion$1(T) ? FromUnion$c(T.anyOf) :
-                    IsLiteral$1(T) ? FromLiteral$3(T.const) :
-                        IsNumber$2(T) ? ['[number]'] :
-                            IsInteger$2(T) ? ['[number]'] :
-                                []))];
-    }
-
-    // prettier-ignore
-    function FromProperties$i(T, P, options) {
-        const Acc = {};
-        for (const K2 of Object.getOwnPropertyNames(P)) {
-            Acc[K2] = Index(T, IndexPropertyKeys(P[K2]), options);
-        }
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$b(T, R, options) {
-        return FromProperties$i(T, R.properties, options);
-    }
-    // prettier-ignore
-    function IndexFromMappedResult(T, R, options) {
-        const P = FromMappedResult$b(T, R, options);
-        return MappedResult(P);
-    }
-
-    // prettier-ignore
-    function FromRest$7(T, K) {
-        return T.map(L => IndexFromPropertyKey(L, K));
-    }
-    // prettier-ignore
-    function FromIntersectRest(T) {
-        return T.filter(L => !IsNever$1(L));
-    }
-    // prettier-ignore
-    function FromIntersect$b(T, K) {
-        return (IntersectEvaluated(FromIntersectRest(FromRest$7(T, K))));
-    }
-    // prettier-ignore
-    function FromUnionRest(T) {
-        return (T.some(L => IsNever$1(L))
-            ? []
-            : T);
-    }
-    // prettier-ignore
-    function FromUnion$b(T, K) {
-        return (UnionEvaluated(FromUnionRest(FromRest$7(T, K))));
-    }
-    // prettier-ignore
-    function FromTuple$8(T, K) {
-        return (K in T ? T[K] :
-            K === '[number]' ? UnionEvaluated(T) :
-                Never());
-    }
-    // prettier-ignore
-    function FromArray$9(T, K) {
-        return (K === '[number]'
-            ? T
-            : Never());
-    }
-    // prettier-ignore
-    function FromProperty$1(T, K) {
-        return (K in T ? T[K] : Never());
-    }
-    // prettier-ignore
-    function IndexFromPropertyKey(T, K) {
-        return (IsIntersect$1(T) ? FromIntersect$b(T.allOf, K) :
-            IsUnion$1(T) ? FromUnion$b(T.anyOf, K) :
-                IsTuple$1(T) ? FromTuple$8(T.items ?? [], K) :
-                    IsArray$2(T) ? FromArray$9(T.items, K) :
-                        IsObject$2(T) ? FromProperty$1(T.properties, K) :
-                            Never());
-    }
-    // prettier-ignore
-    function IndexFromPropertyKeys(T, K) {
-        return K.map(L => IndexFromPropertyKey(T, L));
-    }
-    // prettier-ignore
-    function FromSchema(T, K) {
-        return (UnionEvaluated(IndexFromPropertyKeys(T, K)));
-    }
-    /** `[Json]` Returns an Indexed property type for the given keys */
-    function Index(T, K, options = {}) {
-        // prettier-ignore
-        return (IsMappedResult$1(K) ? CloneType(IndexFromMappedResult(T, K, options)) :
-            IsMappedKey$1(K) ? CloneType(IndexFromMappedKey(T, K, options)) :
-                IsSchema$1(K) ? CloneType(FromSchema(T, IndexPropertyKeys(K)), options) :
-                    CloneType(FromSchema(T, K), options));
-    }
-
-    // prettier-ignore
-    function MappedIndexPropertyKey(T, K, options) {
-        return { [K]: Index(T, [K], options) };
-    }
-    // prettier-ignore
-    function MappedIndexPropertyKeys(T, K, options) {
-        return K.reduce((Acc, L) => {
-            return { ...Acc, ...MappedIndexPropertyKey(T, L, options) };
-        }, {});
-    }
-    // prettier-ignore
-    function MappedIndexProperties(T, K, options) {
-        return MappedIndexPropertyKeys(T, K.keys, options);
-    }
-    // prettier-ignore
-    function IndexFromMappedKey(T, K, options) {
-        const P = MappedIndexProperties(T, K, options);
-        return MappedResult(P);
-    }
-
-    /** `[JavaScript]` Creates an Iterator type */
-    function Iterator(items, options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Iterator',
-            type: 'Iterator',
-            items: CloneType(items),
-        };
-    }
-
-    /** `[Json]` Creates an Object type */
-    function _Object(properties, options = {}) {
-        const propertyKeys = globalThis.Object.getOwnPropertyNames(properties);
-        const optionalKeys = propertyKeys.filter((key) => IsOptional$1(properties[key]));
-        const requiredKeys = propertyKeys.filter((name) => !optionalKeys.includes(name));
-        const clonedAdditionalProperties = IsSchema$1(options.additionalProperties) ? { additionalProperties: CloneType(options.additionalProperties) } : {};
-        const clonedProperties = {};
-        for (const key of propertyKeys)
-            clonedProperties[key] = CloneType(properties[key]);
-        return (requiredKeys.length > 0
-            ? { ...options, ...clonedAdditionalProperties, [Kind]: 'Object', type: 'object', properties: clonedProperties, required: requiredKeys }
-            : { ...options, ...clonedAdditionalProperties, [Kind]: 'Object', type: 'object', properties: clonedProperties });
-    }
-    /** `[Json]` Creates an Object type */
-    const Object$1 = _Object;
-
-    /** `[JavaScript]` Creates a Promise type */
-    function Promise$1(item, options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Promise',
-            type: 'Promise',
-            item: CloneType(item),
-        };
-    }
-
-    function RemoveReadonly(schema) {
-        return Discard(CloneType(schema), [ReadonlyKind]);
-    }
-    function AddReadonly(schema) {
-        return { ...CloneType(schema), [ReadonlyKind]: 'Readonly' };
-    }
-    // prettier-ignore
-    function ReadonlyWithFlag(schema, F) {
-        return (F === false
-            ? RemoveReadonly(schema)
-            : AddReadonly(schema));
-    }
-    /** `[Json]` Creates a Readonly property */
-    function Readonly(schema, enable) {
-        const F = enable ?? true;
-        return IsMappedResult$1(schema) ? ReadonlyFromMappedResult(schema, F) : ReadonlyWithFlag(schema, F);
-    }
-
-    // prettier-ignore
-    function FromProperties$h(K, F) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(K))
-            Acc[K2] = Readonly(K[K2], F);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$a(R, F) {
-        return FromProperties$h(R.properties, F);
-    }
-    // prettier-ignore
-    function ReadonlyFromMappedResult(R, F) {
-        const P = FromMappedResult$a(R, F);
-        return MappedResult(P);
-    }
-
-    /** `[Json]` Creates a Tuple type */
-    function Tuple(items, options = {}) {
-        // return TupleResolver.Resolve(T)
-        const [additionalItems, minItems, maxItems] = [false, items.length, items.length];
-        // prettier-ignore
-        return (items.length > 0 ?
-            { ...options, [Kind]: 'Tuple', type: 'array', items: CloneRest(items), additionalItems, minItems, maxItems } :
-            { ...options, [Kind]: 'Tuple', type: 'array', minItems, maxItems });
-    }
-
-    // prettier-ignore
-    function FromMappedResult$9(K, P) {
-        return (K in P
-            ? FromSchemaType(K, P[K])
-            : MappedResult(P));
-    }
-    // prettier-ignore
-    function MappedKeyToKnownMappedResultProperties(K) {
-        return { [K]: Literal(K) };
-    }
-    // prettier-ignore
-    function MappedKeyToUnknownMappedResultProperties(P) {
-        const Acc = {};
-        for (const L of P)
-            Acc[L] = Literal(L);
-        return Acc;
-    }
-    // prettier-ignore
-    function MappedKeyToMappedResultProperties(K, P) {
-        return (SetIncludes(P, K)
-            ? MappedKeyToKnownMappedResultProperties(K)
-            : MappedKeyToUnknownMappedResultProperties(P));
-    }
-    // prettier-ignore
-    function FromMappedKey$3(K, P) {
-        const R = MappedKeyToMappedResultProperties(K, P);
-        return FromMappedResult$9(K, R);
-    }
-    // prettier-ignore
-    function FromRest$6(K, T) {
-        return T.map(L => FromSchemaType(K, L));
-    }
-    // prettier-ignore
-    function FromProperties$g(K, T) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(T))
-            Acc[K2] = FromSchemaType(K, T[K2]);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromSchemaType(K, T) {
-        return (
-        // unevaluated modifier types
-        IsOptional$1(T) ? Optional(FromSchemaType(K, Discard(T, [OptionalKind]))) :
-            IsReadonly(T) ? Readonly(FromSchemaType(K, Discard(T, [ReadonlyKind]))) :
-                // unevaluated mapped types
-                IsMappedResult$1(T) ? FromMappedResult$9(K, T.properties) :
-                    IsMappedKey$1(T) ? FromMappedKey$3(K, T.keys) :
-                        // unevaluated types
-                        IsConstructor$1(T) ? Constructor(FromRest$6(K, T.parameters), FromSchemaType(K, T.returns)) :
-                            IsFunction$2(T) ? Function$1(FromRest$6(K, T.parameters), FromSchemaType(K, T.returns)) :
-                                IsAsyncIterator$2(T) ? AsyncIterator(FromSchemaType(K, T.items)) :
-                                    IsIterator$2(T) ? Iterator(FromSchemaType(K, T.items)) :
-                                        IsIntersect$1(T) ? Intersect$1(FromRest$6(K, T.allOf)) :
-                                            IsUnion$1(T) ? Union$1(FromRest$6(K, T.anyOf)) :
-                                                IsTuple$1(T) ? Tuple(FromRest$6(K, T.items ?? [])) :
-                                                    IsObject$2(T) ? Object$1(FromProperties$g(K, T.properties)) :
-                                                        IsArray$2(T) ? Array$1(FromSchemaType(K, T.items)) :
-                                                            IsPromise$2(T) ? Promise$1(FromSchemaType(K, T.item)) :
-                                                                T);
-    }
-    // prettier-ignore
-    function MappedFunctionReturnType(K, T) {
-        const Acc = {};
-        for (const L of K)
-            Acc[L] = FromSchemaType(L, T);
-        return Acc;
-    }
-    /** `[Json]` Creates a Mapped object type */
-    function Mapped(key, map, options = {}) {
-        const K = IsSchema$1(key) ? IndexPropertyKeys(key) : key;
-        const RT = map({ [Kind]: 'MappedKey', keys: K });
-        const R = MappedFunctionReturnType(K, RT);
-        return CloneType(Object$1(R), options);
-    }
-
-    function RemoveOptional(schema) {
-        return Discard(CloneType(schema), [OptionalKind]);
-    }
-    function AddOptional(schema) {
-        return { ...CloneType(schema), [OptionalKind]: 'Optional' };
-    }
-    // prettier-ignore
-    function OptionalWithFlag(schema, F) {
-        return (F === false
-            ? RemoveOptional(schema)
-            : AddOptional(schema));
-    }
-    /** `[Json]` Creates a Optional property */
-    function Optional(schema, enable) {
-        const F = enable ?? true;
-        return IsMappedResult$1(schema) ? OptionalFromMappedResult(schema, F) : OptionalWithFlag(schema, F);
-    }
-
-    // prettier-ignore
-    function FromProperties$f(P, F) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Optional(P[K2], F);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$8(R, F) {
-        return FromProperties$f(R.properties, F);
-    }
-    // prettier-ignore
-    function OptionalFromMappedResult(R, F) {
-        const P = FromMappedResult$8(R, F);
-        return MappedResult(P);
-    }
-
-    // ------------------------------------------------------------------
-    // IntersectCreate
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IntersectCreate(T, options) {
-        const allObjects = T.every((schema) => IsObject$2(schema));
-        const clonedUnevaluatedProperties = IsSchema$1(options.unevaluatedProperties)
-            ? { unevaluatedProperties: CloneType(options.unevaluatedProperties) }
-            : {};
-        return ((options.unevaluatedProperties === false || IsSchema$1(options.unevaluatedProperties) || allObjects
-            ? { ...options, ...clonedUnevaluatedProperties, [Kind]: 'Intersect', type: 'object', allOf: CloneRest(T) }
-            : { ...options, ...clonedUnevaluatedProperties, [Kind]: 'Intersect', allOf: CloneRest(T) }));
-    }
-
-    // prettier-ignore
-    function IsIntersectOptional(T) {
-        return T.every(L => IsOptional$1(L));
-    }
-    // prettier-ignore
-    function RemoveOptionalFromType(T) {
-        return (Discard(T, [OptionalKind]));
-    }
-    // prettier-ignore
-    function RemoveOptionalFromRest(T) {
-        return T.map(L => IsOptional$1(L) ? RemoveOptionalFromType(L) : L);
-    }
-    // prettier-ignore
-    function ResolveIntersect(T, options) {
-        return (IsIntersectOptional(T)
-            ? Optional(IntersectCreate(RemoveOptionalFromRest(T), options))
-            : IntersectCreate(RemoveOptionalFromRest(T), options));
-    }
-    /** `[Json]` Creates an evaluated Intersect type */
-    function IntersectEvaluated(T, options = {}) {
-        if (T.length === 0)
-            return Never(options);
-        if (T.length === 1)
-            return CloneType(T[0], options);
-        if (T.some((schema) => IsTransform$1(schema)))
-            throw new Error('Cannot intersect transform types');
-        return ResolveIntersect(T, options);
-    }
-
-    /** `[Json]` Creates an evaluated Intersect type */
-    function Intersect$1(T, options = {}) {
-        if (T.length === 0)
-            return Never(options);
-        if (T.length === 1)
-            return CloneType(T[0], options);
-        if (T.some((schema) => IsTransform$1(schema)))
-            throw new Error('Cannot intersect transform types');
-        return IntersectCreate(T, options);
-    }
-
-    // prettier-ignore
-    function FromRest$5(T) {
-        return T.map(L => AwaitedResolve(L));
-    }
-    // prettier-ignore
-    function FromIntersect$a(T) {
-        return Intersect$1(FromRest$5(T));
-    }
-    // prettier-ignore
-    function FromUnion$a(T) {
-        return Union$1(FromRest$5(T));
-    }
-    // prettier-ignore
-    function FromPromise$5(T) {
-        return AwaitedResolve(T);
-    }
-    // ----------------------------------------------------------------
-    // AwaitedResolve
-    // ----------------------------------------------------------------
-    // prettier-ignore
-    function AwaitedResolve(T) {
-        return (IsIntersect$1(T) ? FromIntersect$a(T.allOf) :
-            IsUnion$1(T) ? FromUnion$a(T.anyOf) :
-                IsPromise$2(T) ? FromPromise$5(T.item) :
-                    T);
-    }
-    /** `[JavaScript]` Constructs a type by recursively unwrapping Promise types */
-    function Awaited(T, options = {}) {
-        return CloneType(AwaitedResolve(T), options);
-    }
-
-    // prettier-ignore
-    function FromRest$4(T) {
-        const Acc = [];
-        for (const L of T)
-            Acc.push(KeyOfPropertyKeys(L));
-        return Acc;
-    }
-    // prettier-ignore
-    function FromIntersect$9(T) {
-        const C = FromRest$4(T);
-        const R = SetUnionMany(C);
-        return R;
-    }
-    // prettier-ignore
-    function FromUnion$9(T) {
-        const C = FromRest$4(T);
-        const R = SetIntersectMany(C);
-        return R;
-    }
-    // prettier-ignore
-    function FromTuple$7(T) {
-        return T.map((_, I) => I.toString());
-    }
-    // prettier-ignore
-    function FromArray$8(_) {
-        return (['[number]']);
-    }
-    // prettier-ignore
-    function FromProperties$e(T) {
-        return (globalThis.Object.getOwnPropertyNames(T));
-    }
-    // ------------------------------------------------------------------
-    // FromPatternProperties
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromPatternProperties(patternProperties) {
-        if (!includePatternProperties)
-            return [];
-        const patternPropertyKeys = globalThis.Object.getOwnPropertyNames(patternProperties);
-        return patternPropertyKeys.map(key => {
-            return (key[0] === '^' && key[key.length - 1] === '$')
-                ? key.slice(1, key.length - 1)
-                : key;
-        });
-    }
-    /** Returns a tuple of PropertyKeys derived from the given TSchema. */
-    // prettier-ignore
-    function KeyOfPropertyKeys(T) {
-        return (IsIntersect$1(T) ? FromIntersect$9(T.allOf) :
-            IsUnion$1(T) ? FromUnion$9(T.anyOf) :
-                IsTuple$1(T) ? FromTuple$7(T.items ?? []) :
-                    IsArray$2(T) ? FromArray$8(T.items) :
-                        IsObject$2(T) ? FromProperties$e(T.properties) :
-                            IsRecord$1(T) ? FromPatternProperties(T.patternProperties) :
-                                []);
-    }
-    // ----------------------------------------------------------------
-    // KeyOfPattern
-    // ----------------------------------------------------------------
-    let includePatternProperties = false;
-    /** Returns a regular expression pattern derived from the given TSchema */
-    function KeyOfPattern(schema) {
-        includePatternProperties = true;
-        const keys = KeyOfPropertyKeys(schema);
-        includePatternProperties = false;
-        const pattern = keys.map((key) => `(${key})`);
-        return `^(${pattern.join('|')})$`;
-    }
-
-    // prettier-ignore
-    function KeyOfPropertyKeysToRest(T) {
-        return T.map(L => L === '[number]' ? Number$1() : Literal(L));
-    }
-    /** `[Json]` Creates a KeyOf type */
-    function KeyOf(T, options = {}) {
-        if (IsMappedResult$1(T)) {
-            return KeyOfFromMappedResult(T, options);
-        }
-        else {
-            const K = KeyOfPropertyKeys(T);
-            const S = KeyOfPropertyKeysToRest(K);
-            const U = UnionEvaluated(S);
-            return CloneType(U, options);
-        }
-    }
-
-    // prettier-ignore
-    function FromProperties$d(K, options) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(K))
-            Acc[K2] = KeyOf(K[K2], options);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$7(R, options) {
-        return FromProperties$d(R.properties, options);
-    }
-    // prettier-ignore
-    function KeyOfFromMappedResult(R, options) {
-        const P = FromMappedResult$7(R, options);
-        return MappedResult(P);
-    }
-
-    /**
-     * `[Utility]` Resolves an array of keys and schemas from the given schema. This method is faster
-     * than obtaining the keys and resolving each individually via indexing. This method was written
-     * accellerate Intersect and Union encoding.
-     */
-    function KeyOfPropertyEntries(schema) {
-        const keys = KeyOfPropertyKeys(schema);
-        const schemas = IndexFromPropertyKeys(schema, keys);
-        return keys.map((_, index) => [keys[index], schemas[index]]);
-    }
-
-    // prettier-ignore
-    function CompositeKeys(T) {
-        const Acc = [];
-        for (const L of T)
-            Acc.push(...KeyOfPropertyKeys(L));
-        return SetDistinct(Acc);
-    }
-    // prettier-ignore
-    function FilterNever(T) {
-        return T.filter(L => !IsNever$1(L));
-    }
-    // prettier-ignore
-    function CompositeProperty(T, K) {
-        const Acc = [];
-        for (const L of T)
-            Acc.push(...IndexFromPropertyKeys(L, [K]));
-        return FilterNever(Acc);
-    }
-    // prettier-ignore
-    function CompositeProperties(T, K) {
-        const Acc = {};
-        for (const L of K) {
-            Acc[L] = IntersectEvaluated(CompositeProperty(T, L));
-        }
-        return Acc;
-    }
-    // prettier-ignore
-    function Composite(T, options = {}) {
-        const K = CompositeKeys(T);
-        const P = CompositeProperties(T, K);
-        const R = Object$1(P, options);
-        return R;
-    }
-
-    /** `[JavaScript]` Creates a Date type */
-    function Date$1(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Date',
-            type: 'Date',
-        };
-    }
-
-    /** `[Json]` Creates a Null type */
-    function Null(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Null',
-            type: 'null',
-        };
-    }
-
-    /** `[JavaScript]` Creates a Symbol type */
-    function Symbol$1(options) {
-        return { ...options, [Kind]: 'Symbol', type: 'symbol' };
-    }
-
-    /** `[JavaScript]` Creates a Undefined type */
-    function Undefined(options = {}) {
-        return { ...options, [Kind]: 'Undefined', type: 'undefined' };
-    }
-
-    /** `[JavaScript]` Creates a Uint8Array type */
-    function Uint8Array$1(options = {}) {
-        return { ...options, [Kind]: 'Uint8Array', type: 'Uint8Array' };
-    }
-
-    /** `[Json]` Creates an Unknown type */
-    function Unknown(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Unknown',
-        };
-    }
-
-    // prettier-ignore
-    function FromArray$7(T) {
-        return T.map(L => FromValue(L, false));
-    }
-    // prettier-ignore
-    function FromProperties$c(value) {
-        const Acc = {};
-        for (const K of globalThis.Object.getOwnPropertyNames(value))
-            Acc[K] = Readonly(FromValue(value[K], false));
-        return Acc;
-    }
-    function ConditionalReadonly(T, root) {
-        return (root === true ? T : Readonly(T));
-    }
-    // prettier-ignore
-    function FromValue(value, root) {
-        return (IsAsyncIterator$3(value) ? ConditionalReadonly(Any(), root) :
-            IsIterator$3(value) ? ConditionalReadonly(Any(), root) :
-                IsArray$3(value) ? Readonly(Tuple(FromArray$7(value))) :
-                    IsUint8Array$3(value) ? Uint8Array$1() :
-                        IsDate$3(value) ? Date$1() :
-                            IsObject$3(value) ? ConditionalReadonly(Object$1(FromProperties$c(value)), root) :
-                                IsFunction$3(value) ? ConditionalReadonly(Function$1([], Unknown()), root) :
-                                    IsUndefined$3(value) ? Undefined() :
-                                        IsNull$3(value) ? Null() :
-                                            IsSymbol$3(value) ? Symbol$1() :
-                                                IsBigInt$3(value) ? BigInt$1() :
-                                                    IsNumber$3(value) ? Literal(value) :
-                                                        IsBoolean$3(value) ? Literal(value) :
-                                                            IsString$3(value) ? Literal(value) :
-                                                                Object$1({}));
-    }
-    /** `[JavaScript]` Creates a readonly const type from the given value. */
-    function Const(T, options = {}) {
-        return CloneType(FromValue(T, true), options);
-    }
-
-    /** `[JavaScript]` Extracts the ConstructorParameters from the given Constructor type */
-    function ConstructorParameters(schema, options = {}) {
-        return Tuple(CloneRest(schema.parameters), { ...options });
-    }
-
-    function FromRest$3(schema, references) {
-        return schema.map((schema) => Deref$1(schema, references));
-    }
-    // prettier-ignore
-    function FromProperties$b(properties, references) {
-        const Acc = {};
-        for (const K of globalThis.Object.getOwnPropertyNames(properties)) {
-            Acc[K] = Deref$1(properties[K], references);
-        }
-        return Acc;
-    }
-    // prettier-ignore
-    function FromConstructor$4(schema, references) {
-        schema.parameters = FromRest$3(schema.parameters, references);
-        schema.returns = Deref$1(schema.returns, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromFunction$4(schema, references) {
-        schema.parameters = FromRest$3(schema.parameters, references);
-        schema.returns = Deref$1(schema.returns, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromIntersect$8(schema, references) {
-        schema.allOf = FromRest$3(schema.allOf, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromUnion$8(schema, references) {
-        schema.anyOf = FromRest$3(schema.anyOf, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromTuple$6(schema, references) {
-        if (IsUndefined$3(schema.items))
-            return schema;
-        schema.items = FromRest$3(schema.items, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromArray$6(schema, references) {
-        schema.items = Deref$1(schema.items, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromObject$6(schema, references) {
-        schema.properties = FromProperties$b(schema.properties, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromPromise$4(schema, references) {
-        schema.item = Deref$1(schema.item, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromAsyncIterator$4(schema, references) {
-        schema.items = Deref$1(schema.items, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromIterator$4(schema, references) {
-        schema.items = Deref$1(schema.items, references);
-        return schema;
-    }
-    // prettier-ignore
-    function FromRef$5(schema, references) {
-        const target = references.find(remote => remote.$id === schema.$ref);
-        if (target === undefined)
-            throw Error(`Unable to dereference schema with $id ${schema.$ref}`);
-        const discard = Discard(target, ['$id']);
-        return Deref$1(discard, references);
-    }
-    // prettier-ignore
-    function DerefResolve(schema, references) {
-        return (IsConstructor$1(schema) ? FromConstructor$4(schema, references) :
-            IsFunction$2(schema) ? FromFunction$4(schema, references) :
-                IsIntersect$1(schema) ? FromIntersect$8(schema, references) :
-                    IsUnion$1(schema) ? FromUnion$8(schema, references) :
-                        IsTuple$1(schema) ? FromTuple$6(schema, references) :
-                            IsArray$2(schema) ? FromArray$6(schema, references) :
-                                IsObject$2(schema) ? FromObject$6(schema, references) :
-                                    IsPromise$2(schema) ? FromPromise$4(schema, references) :
-                                        IsAsyncIterator$2(schema) ? FromAsyncIterator$4(schema, references) :
-                                            IsIterator$2(schema) ? FromIterator$4(schema, references) :
-                                                IsRef$1(schema) ? FromRef$5(schema, references) :
-                                                    schema);
-    }
-    // ------------------------------------------------------------------
-    // TDeref
-    // ------------------------------------------------------------------
-    /** `[Json]` Creates a dereferenced type */
-    function Deref$1(schema, references) {
-        return DerefResolve(CloneType(schema), CloneRest(references));
-    }
-
-    /** `[Json]` Creates a Enum type */
-    function Enum(item, options = {}) {
-        if (IsUndefined$3(item))
-            throw new Error('Enum undefined or empty');
-        const values1 = globalThis.Object.getOwnPropertyNames(item)
-            .filter((key) => isNaN(key))
-            .map((key) => item[key]);
-        const values2 = [...new Set(values1)];
-        const anyOf = values2.map((value) => Literal(value));
-        return Union$1(anyOf, { ...options, [Hint]: 'Enum' });
-    }
-
-    class ExtendsResolverError extends TypeBoxError {
-    }
-    var ExtendsResult;
-    (function (ExtendsResult) {
-        ExtendsResult[ExtendsResult["Union"] = 0] = "Union";
-        ExtendsResult[ExtendsResult["True"] = 1] = "True";
-        ExtendsResult[ExtendsResult["False"] = 2] = "False";
-    })(ExtendsResult || (ExtendsResult = {}));
-    // ------------------------------------------------------------------
-    // IntoBooleanResult
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IntoBooleanResult(result) {
-        return result === ExtendsResult.False ? result : ExtendsResult.True;
-    }
-    // ------------------------------------------------------------------
-    // Throw
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function Throw(message) {
-        throw new ExtendsResolverError(message);
-    }
-    // ------------------------------------------------------------------
-    // StructuralRight
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IsStructuralRight(right) {
-        return (IsNever(right) ||
-            IsIntersect(right) ||
-            IsUnion(right) ||
-            IsUnknown(right) ||
-            IsAny(right));
-    }
-    // prettier-ignore
-    function StructuralRight(left, right) {
-        return (IsNever(right) ? FromNeverRight() :
-            IsIntersect(right) ? FromIntersectRight(left, right) :
-                IsUnion(right) ? FromUnionRight(left, right) :
-                    IsUnknown(right) ? FromUnknownRight() :
-                        IsAny(right) ? FromAnyRight() :
-                            Throw('StructuralRight'));
-    }
-    // ------------------------------------------------------------------
-    // Any
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromAnyRight(left, right) {
-        return ExtendsResult.True;
-    }
-    // prettier-ignore
-    function FromAny$2(left, right) {
-        return (IsIntersect(right) ? FromIntersectRight(left, right) :
-            (IsUnion(right) && right.anyOf.some((schema) => IsAny(schema) || IsUnknown(schema))) ? ExtendsResult.True :
-                IsUnion(right) ? ExtendsResult.Union :
-                    IsUnknown(right) ? ExtendsResult.True :
-                        IsAny(right) ? ExtendsResult.True :
-                            ExtendsResult.Union);
-    }
-    // ------------------------------------------------------------------
-    // Array
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromArrayRight(left, right) {
-        return (IsUnknown(left) ? ExtendsResult.False :
-            IsAny(left) ? ExtendsResult.Union :
-                IsNever(left) ? ExtendsResult.True :
-                    ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromArray$5(left, right) {
-        return (IsObject$1(right) && IsObjectArrayLike(right) ? ExtendsResult.True :
-            IsStructuralRight(right) ? StructuralRight(left, right) :
-                !IsArray$1(right) ? ExtendsResult.False :
-                    IntoBooleanResult(Visit$6(left.items, right.items)));
-    }
-    // ------------------------------------------------------------------
-    // AsyncIterator
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromAsyncIterator$3(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            !IsAsyncIterator$1(right) ? ExtendsResult.False :
-                IntoBooleanResult(Visit$6(left.items, right.items)));
-    }
-    // ------------------------------------------------------------------
-    // BigInt
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromBigInt$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsBigInt$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Boolean
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromBooleanRight(left, right) {
-        return (IsLiteralBoolean(left) ? ExtendsResult.True :
-            IsBoolean$1(left) ? ExtendsResult.True :
-                ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromBoolean$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsBoolean$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Constructor
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromConstructor$3(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                !IsConstructor(right) ? ExtendsResult.False :
-                    left.parameters.length > right.parameters.length ? ExtendsResult.False :
-                        (!left.parameters.every((schema, index) => IntoBooleanResult(Visit$6(right.parameters[index], schema)) === ExtendsResult.True)) ? ExtendsResult.False :
-                            IntoBooleanResult(Visit$6(left.returns, right.returns)));
-    }
-    // ------------------------------------------------------------------
-    // Date
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromDate$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsDate$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Function
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromFunction$3(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                !IsFunction$1(right) ? ExtendsResult.False :
-                    left.parameters.length > right.parameters.length ? ExtendsResult.False :
-                        (!left.parameters.every((schema, index) => IntoBooleanResult(Visit$6(right.parameters[index], schema)) === ExtendsResult.True)) ? ExtendsResult.False :
-                            IntoBooleanResult(Visit$6(left.returns, right.returns)));
-    }
-    // ------------------------------------------------------------------
-    // Integer
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromIntegerRight(left, right) {
-        return (IsLiteral(left) && IsNumber$3(left.const) ? ExtendsResult.True :
-            IsNumber$1(left) || IsInteger$1(left) ? ExtendsResult.True :
-                ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromInteger$2(left, right) {
-        return (IsInteger$1(right) || IsNumber$1(right) ? ExtendsResult.True :
-            IsStructuralRight(right) ? StructuralRight(left, right) :
-                IsObject$1(right) ? FromObjectRight(left, right) :
-                    IsRecord(right) ? FromRecordRight(left, right) :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Intersect
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromIntersectRight(left, right) {
-        return right.allOf.every((schema) => Visit$6(left, schema) === ExtendsResult.True)
-            ? ExtendsResult.True
-            : ExtendsResult.False;
-    }
-    // prettier-ignore
-    function FromIntersect$7(left, right) {
-        return left.allOf.some((schema) => Visit$6(schema, right) === ExtendsResult.True)
-            ? ExtendsResult.True
-            : ExtendsResult.False;
-    }
-    // ------------------------------------------------------------------
-    // Iterator
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromIterator$3(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            !IsIterator$1(right) ? ExtendsResult.False :
-                IntoBooleanResult(Visit$6(left.items, right.items)));
-    }
-    // ------------------------------------------------------------------
-    // Literal
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromLiteral$2(left, right) {
-        return (IsLiteral(right) && right.const === left.const ? ExtendsResult.True :
-            IsStructuralRight(right) ? StructuralRight(left, right) :
-                IsObject$1(right) ? FromObjectRight(left, right) :
-                    IsRecord(right) ? FromRecordRight(left, right) :
-                        IsString$1(right) ? FromStringRight(left) :
-                            IsNumber$1(right) ? FromNumberRight(left) :
-                                IsInteger$1(right) ? FromIntegerRight(left) :
-                                    IsBoolean$1(right) ? FromBooleanRight(left) :
-                                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Never
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromNeverRight(left, right) {
-        return ExtendsResult.False;
-    }
-    // prettier-ignore
-    function FromNever$2(left, right) {
-        return ExtendsResult.True;
-    }
-    // ------------------------------------------------------------------
-    // Not
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function UnwrapTNot(schema) {
-        let [current, depth] = [schema, 0];
-        while (true) {
-            if (!IsNot(current))
-                break;
-            current = current.not;
-            depth += 1;
-        }
-        return depth % 2 === 0 ? current : Unknown();
-    }
-    // prettier-ignore
-    function FromNot$5(left, right) {
-        // TypeScript has no concept of negated types, and attempts to correctly check the negated
-        // type at runtime would put TypeBox at odds with TypeScripts ability to statically infer
-        // the type. Instead we unwrap to either unknown or T and continue evaluating.
-        // prettier-ignore
-        return (IsNot(left) ? Visit$6(UnwrapTNot(left), right) :
-            IsNot(right) ? Visit$6(left, UnwrapTNot(right)) :
-                Throw('Invalid fallthrough for Not'));
-    }
-    // ------------------------------------------------------------------
-    // Null
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromNull$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsNull$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Number
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromNumberRight(left, right) {
-        return (IsLiteralNumber(left) ? ExtendsResult.True :
-            IsNumber$1(left) || IsInteger$1(left) ? ExtendsResult.True :
-                ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromNumber$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsInteger$1(right) || IsNumber$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Object
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IsObjectPropertyCount(schema, count) {
-        return Object.getOwnPropertyNames(schema.properties).length === count;
-    }
-    // prettier-ignore
-    function IsObjectStringLike(schema) {
-        return IsObjectArrayLike(schema);
-    }
-    // prettier-ignore
-    function IsObjectSymbolLike(schema) {
-        return IsObjectPropertyCount(schema, 0) || (IsObjectPropertyCount(schema, 1) && 'description' in schema.properties && IsUnion(schema.properties.description) && schema.properties.description.anyOf.length === 2 && ((IsString$1(schema.properties.description.anyOf[0]) &&
-            IsUndefined$1(schema.properties.description.anyOf[1])) || (IsString$1(schema.properties.description.anyOf[1]) &&
-            IsUndefined$1(schema.properties.description.anyOf[0]))));
-    }
-    // prettier-ignore
-    function IsObjectNumberLike(schema) {
-        return IsObjectPropertyCount(schema, 0);
-    }
-    // prettier-ignore
-    function IsObjectBooleanLike(schema) {
-        return IsObjectPropertyCount(schema, 0);
-    }
-    // prettier-ignore
-    function IsObjectBigIntLike(schema) {
-        return IsObjectPropertyCount(schema, 0);
-    }
-    // prettier-ignore
-    function IsObjectDateLike(schema) {
-        return IsObjectPropertyCount(schema, 0);
-    }
-    // prettier-ignore
-    function IsObjectUint8ArrayLike(schema) {
-        return IsObjectArrayLike(schema);
-    }
-    // prettier-ignore
-    function IsObjectFunctionLike(schema) {
-        const length = Number$1();
-        return IsObjectPropertyCount(schema, 0) || (IsObjectPropertyCount(schema, 1) && 'length' in schema.properties && IntoBooleanResult(Visit$6(schema.properties['length'], length)) === ExtendsResult.True);
-    }
-    // prettier-ignore
-    function IsObjectConstructorLike(schema) {
-        return IsObjectPropertyCount(schema, 0);
-    }
-    // prettier-ignore
-    function IsObjectArrayLike(schema) {
-        const length = Number$1();
-        return IsObjectPropertyCount(schema, 0) || (IsObjectPropertyCount(schema, 1) && 'length' in schema.properties && IntoBooleanResult(Visit$6(schema.properties['length'], length)) === ExtendsResult.True);
-    }
-    // prettier-ignore
-    function IsObjectPromiseLike(schema) {
-        const then = Function$1([Any()], Any());
-        return IsObjectPropertyCount(schema, 0) || (IsObjectPropertyCount(schema, 1) && 'then' in schema.properties && IntoBooleanResult(Visit$6(schema.properties['then'], then)) === ExtendsResult.True);
-    }
-    // ------------------------------------------------------------------
-    // Property
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function Property(left, right) {
-        return (Visit$6(left, right) === ExtendsResult.False ? ExtendsResult.False :
-            IsOptional(left) && !IsOptional(right) ? ExtendsResult.False :
-                ExtendsResult.True);
-    }
-    // prettier-ignore
-    function FromObjectRight(left, right) {
-        return (IsUnknown(left) ? ExtendsResult.False :
-            IsAny(left) ? ExtendsResult.Union : (IsNever(left) ||
-                (IsLiteralString(left) && IsObjectStringLike(right)) ||
-                (IsLiteralNumber(left) && IsObjectNumberLike(right)) ||
-                (IsLiteralBoolean(left) && IsObjectBooleanLike(right)) ||
-                (IsSymbol$1(left) && IsObjectSymbolLike(right)) ||
-                (IsBigInt$1(left) && IsObjectBigIntLike(right)) ||
-                (IsString$1(left) && IsObjectStringLike(right)) ||
-                (IsSymbol$1(left) && IsObjectSymbolLike(right)) ||
-                (IsNumber$1(left) && IsObjectNumberLike(right)) ||
-                (IsInteger$1(left) && IsObjectNumberLike(right)) ||
-                (IsBoolean$1(left) && IsObjectBooleanLike(right)) ||
-                (IsUint8Array$1(left) && IsObjectUint8ArrayLike(right)) ||
-                (IsDate$1(left) && IsObjectDateLike(right)) ||
-                (IsConstructor(left) && IsObjectConstructorLike(right)) ||
-                (IsFunction$1(left) && IsObjectFunctionLike(right))) ? ExtendsResult.True :
-                (IsRecord(left) && IsString$1(RecordKey(left))) ? (() => {
-                    // When expressing a Record with literal key values, the Record is converted into a Object with
-                    // the Hint assigned as `Record`. This is used to invert the extends logic.
-                    return right[Hint] === 'Record' ? ExtendsResult.True : ExtendsResult.False;
-                })() :
-                    (IsRecord(left) && IsNumber$1(RecordKey(left))) ? (() => {
-                        return IsObjectPropertyCount(right, 0) ? ExtendsResult.True : ExtendsResult.False;
-                    })() :
-                        ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromObject$5(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsRecord(right) ? FromRecordRight(left, right) :
-                !IsObject$1(right) ? ExtendsResult.False :
-                    (() => {
-                        for (const key of Object.getOwnPropertyNames(right.properties)) {
-                            if (!(key in left.properties) && !IsOptional(right.properties[key])) {
-                                return ExtendsResult.False;
-                            }
-                            if (IsOptional(right.properties[key])) {
-                                return ExtendsResult.True;
-                            }
-                            if (Property(left.properties[key], right.properties[key]) === ExtendsResult.False) {
-                                return ExtendsResult.False;
-                            }
-                        }
-                        return ExtendsResult.True;
-                    })());
-    }
-    // ------------------------------------------------------------------
-    // Promise
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromPromise$3(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) && IsObjectPromiseLike(right) ? ExtendsResult.True :
-                !IsPromise$1(right) ? ExtendsResult.False :
-                    IntoBooleanResult(Visit$6(left.item, right.item)));
-    }
-    // ------------------------------------------------------------------
-    // Record
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function RecordKey(schema) {
-        return (PatternNumberExact in schema.patternProperties ? Number$1() :
-            PatternStringExact in schema.patternProperties ? String$1() :
-                Throw('Unknown record key pattern'));
-    }
-    // prettier-ignore
-    function RecordValue(schema) {
-        return (PatternNumberExact in schema.patternProperties ? schema.patternProperties[PatternNumberExact] :
-            PatternStringExact in schema.patternProperties ? schema.patternProperties[PatternStringExact] :
-                Throw('Unable to get record value schema'));
-    }
-    // prettier-ignore
-    function FromRecordRight(left, right) {
-        const [Key, Value] = [RecordKey(right), RecordValue(right)];
-        return ((IsLiteralString(left) && IsNumber$1(Key) && IntoBooleanResult(Visit$6(left, Value)) === ExtendsResult.True) ? ExtendsResult.True :
-            IsUint8Array$1(left) && IsNumber$1(Key) ? Visit$6(left, Value) :
-                IsString$1(left) && IsNumber$1(Key) ? Visit$6(left, Value) :
-                    IsArray$1(left) && IsNumber$1(Key) ? Visit$6(left, Value) :
-                        IsObject$1(left) ? (() => {
-                            for (const key of Object.getOwnPropertyNames(left.properties)) {
-                                if (Property(Value, left.properties[key]) === ExtendsResult.False) {
-                                    return ExtendsResult.False;
-                                }
-                            }
-                            return ExtendsResult.True;
-                        })() :
-                            ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromRecord$5(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                !IsRecord(right) ? ExtendsResult.False :
-                    Visit$6(RecordValue(left), RecordValue(right)));
-    }
-    // ------------------------------------------------------------------
-    // RegExp
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromRegExp$2(left, right) {
-        // Note: RegExp types evaluate as strings, not RegExp objects.
-        // Here we remap either into string and continue evaluating.
-        const L = IsRegExp(left) ? String$1() : left;
-        const R = IsRegExp(right) ? String$1() : right;
-        return Visit$6(L, R);
-    }
-    // ------------------------------------------------------------------
-    // String
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromStringRight(left, right) {
-        return (IsLiteral(left) && IsString$3(left.const) ? ExtendsResult.True :
-            IsString$1(left) ? ExtendsResult.True :
-                ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromString$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsString$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Symbol
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromSymbol$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsSymbol$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // TemplateLiteral
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromTemplateLiteral$3(left, right) {
-        // TemplateLiteral types are resolved to either unions for finite expressions or string
-        // for infinite expressions. Here we call to TemplateLiteralResolver to resolve for
-        // either type and continue evaluating.
-        return (IsTemplateLiteral(left) ? Visit$6(TemplateLiteralToUnion(left), right) :
-            IsTemplateLiteral(right) ? Visit$6(left, TemplateLiteralToUnion(right)) :
-                Throw('Invalid fallthrough for TemplateLiteral'));
-    }
-    // ------------------------------------------------------------------
-    // Tuple
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function IsArrayOfTuple(left, right) {
-        return (IsArray$1(right) &&
-            left.items !== undefined &&
-            left.items.every((schema) => Visit$6(schema, right.items) === ExtendsResult.True));
-    }
-    // prettier-ignore
-    function FromTupleRight(left, right) {
-        return (IsNever(left) ? ExtendsResult.True :
-            IsUnknown(left) ? ExtendsResult.False :
-                IsAny(left) ? ExtendsResult.Union :
-                    ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromTuple$5(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) && IsObjectArrayLike(right) ? ExtendsResult.True :
-                IsArray$1(right) && IsArrayOfTuple(left, right) ? ExtendsResult.True :
-                    !IsTuple(right) ? ExtendsResult.False :
-                        (IsUndefined$3(left.items) && !IsUndefined$3(right.items)) || (!IsUndefined$3(left.items) && IsUndefined$3(right.items)) ? ExtendsResult.False :
-                            (IsUndefined$3(left.items) && !IsUndefined$3(right.items)) ? ExtendsResult.True :
-                                left.items.every((schema, index) => Visit$6(schema, right.items[index]) === ExtendsResult.True) ? ExtendsResult.True :
-                                    ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Uint8Array
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromUint8Array$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsUint8Array$1(right) ? ExtendsResult.True :
-                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Undefined
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromUndefined$2(left, right) {
-        return (IsStructuralRight(right) ? StructuralRight(left, right) :
-            IsObject$1(right) ? FromObjectRight(left, right) :
-                IsRecord(right) ? FromRecordRight(left, right) :
-                    IsVoid(right) ? FromVoidRight(left) :
-                        IsUndefined$1(right) ? ExtendsResult.True :
-                            ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Union
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromUnionRight(left, right) {
-        return right.anyOf.some((schema) => Visit$6(left, schema) === ExtendsResult.True)
-            ? ExtendsResult.True
-            : ExtendsResult.False;
-    }
-    // prettier-ignore
-    function FromUnion$7(left, right) {
-        return left.anyOf.every((schema) => Visit$6(schema, right) === ExtendsResult.True)
-            ? ExtendsResult.True
-            : ExtendsResult.False;
-    }
-    // ------------------------------------------------------------------
-    // Unknown
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromUnknownRight(left, right) {
-        return ExtendsResult.True;
-    }
-    // prettier-ignore
-    function FromUnknown$2(left, right) {
-        return (IsNever(right) ? FromNeverRight() :
-            IsIntersect(right) ? FromIntersectRight(left, right) :
-                IsUnion(right) ? FromUnionRight(left, right) :
-                    IsAny(right) ? FromAnyRight() :
-                        IsString$1(right) ? FromStringRight(left) :
-                            IsNumber$1(right) ? FromNumberRight(left) :
-                                IsInteger$1(right) ? FromIntegerRight(left) :
-                                    IsBoolean$1(right) ? FromBooleanRight(left) :
-                                        IsArray$1(right) ? FromArrayRight(left) :
-                                            IsTuple(right) ? FromTupleRight(left) :
-                                                IsObject$1(right) ? FromObjectRight(left, right) :
-                                                    IsUnknown(right) ? ExtendsResult.True :
-                                                        ExtendsResult.False);
-    }
-    // ------------------------------------------------------------------
-    // Void
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromVoidRight(left, right) {
-        return (IsUndefined$1(left) ? ExtendsResult.True :
-            IsUndefined$1(left) ? ExtendsResult.True :
-                ExtendsResult.False);
-    }
-    // prettier-ignore
-    function FromVoid$2(left, right) {
-        return (IsIntersect(right) ? FromIntersectRight(left, right) :
-            IsUnion(right) ? FromUnionRight(left, right) :
-                IsUnknown(right) ? FromUnknownRight() :
-                    IsAny(right) ? FromAnyRight() :
-                        IsObject$1(right) ? FromObjectRight(left, right) :
-                            IsVoid(right) ? ExtendsResult.True :
-                                ExtendsResult.False);
-    }
-    // prettier-ignore
-    function Visit$6(left, right) {
-        return (
-        // resolvable
-        (IsTemplateLiteral(left) || IsTemplateLiteral(right)) ? FromTemplateLiteral$3(left, right) :
-            (IsRegExp(left) || IsRegExp(right)) ? FromRegExp$2(left, right) :
-                (IsNot(left) || IsNot(right)) ? FromNot$5(left, right) :
-                    // standard
-                    IsAny(left) ? FromAny$2(left, right) :
-                        IsArray$1(left) ? FromArray$5(left, right) :
-                            IsBigInt$1(left) ? FromBigInt$2(left, right) :
-                                IsBoolean$1(left) ? FromBoolean$2(left, right) :
-                                    IsAsyncIterator$1(left) ? FromAsyncIterator$3(left, right) :
-                                        IsConstructor(left) ? FromConstructor$3(left, right) :
-                                            IsDate$1(left) ? FromDate$2(left, right) :
-                                                IsFunction$1(left) ? FromFunction$3(left, right) :
-                                                    IsInteger$1(left) ? FromInteger$2(left, right) :
-                                                        IsIntersect(left) ? FromIntersect$7(left, right) :
-                                                            IsIterator$1(left) ? FromIterator$3(left, right) :
-                                                                IsLiteral(left) ? FromLiteral$2(left, right) :
-                                                                    IsNever(left) ? FromNever$2() :
-                                                                        IsNull$1(left) ? FromNull$2(left, right) :
-                                                                            IsNumber$1(left) ? FromNumber$2(left, right) :
-                                                                                IsObject$1(left) ? FromObject$5(left, right) :
-                                                                                    IsRecord(left) ? FromRecord$5(left, right) :
-                                                                                        IsString$1(left) ? FromString$2(left, right) :
-                                                                                            IsSymbol$1(left) ? FromSymbol$2(left, right) :
-                                                                                                IsTuple(left) ? FromTuple$5(left, right) :
-                                                                                                    IsPromise$1(left) ? FromPromise$3(left, right) :
-                                                                                                        IsUint8Array$1(left) ? FromUint8Array$2(left, right) :
-                                                                                                            IsUndefined$1(left) ? FromUndefined$2(left, right) :
-                                                                                                                IsUnion(left) ? FromUnion$7(left, right) :
-                                                                                                                    IsUnknown(left) ? FromUnknown$2(left, right) :
-                                                                                                                        IsVoid(left) ? FromVoid$2(left, right) :
-                                                                                                                            Throw(`Unknown left type operand '${left[Kind]}'`));
-    }
-    function ExtendsCheck(left, right) {
-        return Visit$6(left, right);
-    }
-
-    // prettier-ignore
-    function FromProperties$a(P, Right, True, False, options) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Extends(P[K2], Right, True, False, options);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$6(Left, Right, True, False, options) {
-        return FromProperties$a(Left.properties, Right, True, False, options);
-    }
-    // prettier-ignore
-    function ExtendsFromMappedResult(Left, Right, True, False, options) {
-        const P = FromMappedResult$6(Left, Right, True, False, options);
-        return MappedResult(P);
-    }
-
-    // prettier-ignore
-    function ExtendsResolve(left, right, trueType, falseType) {
-        const R = ExtendsCheck(left, right);
-        return (R === ExtendsResult.Union ? Union$1([trueType, falseType]) :
-            R === ExtendsResult.True ? trueType :
-                falseType);
-    }
-    /** `[Json]` Creates a Conditional type */
-    function Extends(L, R, T, F, options = {}) {
-        // prettier-ignore
-        return (IsMappedResult$1(L) ? ExtendsFromMappedResult(L, R, T, F, options) :
-            IsMappedKey$1(L) ? CloneType(ExtendsFromMappedKey(L, R, T, F, options)) :
-                CloneType(ExtendsResolve(L, R, T, F), options));
-    }
-
-    // prettier-ignore
-    function FromPropertyKey$2(K, U, L, R, options) {
-        return {
-            [K]: Extends(Literal(K), U, L, R, options)
-        };
-    }
-    // prettier-ignore
-    function FromPropertyKeys$2(K, U, L, R, options) {
-        return K.reduce((Acc, LK) => {
-            return { ...Acc, ...FromPropertyKey$2(LK, U, L, R, options) };
-        }, {});
-    }
-    // prettier-ignore
-    function FromMappedKey$2(K, U, L, R, options) {
-        return FromPropertyKeys$2(K.keys, U, L, R, options);
-    }
-    // prettier-ignore
-    function ExtendsFromMappedKey(T, U, L, R, options) {
-        const P = FromMappedKey$2(T, U, L, R, options);
-        return MappedResult(P);
-    }
-
-    /** Fast undefined check used for properties of type undefined */
-    function Intersect(schema) {
-        return schema.allOf.every((schema) => ExtendsUndefinedCheck(schema));
-    }
-    function Union(schema) {
-        return schema.anyOf.some((schema) => ExtendsUndefinedCheck(schema));
-    }
-    function Not$1(schema) {
-        return !ExtendsUndefinedCheck(schema.not);
-    }
-    /** Fast undefined check used for properties of type undefined */
-    // prettier-ignore
-    function ExtendsUndefinedCheck(schema) {
-        return (schema[Kind] === 'Intersect' ? Intersect(schema) :
-            schema[Kind] === 'Union' ? Union(schema) :
-                schema[Kind] === 'Not' ? Not$1(schema) :
-                    schema[Kind] === 'Undefined' ? true :
-                        false);
-    }
-
-    function ExcludeFromTemplateLiteral(L, R) {
-        return Exclude(TemplateLiteralToUnion(L), R);
-    }
-
-    function ExcludeRest(L, R) {
-        const excluded = L.filter((inner) => ExtendsCheck(inner, R) === ExtendsResult.False);
-        return excluded.length === 1 ? excluded[0] : Union$1(excluded);
-    }
-    /** `[Json]` Constructs a type by excluding from unionType all union members that are assignable to excludedMembers */
-    function Exclude(L, R, options = {}) {
-        // overloads
-        if (IsTemplateLiteral$1(L))
-            return CloneType(ExcludeFromTemplateLiteral(L, R), options);
-        if (IsMappedResult$1(L))
-            return CloneType(ExcludeFromMappedResult(L, R), options);
-        // prettier-ignore
-        return CloneType(IsUnion$1(L) ? ExcludeRest(L.anyOf, R) :
-            ExtendsCheck(L, R) !== ExtendsResult.False ? Never() : L, options);
-    }
-
-    // prettier-ignore
-    function FromProperties$9(P, U) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Exclude(P[K2], U);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$5(R, T) {
-        return FromProperties$9(R.properties, T);
-    }
-    // prettier-ignore
-    function ExcludeFromMappedResult(R, T) {
-        const P = FromMappedResult$5(R, T);
-        return MappedResult(P);
-    }
-
-    function ExtractFromTemplateLiteral(L, R) {
-        return Extract(TemplateLiteralToUnion(L), R);
-    }
-
-    function ExtractRest(L, R) {
-        const extracted = L.filter((inner) => ExtendsCheck(inner, R) !== ExtendsResult.False);
-        return extracted.length === 1 ? extracted[0] : Union$1(extracted);
-    }
-    /** `[Json]` Constructs a type by extracting from type all union members that are assignable to union */
-    function Extract(L, R, options = {}) {
-        // overloads
-        if (IsTemplateLiteral$1(L))
-            return CloneType(ExtractFromTemplateLiteral(L, R), options);
-        if (IsMappedResult$1(L))
-            return CloneType(ExtractFromMappedResult(L, R), options);
-        // prettier-ignore
-        return CloneType(IsUnion$1(L) ? ExtractRest(L.anyOf, R) :
-            ExtendsCheck(L, R) !== ExtendsResult.False ? L : Never(), options);
-    }
-
-    // prettier-ignore
-    function FromProperties$8(P, T) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Extract(P[K2], T);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$4(R, T) {
-        return FromProperties$8(R.properties, T);
-    }
-    // prettier-ignore
-    function ExtractFromMappedResult(R, T) {
-        const P = FromMappedResult$4(R, T);
-        return MappedResult(P);
-    }
-
-    /** `[JavaScript]` Extracts the InstanceType from the given Constructor type */
-    function InstanceType(schema, options = {}) {
-        return CloneType(schema.returns, options);
-    }
-
-    /** `[Json]` Creates an Integer type */
-    function Integer(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Integer',
-            type: 'integer',
-        };
-    }
-
-    // prettier-ignore
-    function MappedIntrinsicPropertyKey(K, M, options) {
-        return {
-            [K]: Intrinsic(Literal(K), M, options)
-        };
-    }
-    // prettier-ignore
-    function MappedIntrinsicPropertyKeys(K, M, options) {
-        return K.reduce((Acc, L) => {
-            return { ...Acc, ...MappedIntrinsicPropertyKey(L, M, options) };
-        }, {});
-    }
-    // prettier-ignore
-    function MappedIntrinsicProperties(T, M, options) {
-        return MappedIntrinsicPropertyKeys(T['keys'], M, options);
-    }
-    // prettier-ignore
-    function IntrinsicFromMappedKey(T, M, options) {
-        const P = MappedIntrinsicProperties(T, M, options);
-        return MappedResult(P);
-    }
-
-    // ------------------------------------------------------------------
-    // Apply
-    // ------------------------------------------------------------------
-    function ApplyUncapitalize(value) {
-        const [first, rest] = [value.slice(0, 1), value.slice(1)];
-        return [first.toLowerCase(), rest].join('');
-    }
-    function ApplyCapitalize(value) {
-        const [first, rest] = [value.slice(0, 1), value.slice(1)];
-        return [first.toUpperCase(), rest].join('');
-    }
-    function ApplyUppercase(value) {
-        return value.toUpperCase();
-    }
-    function ApplyLowercase(value) {
-        return value.toLowerCase();
-    }
-    function FromTemplateLiteral$2(schema, mode, options) {
-        // note: template literals require special runtime handling as they are encoded in string patterns.
-        // This diverges from the mapped type which would otherwise map on the template literal kind.
-        const expression = TemplateLiteralParseExact(schema.pattern);
-        const finite = IsTemplateLiteralExpressionFinite(expression);
-        if (!finite)
-            return { ...schema, pattern: FromLiteralValue(schema.pattern, mode) };
-        const strings = [...TemplateLiteralExpressionGenerate(expression)];
-        const literals = strings.map((value) => Literal(value));
-        const mapped = FromRest$2(literals, mode);
-        const union = Union$1(mapped);
-        return TemplateLiteral([union], options);
-    }
-    // prettier-ignore
-    function FromLiteralValue(value, mode) {
-        return (typeof value === 'string' ? (mode === 'Uncapitalize' ? ApplyUncapitalize(value) :
-            mode === 'Capitalize' ? ApplyCapitalize(value) :
-                mode === 'Uppercase' ? ApplyUppercase(value) :
-                    mode === 'Lowercase' ? ApplyLowercase(value) :
-                        value) : value.toString());
-    }
-    // prettier-ignore
-    function FromRest$2(T, M) {
-        return T.map(L => Intrinsic(L, M));
-    }
-    /** Applies an intrinsic string manipulation to the given type. */
-    function Intrinsic(schema, mode, options = {}) {
-        // prettier-ignore
-        return (
-        // Intrinsic-Mapped-Inference
-        IsMappedKey$1(schema) ? IntrinsicFromMappedKey(schema, mode, options) :
-            // Standard-Inference
-            IsTemplateLiteral$1(schema) ? FromTemplateLiteral$2(schema, mode, schema) :
-                IsUnion$1(schema) ? Union$1(FromRest$2(schema.anyOf, mode), options) :
-                    IsLiteral$1(schema) ? Literal(FromLiteralValue(schema.const, mode), options) :
-                        schema);
-    }
-
-    /** `[Json]` Intrinsic function to Capitalize LiteralString types */
-    function Capitalize(T, options = {}) {
-        return Intrinsic(T, 'Capitalize', options);
-    }
-
-    /** `[Json]` Intrinsic function to Lowercase LiteralString types */
-    function Lowercase(T, options = {}) {
-        return Intrinsic(T, 'Lowercase', options);
-    }
-
-    /** `[Json]` Intrinsic function to Uncapitalize LiteralString types */
-    function Uncapitalize(T, options = {}) {
-        return Intrinsic(T, 'Uncapitalize', options);
-    }
-
-    /** `[Json]` Intrinsic function to Uppercase LiteralString types */
-    function Uppercase(T, options = {}) {
-        return Intrinsic(T, 'Uppercase', options);
-    }
-
-    /** `[Json]` Creates a Not type */
-    function Not(schema, options) {
-        return {
-            ...options,
-            [Kind]: 'Not',
-            not: CloneType(schema),
-        };
-    }
-
-    // prettier-ignore
-    function FromProperties$7(P, K, options) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Omit(P[K2], K, options);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$3(R, K, options) {
-        return FromProperties$7(R.properties, K, options);
-    }
-    // prettier-ignore
-    function OmitFromMappedResult(R, K, options) {
-        const P = FromMappedResult$3(R, K, options);
-        return MappedResult(P);
-    }
-
-    // prettier-ignore
-    function FromIntersect$6(T, K) {
-        return T.map((T) => OmitResolve(T, K));
-    }
-    // prettier-ignore
-    function FromUnion$6(T, K) {
-        return T.map((T) => OmitResolve(T, K));
-    }
-    // ------------------------------------------------------------------
-    // FromProperty
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function FromProperty(T, K) {
-        const { [K]: _, ...R } = T;
-        return R;
-    }
-    // prettier-ignore
-    function FromProperties$6(T, K) {
-        return K.reduce((T, K2) => FromProperty(T, K2), T);
-    }
-    // ------------------------------------------------------------------
-    // OmitResolve
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function OmitResolve(T, K) {
-        return (IsIntersect$1(T) ? Intersect$1(FromIntersect$6(T.allOf, K)) :
-            IsUnion$1(T) ? Union$1(FromUnion$6(T.anyOf, K)) :
-                IsObject$2(T) ? Object$1(FromProperties$6(T.properties, K)) :
-                    Object$1({}));
-    }
-    function Omit(T, K, options = {}) {
-        // mapped
-        if (IsMappedKey$1(K))
-            return OmitFromMappedKey(T, K, options);
-        if (IsMappedResult$1(T))
-            return OmitFromMappedResult(T, K, options);
-        // non-mapped
-        const I = IsSchema$1(K) ? IndexPropertyKeys(K) : K;
-        const D = Discard(T, [TransformKind, '$id', 'required']);
-        const R = CloneType(OmitResolve(T, I), options);
-        return { ...D, ...R };
-    }
-
-    // prettier-ignore
-    function FromPropertyKey$1(T, K, options) {
-        return {
-            [K]: Omit(T, [K], options)
-        };
-    }
-    // prettier-ignore
-    function FromPropertyKeys$1(T, K, options) {
-        return K.reduce((Acc, LK) => {
-            return { ...Acc, ...FromPropertyKey$1(T, LK, options) };
-        }, {});
-    }
-    // prettier-ignore
-    function FromMappedKey$1(T, K, options) {
-        return FromPropertyKeys$1(T, K.keys, options);
-    }
-    // prettier-ignore
-    function OmitFromMappedKey(T, K, options) {
-        const P = FromMappedKey$1(T, K, options);
-        return MappedResult(P);
-    }
-
-    /** `[JavaScript]` Extracts the Parameters from the given Function type */
-    function Parameters(schema, options = {}) {
-        return Tuple(CloneRest(schema.parameters), { ...options });
-    }
-
-    // prettier-ignore
-    function FromRest$1(T) {
-        return T.map(L => PartialResolve(L));
-    }
-    // prettier-ignore
-    function FromProperties$5(T) {
-        const Acc = {};
-        for (const K of globalThis.Object.getOwnPropertyNames(T))
-            Acc[K] = Optional(T[K]);
-        return Acc;
-    }
-    // ------------------------------------------------------------------
-    // PartialResolve
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function PartialResolve(T) {
-        return (IsIntersect$1(T) ? Intersect$1(FromRest$1(T.allOf)) :
-            IsUnion$1(T) ? Union$1(FromRest$1(T.anyOf)) :
-                IsObject$2(T) ? Object$1(FromProperties$5(T.properties)) :
-                    Object$1({}));
-    }
-    /** `[Json]` Constructs a type where all properties are optional */
-    function Partial(T, options = {}) {
-        if (IsMappedResult$1(T))
-            return PartialFromMappedResult(T, options);
-        const D = Discard(T, [TransformKind, '$id', 'required']);
-        const R = CloneType(PartialResolve(T), options);
-        return { ...D, ...R };
-    }
-
-    // prettier-ignore
-    function FromProperties$4(K, options) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(K))
-            Acc[K2] = Partial(K[K2], options);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$2(R, options) {
-        return FromProperties$4(R.properties, options);
-    }
-    // prettier-ignore
-    function PartialFromMappedResult(R, options) {
-        const P = FromMappedResult$2(R, options);
-        return MappedResult(P);
-    }
-
-    // prettier-ignore
-    function FromProperties$3(P, K, options) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Pick(P[K2], K, options);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult$1(R, K, options) {
-        return FromProperties$3(R.properties, K, options);
-    }
-    // prettier-ignore
-    function PickFromMappedResult(R, K, options) {
-        const P = FromMappedResult$1(R, K, options);
-        return MappedResult(P);
-    }
-
-    function FromIntersect$5(T, K) {
-        return T.map((T) => PickResolve(T, K));
-    }
-    // prettier-ignore
-    function FromUnion$5(T, K) {
-        return T.map((T) => PickResolve(T, K));
-    }
-    // prettier-ignore
-    function FromProperties$2(T, K) {
-        const Acc = {};
-        for (const K2 of K)
-            if (K2 in T)
-                Acc[K2] = T[K2];
-        return Acc;
-    }
-    // ------------------------------------------------------------------
-    // PickResolve
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function PickResolve(T, K) {
-        return (IsIntersect$1(T) ? Intersect$1(FromIntersect$5(T.allOf, K)) :
-            IsUnion$1(T) ? Union$1(FromUnion$5(T.anyOf, K)) :
-                IsObject$2(T) ? Object$1(FromProperties$2(T.properties, K)) :
-                    Object$1({}));
-    }
-    function Pick(T, K, options = {}) {
-        // mapped
-        if (IsMappedKey$1(K))
-            return PickFromMappedKey(T, K, options);
-        if (IsMappedResult$1(T))
-            return PickFromMappedResult(T, K, options);
-        // non-mapped
-        const I = IsSchema$1(K) ? IndexPropertyKeys(K) : K;
-        const D = Discard(T, [TransformKind, '$id', 'required']);
-        const R = CloneType(PickResolve(T, I), options);
-        return { ...D, ...R };
-    }
-
-    // prettier-ignore
-    function FromPropertyKey(T, K, options) {
-        return {
-            [K]: Pick(T, [K], options)
-        };
-    }
-    // prettier-ignore
-    function FromPropertyKeys(T, K, options) {
-        return K.reduce((Acc, LK) => {
-            return { ...Acc, ...FromPropertyKey(T, LK, options) };
-        }, {});
-    }
-    // prettier-ignore
-    function FromMappedKey(T, K, options) {
-        return FromPropertyKeys(T, K.keys, options);
-    }
-    // prettier-ignore
-    function PickFromMappedKey(T, K, options) {
-        const P = FromMappedKey(T, K, options);
-        return MappedResult(P);
-    }
-
-    /** `[Json]` Creates a Readonly and Optional property */
-    function ReadonlyOptional(schema) {
-        return Readonly(Optional(schema));
-    }
-
-    // ------------------------------------------------------------------
-    // RecordCreateFromPattern
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function RecordCreateFromPattern(pattern, T, options) {
-        return {
-            ...options,
-            [Kind]: 'Record',
-            type: 'object',
-            patternProperties: { [pattern]: CloneType(T) }
-        };
-    }
-    // ------------------------------------------------------------------
-    // RecordCreateFromKeys
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function RecordCreateFromKeys(K, T, options) {
-        const Acc = {};
-        for (const K2 of K)
-            Acc[K2] = CloneType(T);
-        return Object$1(Acc, { ...options, [Hint]: 'Record' });
-    }
-    // prettier-ignore
-    function FromTemplateLiteralKey(K, T, options) {
-        return (IsTemplateLiteralFinite(K)
-            ? RecordCreateFromKeys(IndexPropertyKeys(K), T, options)
-            : RecordCreateFromPattern(K.pattern, T, options));
-    }
-    // prettier-ignore
-    function FromUnionKey(K, T, options) {
-        return RecordCreateFromKeys(IndexPropertyKeys(Union$1(K)), T, options);
-    }
-    // prettier-ignore
-    function FromLiteralKey(K, T, options) {
-        return RecordCreateFromKeys([K.toString()], T, options);
-    }
-    // prettier-ignore
-    function FromRegExpKey(K, T, options) {
-        return RecordCreateFromPattern(K.source, T, options);
-    }
-    // prettier-ignore
-    function FromStringKey(K, T, options) {
-        const pattern = IsUndefined$3(K.pattern) ? PatternStringExact : K.pattern;
-        return RecordCreateFromPattern(pattern, T, options);
-    }
-    // prettier-ignore
-    function FromAnyKey(K, T, options) {
-        return RecordCreateFromPattern(PatternStringExact, T, options);
-    }
-    // prettier-ignore
-    function FromNeverKey(K, T, options) {
-        return RecordCreateFromPattern(PatternNeverExact, T, options);
-    }
-    // prettier-ignore
-    function FromIntegerKey(_, T, options) {
-        return RecordCreateFromPattern(PatternNumberExact, T, options);
-    }
-    // prettier-ignore
-    function FromNumberKey(_, T, options) {
-        return RecordCreateFromPattern(PatternNumberExact, T, options);
-    }
-    // ------------------------------------------------------------------
-    // TRecordOrObject
-    // ------------------------------------------------------------------
-    /** `[Json]` Creates a Record type */
-    function Record(K, T, options = {}) {
-        // prettier-ignore
-        return (IsUnion$1(K) ? FromUnionKey(K.anyOf, T, options) :
-            IsTemplateLiteral$1(K) ? FromTemplateLiteralKey(K, T, options) :
-                IsLiteral$1(K) ? FromLiteralKey(K.const, T, options) :
-                    IsInteger$2(K) ? FromIntegerKey(K, T, options) :
-                        IsNumber$2(K) ? FromNumberKey(K, T, options) :
-                            IsRegExp$1(K) ? FromRegExpKey(K, T, options) :
-                                IsString$2(K) ? FromStringKey(K, T, options) :
-                                    IsAny$1(K) ? FromAnyKey(K, T, options) :
-                                        IsNever$1(K) ? FromNeverKey(K, T, options) :
-                                            Never(options));
-    }
-
-    // Auto Tracked For Recursive Types without ID's
-    let Ordinal = 0;
-    /** `[Json]` Creates a Recursive type */
-    function Recursive(callback, options = {}) {
-        if (IsUndefined$3(options.$id))
-            options.$id = `T${Ordinal++}`;
-        const thisType = callback({ [Kind]: 'This', $ref: `${options.$id}` });
-        thisType.$id = options.$id;
-        // prettier-ignore
-        return CloneType({ ...options, [Hint]: 'Recursive', ...thisType });
-    }
-
-    /** `[Json]` Creates a Ref type. */
-    function Ref(unresolved, options = {}) {
-        if (IsString$3(unresolved))
-            return { ...options, [Kind]: 'Ref', $ref: unresolved };
-        if (IsUndefined$3(unresolved.$id))
-            throw new Error('Reference target type must specify an $id');
-        return {
-            ...options,
-            [Kind]: 'Ref',
-            $ref: unresolved.$id,
-        };
-    }
-
-    /** `[JavaScript]` Creates a RegExp type */
-    function RegExp$1(unresolved, options = {}) {
-        const expr = IsString$3(unresolved) ? new globalThis.RegExp(unresolved) : unresolved;
-        return { ...options, [Kind]: 'RegExp', type: 'RegExp', source: expr.source, flags: expr.flags };
-    }
-
-    // prettier-ignore
-    function FromRest(T) {
-        return T.map(L => RequiredResolve(L));
-    }
-    // prettier-ignore
-    function FromProperties$1(T) {
-        const Acc = {};
-        for (const K of globalThis.Object.getOwnPropertyNames(T))
-            Acc[K] = Discard(T[K], [OptionalKind]);
-        return Acc;
-    }
-    // ------------------------------------------------------------------
-    // RequiredResolve
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function RequiredResolve(T) {
-        return (IsIntersect$1(T) ? Intersect$1(FromRest(T.allOf)) :
-            IsUnion$1(T) ? Union$1(FromRest(T.anyOf)) :
-                IsObject$2(T) ? Object$1(FromProperties$1(T.properties)) :
-                    Object$1({}));
-    }
-    /** `[Json]` Constructs a type where all properties are required */
-    function Required(T, options = {}) {
-        if (IsMappedResult$1(T)) {
-            return RequiredFromMappedResult(T, options);
-        }
-        else {
-            const D = Discard(T, [TransformKind, '$id', 'required']);
-            const R = CloneType(RequiredResolve(T), options);
-            return { ...D, ...R };
-        }
-    }
-
-    // prettier-ignore
-    function FromProperties(P, options) {
-        const Acc = {};
-        for (const K2 of globalThis.Object.getOwnPropertyNames(P))
-            Acc[K2] = Required(P[K2], options);
-        return Acc;
-    }
-    // prettier-ignore
-    function FromMappedResult(R, options) {
-        return FromProperties(R.properties, options);
-    }
-    // prettier-ignore
-    function RequiredFromMappedResult(R, options) {
-        const P = FromMappedResult(R, options);
-        return MappedResult(P);
-    }
-
-    // prettier-ignore
-    function RestResolve(T) {
-        return (IsIntersect$1(T) ? CloneRest(T.allOf) :
-            IsUnion$1(T) ? CloneRest(T.anyOf) :
-                IsTuple$1(T) ? CloneRest(T.items ?? []) :
-                    []);
-    }
-    /** `[Json]` Extracts interior Rest elements from Tuple, Intersect and Union types */
-    function Rest(T) {
-        return CloneRest(RestResolve(T));
-    }
-
-    /** `[JavaScript]` Extracts the ReturnType from the given Function type */
-    function ReturnType(schema, options = {}) {
-        return CloneType(schema.returns, options);
-    }
-
-    /** `[Json]` Omits compositing symbols from this schema. */
-    function Strict(schema) {
-        return JSON.parse(JSON.stringify(schema));
-    }
-
-    // ------------------------------------------------------------------
-    // TransformBuilders
-    // ------------------------------------------------------------------
-    class TransformDecodeBuilder {
-        constructor(schema) {
-            this.schema = schema;
-        }
-        Decode(decode) {
-            return new TransformEncodeBuilder(this.schema, decode);
-        }
-    }
-    // prettier-ignore
-    class TransformEncodeBuilder {
-        constructor(schema, decode) {
-            this.schema = schema;
-            this.decode = decode;
-        }
-        EncodeTransform(encode, schema) {
-            const Encode = (value) => schema[TransformKind].Encode(encode(value));
-            const Decode = (value) => this.decode(schema[TransformKind].Decode(value));
-            const Codec = { Encode: Encode, Decode: Decode };
-            return { ...schema, [TransformKind]: Codec };
-        }
-        EncodeSchema(encode, schema) {
-            const Codec = { Decode: this.decode, Encode: encode };
-            return { ...schema, [TransformKind]: Codec };
-        }
-        Encode(encode) {
-            const schema = CloneType(this.schema);
-            return (IsTransform$1(schema) ? this.EncodeTransform(encode, schema) : this.EncodeSchema(encode, schema));
-        }
-    }
-    /** `[Json]` Creates a Transform type */
-    function Transform(schema) {
-        return new TransformDecodeBuilder(schema);
-    }
-
-    /** `[Json]` Creates a Unsafe type that will infers as the generic argument T */
-    function Unsafe(options = {}) {
-        return {
-            ...options,
-            [Kind]: options[Kind] ?? 'Unsafe',
-        };
-    }
-
-    /** `[JavaScript]` Creates a Void type */
-    function Void(options = {}) {
-        return {
-            ...options,
-            [Kind]: 'Void',
-            type: 'void',
-        };
-    }
-
-    // ------------------------------------------------------------------
-    // Type: Module
-    // ------------------------------------------------------------------
-
-    var TypeBuilder = /*#__PURE__*/Object.freeze({
-        __proto__: null,
-        Any: Any,
-        Array: Array$1,
-        AsyncIterator: AsyncIterator,
-        Awaited: Awaited,
-        BigInt: BigInt$1,
-        Boolean: Boolean$1,
-        Capitalize: Capitalize,
-        Composite: Composite,
-        Const: Const,
-        Constructor: Constructor,
-        ConstructorParameters: ConstructorParameters,
-        Date: Date$1,
-        Deref: Deref$1,
-        Enum: Enum,
-        Exclude: Exclude,
-        Extends: Extends,
-        Extract: Extract,
-        Function: Function$1,
-        Index: Index,
-        InstanceType: InstanceType,
-        Integer: Integer,
-        Intersect: Intersect$1,
-        Iterator: Iterator,
-        KeyOf: KeyOf,
-        Literal: Literal,
-        Lowercase: Lowercase,
-        Mapped: Mapped,
-        Never: Never,
-        Not: Not,
-        Null: Null,
-        Number: Number$1,
-        Object: Object$1,
-        Omit: Omit,
-        Optional: Optional,
-        Parameters: Parameters,
-        Partial: Partial,
-        Pick: Pick,
-        Promise: Promise$1,
-        Readonly: Readonly,
-        ReadonlyOptional: ReadonlyOptional,
-        Record: Record,
-        Recursive: Recursive,
-        Ref: Ref,
-        RegExp: RegExp$1,
-        Required: Required,
-        Rest: Rest,
-        ReturnType: ReturnType,
-        Strict: Strict,
-        String: String$1,
-        Symbol: Symbol$1,
-        TemplateLiteral: TemplateLiteral,
-        Transform: Transform,
-        Tuple: Tuple,
-        Uint8Array: Uint8Array$1,
-        Uncapitalize: Uncapitalize,
-        Undefined: Undefined,
-        Union: Union$1,
-        Unknown: Unknown,
-        Unsafe: Unsafe,
-        Uppercase: Uppercase,
-        Void: Void
-    });
-
-    // ------------------------------------------------------------------
-    // JsonTypeBuilder
-    // ------------------------------------------------------------------
-    /** JavaScript Type Builder with Static Resolution for TypeScript */
-    const Type = TypeBuilder;
-
-    const QueueOptionsSchema = Type.Object({
-        // TODO: adds func type to json schema which is not supported
-        //_queue?: Queue;
-        concurrency: Type.Optional(Type.Number()),
-        timeout: Type.Optional(Type.Number()), // TODO
-    }, {
-        additionalProperties: false,
-        title: "QueueOptions",
-    });
-    class Queue {
-        constructor(opts = {}) {
-            this.concurrency = 1;
-            this._running = 0;
-            this._queue = [];
-            if (opts.concurrency)
-                this.concurrency = opts.concurrency;
-        }
-        runNext() {
-            const job = this._queue.shift();
-            if (!job)
-                return;
-            this._running++;
-            job
-                .func()
-                .then((result) => job.resolve(result))
-                .catch((error) => job.reject(error))
-                .finally(() => {
-                this._running--;
-                this.checkQueue();
-            });
-        }
-        checkQueue() {
-            if (this._running < this.concurrency)
-                this.runNext();
-        }
-        add(func) {
-            return new Promise((resolve, reject) => {
-                this._queue.push({ func, resolve, reject });
-                this.checkQueue();
-            });
-        }
-    }
-
-    // Yahoo's servers returned an HTTP 400 for this request.
-    class BadRequestError extends Error {
-        constructor() {
-            super(...arguments);
-            this.name = "BadRequestError";
-        }
-    }
-    // Yahoo's servers returned a 'not-ok' status for this request.
-    // https://developer.mozilla.org/en-US/docs/Web/API/Response/ok
-    class HTTPError extends Error {
-        constructor() {
-            super(...arguments);
-            this.name = "HTTPError";
-        }
-    }
-    // A YahooFinance method was called with invalid options.
-    class InvalidOptionsError extends Error {
-        constructor() {
-            super(...arguments);
-            this.name = "InvalidOptionsError";
-        }
-    }
-    // An internal method yahooFinanceFetch() was called without this._env set.
-    class NoEnvironmentError extends Error {
-        constructor() {
-            super(...arguments);
-            this.name = "NoEnvironmentError";
-        }
-    }
-    class FailedYahooValidationError extends Error {
-        constructor(message, { result, errors }) {
-            super(message);
-            this.name = "FailedYahooValidationError";
-            this.result = result;
-            this.errors = errors;
-        }
-    }
-    const errors$1 = {
-        BadRequestError,
-        HTTPError,
-        InvalidOptionsError,
-        NoEnvironmentError,
-        FailedYahooValidationError,
-    };
-
-    var name = "yahoo-finance2";
-    var version$1 = "2.13.3";
-    var repository = "https://github.com/gadicc/node-yahoo-finance2";
-    var pkg = {
-    	name: name,
-    	version: version$1,
-    	repository: repository};
-
-    var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
-
-    function getAugmentedNamespace(n) {
-      if (n.__esModule) return n;
-      var f = n.default;
-    	if (typeof f == "function") {
-    		var a = function a () {
-    			if (this instanceof a) {
-            return Reflect.construct(f, arguments, this.constructor);
-    			}
-    			return f.apply(this, arguments);
-    		};
-    		a.prototype = f.prototype;
-      } else a = {};
-      Object.defineProperty(a, '__esModule', {value: true});
-    	Object.keys(n).forEach(function (k) {
-    		var d = Object.getOwnPropertyDescriptor(n, k);
-    		Object.defineProperty(a, k, d.get ? d : {
-    			enumerable: true,
-    			get: function () {
-    				return n[k];
-    			}
-    		});
-    	});
-    	return a;
-    }
-
-    var cookie = {};
-
-    /** Highest positive signed 32-bit float value */
-    const maxInt = 2147483647; // aka. 0x7FFFFFFF or 2^31-1
-
-    /** Bootstring parameters */
-    const base = 36;
-    const tMin = 1;
-    const tMax = 26;
-    const skew = 38;
-    const damp = 700;
-    const initialBias = 72;
-    const initialN = 128; // 0x80
-    const delimiter = '-'; // '\x2D'
-
-    /** Regular expressions */
-    const regexPunycode = /^xn--/;
-    const regexNonASCII = /[^\0-\x7F]/; // Note: U+007F DEL is excluded too.
-    const regexSeparators = /[\x2E\u3002\uFF0E\uFF61]/g; // RFC 3490 separators
-
-    /** Error messages */
-    const errors = {
-    	'overflow': 'Overflow: input needs wider integers to process',
-    	'not-basic': 'Illegal input >= 0x80 (not a basic code point)',
-    	'invalid-input': 'Invalid input'
-    };
-
-    /** Convenience shortcuts */
-    const baseMinusTMin = base - tMin;
-    const floor = Math.floor;
-    const stringFromCharCode = String.fromCharCode;
-
-    /*--------------------------------------------------------------------------*/
-
-    /**
-     * A generic error utility function.
-     * @private
-     * @param {String} type The error type.
-     * @returns {Error} Throws a `RangeError` with the applicable error message.
-     */
-    function error(type) {
-    	throw new RangeError(errors[type]);
-    }
-
-    /**
-     * A generic `Array#map` utility function.
-     * @private
-     * @param {Array} array The array to iterate over.
-     * @param {Function} callback The function that gets called for every array
-     * item.
-     * @returns {Array} A new array of values returned by the callback function.
-     */
-    function map(array, callback) {
-    	const result = [];
-    	let length = array.length;
-    	while (length--) {
-    		result[length] = callback(array[length]);
-    	}
-    	return result;
-    }
-
-    /**
-     * A simple `Array#map`-like wrapper to work with domain name strings or email
-     * addresses.
-     * @private
-     * @param {String} domain The domain name or email address.
-     * @param {Function} callback The function that gets called for every
-     * character.
-     * @returns {String} A new string of characters returned by the callback
-     * function.
-     */
-    function mapDomain(domain, callback) {
-    	const parts = domain.split('@');
-    	let result = '';
-    	if (parts.length > 1) {
-    		// In email addresses, only the domain name should be punycoded. Leave
-    		// the local part (i.e. everything up to `@`) intact.
-    		result = parts[0] + '@';
-    		domain = parts[1];
-    	}
-    	// Avoid `split(regex)` for IE8 compatibility. See #17.
-    	domain = domain.replace(regexSeparators, '\x2E');
-    	const labels = domain.split('.');
-    	const encoded = map(labels, callback).join('.');
-    	return result + encoded;
-    }
-
-    /**
-     * Creates an array containing the numeric code points of each Unicode
-     * character in the string. While JavaScript uses UCS-2 internally,
-     * this function will convert a pair of surrogate halves (each of which
-     * UCS-2 exposes as separate characters) into a single code point,
-     * matching UTF-16.
-     * @see `punycode.ucs2.encode`
-     * @see <https://mathiasbynens.be/notes/javascript-encoding>
-     * @memberOf punycode.ucs2
-     * @name decode
-     * @param {String} string The Unicode input string (UCS-2).
-     * @returns {Array} The new array of code points.
-     */
-    function ucs2decode(string) {
-    	const output = [];
-    	let counter = 0;
-    	const length = string.length;
-    	while (counter < length) {
-    		const value = string.charCodeAt(counter++);
-    		if (value >= 0xD800 && value <= 0xDBFF && counter < length) {
-    			// It's a high surrogate, and there is a next character.
-    			const extra = string.charCodeAt(counter++);
-    			if ((extra & 0xFC00) == 0xDC00) { // Low surrogate.
-    				output.push(((value & 0x3FF) << 10) + (extra & 0x3FF) + 0x10000);
-    			} else {
-    				// It's an unmatched surrogate; only append this code unit, in case the
-    				// next code unit is the high surrogate of a surrogate pair.
-    				output.push(value);
-    				counter--;
-    			}
-    		} else {
-    			output.push(value);
-    		}
-    	}
-    	return output;
-    }
-
-    /**
-     * Creates a string based on an array of numeric code points.
-     * @see `punycode.ucs2.decode`
-     * @memberOf punycode.ucs2
-     * @name encode
-     * @param {Array} codePoints The array of numeric code points.
-     * @returns {String} The new Unicode string (UCS-2).
-     */
-    const ucs2encode = codePoints => String.fromCodePoint(...codePoints);
-
-    /**
-     * Converts a basic code point into a digit/integer.
-     * @see `digitToBasic()`
-     * @private
-     * @param {Number} codePoint The basic numeric code point value.
-     * @returns {Number} The numeric value of a basic code point (for use in
-     * representing integers) in the range `0` to `base - 1`, or `base` if
-     * the code point does not represent a value.
-     */
-    const basicToDigit = function(codePoint) {
-    	if (codePoint >= 0x30 && codePoint < 0x3A) {
-    		return 26 + (codePoint - 0x30);
-    	}
-    	if (codePoint >= 0x41 && codePoint < 0x5B) {
-    		return codePoint - 0x41;
-    	}
-    	if (codePoint >= 0x61 && codePoint < 0x7B) {
-    		return codePoint - 0x61;
-    	}
-    	return base;
-    };
-
-    /**
-     * Converts a digit/integer into a basic code point.
-     * @see `basicToDigit()`
-     * @private
-     * @param {Number} digit The numeric value of a basic code point.
-     * @returns {Number} The basic code point whose value (when used for
-     * representing integers) is `digit`, which needs to be in the range
-     * `0` to `base - 1`. If `flag` is non-zero, the uppercase form is
-     * used; else, the lowercase form is used. The behavior is undefined
-     * if `flag` is non-zero and `digit` has no uppercase form.
-     */
-    const digitToBasic = function(digit, flag) {
-    	//  0..25 map to ASCII a..z or A..Z
-    	// 26..35 map to ASCII 0..9
-    	return digit + 22 + 75 * (digit < 26) - ((flag != 0) << 5);
-    };
-
-    /**
-     * Bias adaptation function as per section 3.4 of RFC 3492.
-     * https://tools.ietf.org/html/rfc3492#section-3.4
-     * @private
-     */
-    const adapt = function(delta, numPoints, firstTime) {
-    	let k = 0;
-    	delta = firstTime ? floor(delta / damp) : delta >> 1;
-    	delta += floor(delta / numPoints);
-    	for (/* no initialization */; delta > baseMinusTMin * tMax >> 1; k += base) {
-    		delta = floor(delta / baseMinusTMin);
-    	}
-    	return floor(k + (baseMinusTMin + 1) * delta / (delta + skew));
-    };
-
-    /**
-     * Converts a Punycode string of ASCII-only symbols to a string of Unicode
-     * symbols.
-     * @memberOf punycode
-     * @param {String} input The Punycode string of ASCII-only symbols.
-     * @returns {String} The resulting string of Unicode symbols.
-     */
-    const decode = function(input) {
-    	// Don't use UCS-2.
-    	const output = [];
-    	const inputLength = input.length;
-    	let i = 0;
-    	let n = initialN;
-    	let bias = initialBias;
-
-    	// Handle the basic code points: let `basic` be the number of input code
-    	// points before the last delimiter, or `0` if there is none, then copy
-    	// the first basic code points to the output.
-
-    	let basic = input.lastIndexOf(delimiter);
-    	if (basic < 0) {
-    		basic = 0;
-    	}
-
-    	for (let j = 0; j < basic; ++j) {
-    		// if it's not a basic code point
-    		if (input.charCodeAt(j) >= 0x80) {
-    			error('not-basic');
-    		}
-    		output.push(input.charCodeAt(j));
-    	}
-
-    	// Main decoding loop: start just after the last delimiter if any basic code
-    	// points were copied; start at the beginning otherwise.
-
-    	for (let index = basic > 0 ? basic + 1 : 0; index < inputLength; /* no final expression */) {
-
-    		// `index` is the index of the next character to be consumed.
-    		// Decode a generalized variable-length integer into `delta`,
-    		// which gets added to `i`. The overflow checking is easier
-    		// if we increase `i` as we go, then subtract off its starting
-    		// value at the end to obtain `delta`.
-    		const oldi = i;
-    		for (let w = 1, k = base; /* no condition */; k += base) {
-
-    			if (index >= inputLength) {
-    				error('invalid-input');
-    			}
-
-    			const digit = basicToDigit(input.charCodeAt(index++));
-
-    			if (digit >= base) {
-    				error('invalid-input');
-    			}
-    			if (digit > floor((maxInt - i) / w)) {
-    				error('overflow');
-    			}
-
-    			i += digit * w;
-    			const t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
-
-    			if (digit < t) {
-    				break;
-    			}
-
-    			const baseMinusT = base - t;
-    			if (w > floor(maxInt / baseMinusT)) {
-    				error('overflow');
-    			}
-
-    			w *= baseMinusT;
-
-    		}
-
-    		const out = output.length + 1;
-    		bias = adapt(i - oldi, out, oldi == 0);
-
-    		// `i` was supposed to wrap around from `out` to `0`,
-    		// incrementing `n` each time, so we'll fix that now:
-    		if (floor(i / out) > maxInt - n) {
-    			error('overflow');
-    		}
-
-    		n += floor(i / out);
-    		i %= out;
-
-    		// Insert `n` at position `i` of the output.
-    		output.splice(i++, 0, n);
-
-    	}
-
-    	return String.fromCodePoint(...output);
-    };
-
-    /**
-     * Converts a string of Unicode symbols (e.g. a domain name label) to a
-     * Punycode string of ASCII-only symbols.
-     * @memberOf punycode
-     * @param {String} input The string of Unicode symbols.
-     * @returns {String} The resulting Punycode string of ASCII-only symbols.
-     */
-    const encode = function(input) {
-    	const output = [];
-
-    	// Convert the input in UCS-2 to an array of Unicode code points.
-    	input = ucs2decode(input);
-
-    	// Cache the length.
-    	const inputLength = input.length;
-
-    	// Initialize the state.
-    	let n = initialN;
-    	let delta = 0;
-    	let bias = initialBias;
-
-    	// Handle the basic code points.
-    	for (const currentValue of input) {
-    		if (currentValue < 0x80) {
-    			output.push(stringFromCharCode(currentValue));
-    		}
-    	}
-
-    	const basicLength = output.length;
-    	let handledCPCount = basicLength;
-
-    	// `handledCPCount` is the number of code points that have been handled;
-    	// `basicLength` is the number of basic code points.
-
-    	// Finish the basic string with a delimiter unless it's empty.
-    	if (basicLength) {
-    		output.push(delimiter);
-    	}
-
-    	// Main encoding loop:
-    	while (handledCPCount < inputLength) {
-
-    		// All non-basic code points < n have been handled already. Find the next
-    		// larger one:
-    		let m = maxInt;
-    		for (const currentValue of input) {
-    			if (currentValue >= n && currentValue < m) {
-    				m = currentValue;
-    			}
-    		}
-
-    		// Increase `delta` enough to advance the decoder's <n,i> state to <m,0>,
-    		// but guard against overflow.
-    		const handledCPCountPlusOne = handledCPCount + 1;
-    		if (m - n > floor((maxInt - delta) / handledCPCountPlusOne)) {
-    			error('overflow');
-    		}
-
-    		delta += (m - n) * handledCPCountPlusOne;
-    		n = m;
-
-    		for (const currentValue of input) {
-    			if (currentValue < n && ++delta > maxInt) {
-    				error('overflow');
-    			}
-    			if (currentValue === n) {
-    				// Represent delta as a generalized variable-length integer.
-    				let q = delta;
-    				for (let k = base; /* no condition */; k += base) {
-    					const t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
-    					if (q < t) {
-    						break;
-    					}
-    					const qMinusT = q - t;
-    					const baseMinusT = base - t;
-    					output.push(
-    						stringFromCharCode(digitToBasic(t + qMinusT % baseMinusT, 0))
-    					);
-    					q = floor(qMinusT / baseMinusT);
-    				}
-
-    				output.push(stringFromCharCode(digitToBasic(q, 0)));
-    				bias = adapt(delta, handledCPCountPlusOne, handledCPCount === basicLength);
-    				delta = 0;
-    				++handledCPCount;
-    			}
-    		}
-
-    		++delta;
-    		++n;
-
-    	}
-    	return output.join('');
-    };
-
-    /**
-     * Converts a Punycode string representing a domain name or an email address
-     * to Unicode. Only the Punycoded parts of the input will be converted, i.e.
-     * it doesn't matter if you call it on a string that has already been
-     * converted to Unicode.
-     * @memberOf punycode
-     * @param {String} input The Punycoded domain name or email address to
-     * convert to Unicode.
-     * @returns {String} The Unicode representation of the given Punycode
-     * string.
-     */
-    const toUnicode = function(input) {
-    	return mapDomain(input, function(string) {
-    		return regexPunycode.test(string)
-    			? decode(string.slice(4).toLowerCase())
-    			: string;
-    	});
-    };
-
-    /**
-     * Converts a Unicode string representing a domain name or an email address to
-     * Punycode. Only the non-ASCII parts of the domain name will be converted,
-     * i.e. it doesn't matter if you call it with a domain that's already in
-     * ASCII.
-     * @memberOf punycode
-     * @param {String} input The domain name or email address to convert, as a
-     * Unicode string.
-     * @returns {String} The Punycode representation of the given domain name or
-     * email address.
-     */
-    const toASCII = function(input) {
-    	return mapDomain(input, function(string) {
-    		return regexNonASCII.test(string)
-    			? 'xn--' + encode(string)
-    			: string;
-    	});
-    };
-
-    /*--------------------------------------------------------------------------*/
-
-    /** Define the public API */
-    const punycode = {
-    	/**
-    	 * A string representing the current Punycode.js version number.
-    	 * @memberOf punycode
-    	 * @type String
-    	 */
-    	'version': '2.3.1',
-    	/**
-    	 * An object of methods to convert from JavaScript's internal character
-    	 * representation (UCS-2) to Unicode code points, and back.
-    	 * @see <https://mathiasbynens.be/notes/javascript-encoding>
-    	 * @memberOf punycode
-    	 * @type Object
-    	 */
-    	'ucs2': {
-    		'decode': ucs2decode,
-    		'encode': ucs2encode
-    	},
-    	'decode': decode,
-    	'encode': encode,
-    	'toASCII': toASCII,
-    	'toUnicode': toUnicode
-    };
-
-    var punycode_es6 = /*#__PURE__*/Object.freeze({
-        __proto__: null,
-        decode: decode,
-        default: punycode,
-        encode: encode,
-        toASCII: toASCII,
-        toUnicode: toUnicode,
-        ucs2decode: ucs2decode,
-        ucs2encode: ucs2encode
-    });
-
-    var require$$0 = /*@__PURE__*/getAugmentedNamespace(punycode_es6);
-
-    var requiresPort;
-    var hasRequiredRequiresPort;
-
-    function requireRequiresPort () {
-    	if (hasRequiredRequiresPort) return requiresPort;
-    	hasRequiredRequiresPort = 1;
-
-    	/**
-    	 * Check if we're required to add a port number.
-    	 *
-    	 * @see https://url.spec.whatwg.org/#default-port
-    	 * @param {Number|String} port Port number we need to check
-    	 * @param {String} protocol Protocol we need to check against.
-    	 * @returns {Boolean} Is it a default port for the given protocol
-    	 * @api private
-    	 */
-    	requiresPort = function required(port, protocol) {
-    	  protocol = protocol.split(':')[0];
-    	  port = +port;
-
-    	  if (!port) return false;
-
-    	  switch (protocol) {
-    	    case 'http':
-    	    case 'ws':
-    	    return port !== 80;
-
-    	    case 'https':
-    	    case 'wss':
-    	    return port !== 443;
-
-    	    case 'ftp':
-    	    return port !== 21;
-
-    	    case 'gopher':
-    	    return port !== 70;
-
-    	    case 'file':
-    	    return false;
-    	  }
-
-    	  return port !== 0;
-    	};
-    	return requiresPort;
-    }
-
-    var querystringify = {};
-
-    var hasRequiredQuerystringify;
-
-    function requireQuerystringify () {
-    	if (hasRequiredQuerystringify) return querystringify;
-    	hasRequiredQuerystringify = 1;
-
-    	var has = Object.prototype.hasOwnProperty
-    	  , undef;
-
-    	/**
-    	 * Decode a URI encoded string.
-    	 *
-    	 * @param {String} input The URI encoded string.
-    	 * @returns {String|Null} The decoded string.
-    	 * @api private
-    	 */
-    	function decode(input) {
-    	  try {
-    	    return decodeURIComponent(input.replace(/\+/g, ' '));
-    	  } catch (e) {
-    	    return null;
-    	  }
-    	}
-
-    	/**
-    	 * Attempts to encode a given input.
-    	 *
-    	 * @param {String} input The string that needs to be encoded.
-    	 * @returns {String|Null} The encoded string.
-    	 * @api private
-    	 */
-    	function encode(input) {
-    	  try {
-    	    return encodeURIComponent(input);
-    	  } catch (e) {
-    	    return null;
-    	  }
-    	}
-
-    	/**
-    	 * Simple query string parser.
-    	 *
-    	 * @param {String} query The query string that needs to be parsed.
-    	 * @returns {Object}
-    	 * @api public
-    	 */
-    	function querystring(query) {
-    	  var parser = /([^=?#&]+)=?([^&]*)/g
-    	    , result = {}
-    	    , part;
-
-    	  while (part = parser.exec(query)) {
-    	    var key = decode(part[1])
-    	      , value = decode(part[2]);
-
-    	    //
-    	    // Prevent overriding of existing properties. This ensures that build-in
-    	    // methods like `toString` or __proto__ are not overriden by malicious
-    	    // querystrings.
-    	    //
-    	    // In the case if failed decoding, we want to omit the key/value pairs
-    	    // from the result.
-    	    //
-    	    if (key === null || value === null || key in result) continue;
-    	    result[key] = value;
-    	  }
-
-    	  return result;
-    	}
-
-    	/**
-    	 * Transform a query string to an object.
-    	 *
-    	 * @param {Object} obj Object that should be transformed.
-    	 * @param {String} prefix Optional prefix.
-    	 * @returns {String}
-    	 * @api public
-    	 */
-    	function querystringify$1(obj, prefix) {
-    	  prefix = prefix || '';
-
-    	  var pairs = []
-    	    , value
-    	    , key;
-
-    	  //
-    	  // Optionally prefix with a '?' if needed
-    	  //
-    	  if ('string' !== typeof prefix) prefix = '?';
-
-    	  for (key in obj) {
-    	    if (has.call(obj, key)) {
-    	      value = obj[key];
-
-    	      //
-    	      // Edge cases where we actually want to encode the value to an empty
-    	      // string instead of the stringified value.
-    	      //
-    	      if (!value && (value === null || value === undef || isNaN(value))) {
-    	        value = '';
-    	      }
-
-    	      key = encode(key);
-    	      value = encode(value);
-
-    	      //
-    	      // If we failed to encode the strings, we should bail out as we don't
-    	      // want to add invalid strings to the query.
-    	      //
-    	      if (key === null || value === null) continue;
-    	      pairs.push(key +'='+ value);
-    	    }
-    	  }
-
-    	  return pairs.length ? prefix + pairs.join('&') : '';
-    	}
-
-    	//
-    	// Expose the module.
-    	//
-    	querystringify.stringify = querystringify$1;
-    	querystringify.parse = querystring;
-    	return querystringify;
-    }
-
-    var urlParse;
-    var hasRequiredUrlParse;
-
-    function requireUrlParse () {
-    	if (hasRequiredUrlParse) return urlParse;
-    	hasRequiredUrlParse = 1;
-
-    	var required = requireRequiresPort()
-    	  , qs = requireQuerystringify()
-    	  , controlOrWhitespace = /^[\x00-\x20\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+/
-    	  , CRHTLF = /[\n\r\t]/g
-    	  , slashes = /^[A-Za-z][A-Za-z0-9+-.]*:\/\//
-    	  , port = /:\d+$/
-    	  , protocolre = /^([a-z][a-z0-9.+-]*:)?(\/\/)?([\\/]+)?([\S\s]*)/i
-    	  , windowsDriveLetter = /^[a-zA-Z]:/;
-
-    	/**
-    	 * Remove control characters and whitespace from the beginning of a string.
-    	 *
-    	 * @param {Object|String} str String to trim.
-    	 * @returns {String} A new string representing `str` stripped of control
-    	 *     characters and whitespace from its beginning.
-    	 * @public
-    	 */
-    	function trimLeft(str) {
-    	  return (str ? str : '').toString().replace(controlOrWhitespace, '');
-    	}
-
-    	/**
-    	 * These are the parse rules for the URL parser, it informs the parser
-    	 * about:
-    	 *
-    	 * 0. The char it Needs to parse, if it's a string it should be done using
-    	 *    indexOf, RegExp using exec and NaN means set as current value.
-    	 * 1. The property we should set when parsing this value.
-    	 * 2. Indication if it's backwards or forward parsing, when set as number it's
-    	 *    the value of extra chars that should be split off.
-    	 * 3. Inherit from location if non existing in the parser.
-    	 * 4. `toLowerCase` the resulting value.
-    	 */
-    	var rules = [
-    	  ['#', 'hash'],                        // Extract from the back.
-    	  ['?', 'query'],                       // Extract from the back.
-    	  function sanitize(address, url) {     // Sanitize what is left of the address
-    	    return isSpecial(url.protocol) ? address.replace(/\\/g, '/') : address;
-    	  },
-    	  ['/', 'pathname'],                    // Extract from the back.
-    	  ['@', 'auth', 1],                     // Extract from the front.
-    	  [NaN, 'host', undefined, 1, 1],       // Set left over value.
-    	  [/:(\d*)$/, 'port', undefined, 1],    // RegExp the back.
-    	  [NaN, 'hostname', undefined, 1, 1]    // Set left over.
-    	];
-
-    	/**
-    	 * These properties should not be copied or inherited from. This is only needed
-    	 * for all non blob URL's as a blob URL does not include a hash, only the
-    	 * origin.
-    	 *
-    	 * @type {Object}
-    	 * @private
-    	 */
-    	var ignore = { hash: 1, query: 1 };
-
-    	/**
-    	 * The location object differs when your code is loaded through a normal page,
-    	 * Worker or through a worker using a blob. And with the blobble begins the
-    	 * trouble as the location object will contain the URL of the blob, not the
-    	 * location of the page where our code is loaded in. The actual origin is
-    	 * encoded in the `pathname` so we can thankfully generate a good "default"
-    	 * location from it so we can generate proper relative URL's again.
-    	 *
-    	 * @param {Object|String} loc Optional default location object.
-    	 * @returns {Object} lolcation object.
-    	 * @public
-    	 */
-    	function lolcation(loc) {
-    	  var globalVar;
-
-    	  if (typeof window !== 'undefined') globalVar = window;
-    	  else if (typeof commonjsGlobal !== 'undefined') globalVar = commonjsGlobal;
-    	  else if (typeof self !== 'undefined') globalVar = self;
-    	  else globalVar = {};
-
-    	  var location = globalVar.location || {};
-    	  loc = loc || location;
-
-    	  var finaldestination = {}
-    	    , type = typeof loc
-    	    , key;
-
-    	  if ('blob:' === loc.protocol) {
-    	    finaldestination = new Url(unescape(loc.pathname), {});
-    	  } else if ('string' === type) {
-    	    finaldestination = new Url(loc, {});
-    	    for (key in ignore) delete finaldestination[key];
-    	  } else if ('object' === type) {
-    	    for (key in loc) {
-    	      if (key in ignore) continue;
-    	      finaldestination[key] = loc[key];
-    	    }
-
-    	    if (finaldestination.slashes === undefined) {
-    	      finaldestination.slashes = slashes.test(loc.href);
-    	    }
-    	  }
-
-    	  return finaldestination;
-    	}
-
-    	/**
-    	 * Check whether a protocol scheme is special.
-    	 *
-    	 * @param {String} The protocol scheme of the URL
-    	 * @return {Boolean} `true` if the protocol scheme is special, else `false`
-    	 * @private
-    	 */
-    	function isSpecial(scheme) {
-    	  return (
-    	    scheme === 'file:' ||
-    	    scheme === 'ftp:' ||
-    	    scheme === 'http:' ||
-    	    scheme === 'https:' ||
-    	    scheme === 'ws:' ||
-    	    scheme === 'wss:'
-    	  );
-    	}
-
-    	/**
-    	 * @typedef ProtocolExtract
-    	 * @type Object
-    	 * @property {String} protocol Protocol matched in the URL, in lowercase.
-    	 * @property {Boolean} slashes `true` if protocol is followed by "//", else `false`.
-    	 * @property {String} rest Rest of the URL that is not part of the protocol.
-    	 */
-
-    	/**
-    	 * Extract protocol information from a URL with/without double slash ("//").
-    	 *
-    	 * @param {String} address URL we want to extract from.
-    	 * @param {Object} location
-    	 * @return {ProtocolExtract} Extracted information.
-    	 * @private
-    	 */
-    	function extractProtocol(address, location) {
-    	  address = trimLeft(address);
-    	  address = address.replace(CRHTLF, '');
-    	  location = location || {};
-
-    	  var match = protocolre.exec(address);
-    	  var protocol = match[1] ? match[1].toLowerCase() : '';
-    	  var forwardSlashes = !!match[2];
-    	  var otherSlashes = !!match[3];
-    	  var slashesCount = 0;
-    	  var rest;
-
-    	  if (forwardSlashes) {
-    	    if (otherSlashes) {
-    	      rest = match[2] + match[3] + match[4];
-    	      slashesCount = match[2].length + match[3].length;
-    	    } else {
-    	      rest = match[2] + match[4];
-    	      slashesCount = match[2].length;
-    	    }
-    	  } else {
-    	    if (otherSlashes) {
-    	      rest = match[3] + match[4];
-    	      slashesCount = match[3].length;
-    	    } else {
-    	      rest = match[4];
-    	    }
-    	  }
-
-    	  if (protocol === 'file:') {
-    	    if (slashesCount >= 2) {
-    	      rest = rest.slice(2);
-    	    }
-    	  } else if (isSpecial(protocol)) {
-    	    rest = match[4];
-    	  } else if (protocol) {
-    	    if (forwardSlashes) {
-    	      rest = rest.slice(2);
-    	    }
-    	  } else if (slashesCount >= 2 && isSpecial(location.protocol)) {
-    	    rest = match[4];
-    	  }
-
-    	  return {
-    	    protocol: protocol,
-    	    slashes: forwardSlashes || isSpecial(protocol),
-    	    slashesCount: slashesCount,
-    	    rest: rest
-    	  };
-    	}
-
-    	/**
-    	 * Resolve a relative URL pathname against a base URL pathname.
-    	 *
-    	 * @param {String} relative Pathname of the relative URL.
-    	 * @param {String} base Pathname of the base URL.
-    	 * @return {String} Resolved pathname.
-    	 * @private
-    	 */
-    	function resolve(relative, base) {
-    	  if (relative === '') return base;
-
-    	  var path = (base || '/').split('/').slice(0, -1).concat(relative.split('/'))
-    	    , i = path.length
-    	    , last = path[i - 1]
-    	    , unshift = false
-    	    , up = 0;
-
-    	  while (i--) {
-    	    if (path[i] === '.') {
-    	      path.splice(i, 1);
-    	    } else if (path[i] === '..') {
-    	      path.splice(i, 1);
-    	      up++;
-    	    } else if (up) {
-    	      if (i === 0) unshift = true;
-    	      path.splice(i, 1);
-    	      up--;
-    	    }
-    	  }
-
-    	  if (unshift) path.unshift('');
-    	  if (last === '.' || last === '..') path.push('');
-
-    	  return path.join('/');
-    	}
-
-    	/**
-    	 * The actual URL instance. Instead of returning an object we've opted-in to
-    	 * create an actual constructor as it's much more memory efficient and
-    	 * faster and it pleases my OCD.
-    	 *
-    	 * It is worth noting that we should not use `URL` as class name to prevent
-    	 * clashes with the global URL instance that got introduced in browsers.
-    	 *
-    	 * @constructor
-    	 * @param {String} address URL we want to parse.
-    	 * @param {Object|String} [location] Location defaults for relative paths.
-    	 * @param {Boolean|Function} [parser] Parser for the query string.
-    	 * @private
-    	 */
-    	function Url(address, location, parser) {
-    	  address = trimLeft(address);
-    	  address = address.replace(CRHTLF, '');
-
-    	  if (!(this instanceof Url)) {
-    	    return new Url(address, location, parser);
-    	  }
-
-    	  var relative, extracted, parse, instruction, index, key
-    	    , instructions = rules.slice()
-    	    , type = typeof location
-    	    , url = this
-    	    , i = 0;
-
-    	  //
-    	  // The following if statements allows this module two have compatibility with
-    	  // 2 different API:
-    	  //
-    	  // 1. Node.js's `url.parse` api which accepts a URL, boolean as arguments
-    	  //    where the boolean indicates that the query string should also be parsed.
-    	  //
-    	  // 2. The `URL` interface of the browser which accepts a URL, object as
-    	  //    arguments. The supplied object will be used as default values / fall-back
-    	  //    for relative paths.
-    	  //
-    	  if ('object' !== type && 'string' !== type) {
-    	    parser = location;
-    	    location = null;
-    	  }
-
-    	  if (parser && 'function' !== typeof parser) parser = qs.parse;
-
-    	  location = lolcation(location);
-
-    	  //
-    	  // Extract protocol information before running the instructions.
-    	  //
-    	  extracted = extractProtocol(address || '', location);
-    	  relative = !extracted.protocol && !extracted.slashes;
-    	  url.slashes = extracted.slashes || relative && location.slashes;
-    	  url.protocol = extracted.protocol || location.protocol || '';
-    	  address = extracted.rest;
-
-    	  //
-    	  // When the authority component is absent the URL starts with a path
-    	  // component.
-    	  //
-    	  if (
-    	    extracted.protocol === 'file:' && (
-    	      extracted.slashesCount !== 2 || windowsDriveLetter.test(address)) ||
-    	    (!extracted.slashes &&
-    	      (extracted.protocol ||
-    	        extracted.slashesCount < 2 ||
-    	        !isSpecial(url.protocol)))
-    	  ) {
-    	    instructions[3] = [/(.*)/, 'pathname'];
-    	  }
-
-    	  for (; i < instructions.length; i++) {
-    	    instruction = instructions[i];
-
-    	    if (typeof instruction === 'function') {
-    	      address = instruction(address, url);
-    	      continue;
-    	    }
-
-    	    parse = instruction[0];
-    	    key = instruction[1];
-
-    	    if (parse !== parse) {
-    	      url[key] = address;
-    	    } else if ('string' === typeof parse) {
-    	      index = parse === '@'
-    	        ? address.lastIndexOf(parse)
-    	        : address.indexOf(parse);
-
-    	      if (~index) {
-    	        if ('number' === typeof instruction[2]) {
-    	          url[key] = address.slice(0, index);
-    	          address = address.slice(index + instruction[2]);
-    	        } else {
-    	          url[key] = address.slice(index);
-    	          address = address.slice(0, index);
-    	        }
-    	      }
-    	    } else if ((index = parse.exec(address))) {
-    	      url[key] = index[1];
-    	      address = address.slice(0, index.index);
-    	    }
-
-    	    url[key] = url[key] || (
-    	      relative && instruction[3] ? location[key] || '' : ''
-    	    );
-
-    	    //
-    	    // Hostname, host and protocol should be lowercased so they can be used to
-    	    // create a proper `origin`.
-    	    //
-    	    if (instruction[4]) url[key] = url[key].toLowerCase();
-    	  }
-
-    	  //
-    	  // Also parse the supplied query string in to an object. If we're supplied
-    	  // with a custom parser as function use that instead of the default build-in
-    	  // parser.
-    	  //
-    	  if (parser) url.query = parser(url.query);
-
-    	  //
-    	  // If the URL is relative, resolve the pathname against the base URL.
-    	  //
-    	  if (
-    	      relative
-    	    && location.slashes
-    	    && url.pathname.charAt(0) !== '/'
-    	    && (url.pathname !== '' || location.pathname !== '')
-    	  ) {
-    	    url.pathname = resolve(url.pathname, location.pathname);
-    	  }
-
-    	  //
-    	  // Default to a / for pathname if none exists. This normalizes the URL
-    	  // to always have a /
-    	  //
-    	  if (url.pathname.charAt(0) !== '/' && isSpecial(url.protocol)) {
-    	    url.pathname = '/' + url.pathname;
-    	  }
-
-    	  //
-    	  // We should not add port numbers if they are already the default port number
-    	  // for a given protocol. As the host also contains the port number we're going
-    	  // override it with the hostname which contains no port number.
-    	  //
-    	  if (!required(url.port, url.protocol)) {
-    	    url.host = url.hostname;
-    	    url.port = '';
-    	  }
-
-    	  //
-    	  // Parse down the `auth` for the username and password.
-    	  //
-    	  url.username = url.password = '';
-
-    	  if (url.auth) {
-    	    index = url.auth.indexOf(':');
-
-    	    if (~index) {
-    	      url.username = url.auth.slice(0, index);
-    	      url.username = encodeURIComponent(decodeURIComponent(url.username));
-
-    	      url.password = url.auth.slice(index + 1);
-    	      url.password = encodeURIComponent(decodeURIComponent(url.password));
-    	    } else {
-    	      url.username = encodeURIComponent(decodeURIComponent(url.auth));
-    	    }
-
-    	    url.auth = url.password ? url.username +':'+ url.password : url.username;
-    	  }
-
-    	  url.origin = url.protocol !== 'file:' && isSpecial(url.protocol) && url.host
-    	    ? url.protocol +'//'+ url.host
-    	    : 'null';
-
-    	  //
-    	  // The href is just the compiled result.
-    	  //
-    	  url.href = url.toString();
-    	}
-
-    	/**
-    	 * This is convenience method for changing properties in the URL instance to
-    	 * insure that they all propagate correctly.
-    	 *
-    	 * @param {String} part          Property we need to adjust.
-    	 * @param {Mixed} value          The newly assigned value.
-    	 * @param {Boolean|Function} fn  When setting the query, it will be the function
-    	 *                               used to parse the query.
-    	 *                               When setting the protocol, double slash will be
-    	 *                               removed from the final url if it is true.
-    	 * @returns {URL} URL instance for chaining.
-    	 * @public
-    	 */
-    	function set(part, value, fn) {
-    	  var url = this;
-
-    	  switch (part) {
-    	    case 'query':
-    	      if ('string' === typeof value && value.length) {
-    	        value = (fn || qs.parse)(value);
-    	      }
-
-    	      url[part] = value;
-    	      break;
-
-    	    case 'port':
-    	      url[part] = value;
-
-    	      if (!required(value, url.protocol)) {
-    	        url.host = url.hostname;
-    	        url[part] = '';
-    	      } else if (value) {
-    	        url.host = url.hostname +':'+ value;
-    	      }
-
-    	      break;
-
-    	    case 'hostname':
-    	      url[part] = value;
-
-    	      if (url.port) value += ':'+ url.port;
-    	      url.host = value;
-    	      break;
-
-    	    case 'host':
-    	      url[part] = value;
-
-    	      if (port.test(value)) {
-    	        value = value.split(':');
-    	        url.port = value.pop();
-    	        url.hostname = value.join(':');
-    	      } else {
-    	        url.hostname = value;
-    	        url.port = '';
-    	      }
-
-    	      break;
-
-    	    case 'protocol':
-    	      url.protocol = value.toLowerCase();
-    	      url.slashes = !fn;
-    	      break;
-
-    	    case 'pathname':
-    	    case 'hash':
-    	      if (value) {
-    	        var char = part === 'pathname' ? '/' : '#';
-    	        url[part] = value.charAt(0) !== char ? char + value : value;
-    	      } else {
-    	        url[part] = value;
-    	      }
-    	      break;
-
-    	    case 'username':
-    	    case 'password':
-    	      url[part] = encodeURIComponent(value);
-    	      break;
-
-    	    case 'auth':
-    	      var index = value.indexOf(':');
-
-    	      if (~index) {
-    	        url.username = value.slice(0, index);
-    	        url.username = encodeURIComponent(decodeURIComponent(url.username));
-
-    	        url.password = value.slice(index + 1);
-    	        url.password = encodeURIComponent(decodeURIComponent(url.password));
-    	      } else {
-    	        url.username = encodeURIComponent(decodeURIComponent(value));
-    	      }
-    	  }
-
-    	  for (var i = 0; i < rules.length; i++) {
-    	    var ins = rules[i];
-
-    	    if (ins[4]) url[ins[1]] = url[ins[1]].toLowerCase();
-    	  }
-
-    	  url.auth = url.password ? url.username +':'+ url.password : url.username;
-
-    	  url.origin = url.protocol !== 'file:' && isSpecial(url.protocol) && url.host
-    	    ? url.protocol +'//'+ url.host
-    	    : 'null';
-
-    	  url.href = url.toString();
-
-    	  return url;
-    	}
-
-    	/**
-    	 * Transform the properties back in to a valid and full URL string.
-    	 *
-    	 * @param {Function} stringify Optional query stringify function.
-    	 * @returns {String} Compiled version of the URL.
-    	 * @public
-    	 */
-    	function toString(stringify) {
-    	  if (!stringify || 'function' !== typeof stringify) stringify = qs.stringify;
-
-    	  var query
-    	    , url = this
-    	    , host = url.host
-    	    , protocol = url.protocol;
-
-    	  if (protocol && protocol.charAt(protocol.length - 1) !== ':') protocol += ':';
-
-    	  var result =
-    	    protocol +
-    	    ((url.protocol && url.slashes) || isSpecial(url.protocol) ? '//' : '');
-
-    	  if (url.username) {
-    	    result += url.username;
-    	    if (url.password) result += ':'+ url.password;
-    	    result += '@';
-    	  } else if (url.password) {
-    	    result += ':'+ url.password;
-    	    result += '@';
-    	  } else if (
-    	    url.protocol !== 'file:' &&
-    	    isSpecial(url.protocol) &&
-    	    !host &&
-    	    url.pathname !== '/'
-    	  ) {
-    	    //
-    	    // Add back the empty userinfo, otherwise the original invalid URL
-    	    // might be transformed into a valid one with `url.pathname` as host.
-    	    //
-    	    result += '@';
-    	  }
-
-    	  //
-    	  // Trailing colon is removed from `url.host` when it is parsed. If it still
-    	  // ends with a colon, then add back the trailing colon that was removed. This
-    	  // prevents an invalid URL from being transformed into a valid one.
-    	  //
-    	  if (host[host.length - 1] === ':' || (port.test(url.hostname) && !url.port)) {
-    	    host += ':';
-    	  }
-
-    	  result += host + url.pathname;
-
-    	  query = 'object' === typeof url.query ? stringify(url.query) : url.query;
-    	  if (query) result += '?' !== query.charAt(0) ? '?'+ query : query;
-
-    	  if (url.hash) result += url.hash;
-
-    	  return result;
-    	}
-
-    	Url.prototype = { set: set, toString: toString };
-
-    	//
-    	// Expose the URL parser and some additional properties that might be useful for
-    	// others or testing.
-    	//
-    	Url.extractProtocol = extractProtocol;
-    	Url.location = lolcation;
-    	Url.trimLeft = trimLeft;
-    	Url.qs = qs;
-
-    	urlParse = Url;
-    	return urlParse;
-    }
-
-    var pubsuffixPsl = {};
-
-    var psl = {};
-
-    var hasRequiredPsl;
-
-    function requirePsl () {
-    	if (hasRequiredPsl) return psl;
-    	hasRequiredPsl = 1;
-    	(function (exports) {
-    Object.defineProperties(exports,{__esModule:{value:true},[Symbol.toStringTag]:{value:"Module"}});function K(e){return e&&e.__esModule&&Object.prototype.hasOwnProperty.call(e,"default")?e.default:e}var O,F;function Q(){if(F)return O;F=1;const e=2147483647,s=36,c=1,o=26,t=38,d=700,z=72,y=128,g="-",P=/^xn--/,V=/[^\0-\x7F]/,G=/[\x2E\u3002\uFF0E\uFF61]/g,W={overflow:"Overflow: input needs wider integers to process","not-basic":"Illegal input >= 0x80 (not a basic code point)","invalid-input":"Invalid input"},C=s-c,h=Math.floor,I=String.fromCharCode;function v(a){throw new RangeError(W[a])}function U(a,i){const m=[];let n=a.length;for(;n--;)m[n]=i(a[n]);return m}function S(a,i){const m=a.split("@");let n="";m.length>1&&(n=m[0]+"@",a=m[1]),a=a.replace(G,".");const r=a.split("."),p=U(r,i).join(".");return n+p}function L(a){const i=[];let m=0;const n=a.length;for(;m<n;){const r=a.charCodeAt(m++);if(r>=55296&&r<=56319&&m<n){const p=a.charCodeAt(m++);(p&64512)==56320?i.push(((r&1023)<<10)+(p&1023)+65536):(i.push(r),m--);}else i.push(r);}return i}const $=a=>String.fromCodePoint(...a),J=function(a){return a>=48&&a<58?26+(a-48):a>=65&&a<91?a-65:a>=97&&a<123?a-97:s},D=function(a,i){return a+22+75*(a<26)-((i!=0)<<5)},T=function(a,i,m){let n=0;for(a=m?h(a/d):a>>1,a+=h(a/i);a>C*o>>1;n+=s)a=h(a/C);return h(n+(C+1)*a/(a+t))},E=function(a){const i=[],m=a.length;let n=0,r=y,p=z,j=a.lastIndexOf(g);j<0&&(j=0);for(let u=0;u<j;++u)a.charCodeAt(u)>=128&&v("not-basic"),i.push(a.charCodeAt(u));for(let u=j>0?j+1:0;u<m;){const k=n;for(let l=1,b=s;;b+=s){u>=m&&v("invalid-input");const w=J(a.charCodeAt(u++));w>=s&&v("invalid-input"),w>h((e-n)/l)&&v("overflow"),n+=w*l;const x=b<=p?c:b>=p+o?o:b-p;if(w<x)break;const q=s-x;l>h(e/q)&&v("overflow"),l*=q;}const f=i.length+1;p=T(n-k,f,k==0),h(n/f)>e-r&&v("overflow"),r+=h(n/f),n%=f,i.splice(n++,0,r);}return String.fromCodePoint(...i)},B=function(a){const i=[];a=L(a);const m=a.length;let n=y,r=0,p=z;for(const k of a)k<128&&i.push(I(k));const j=i.length;let u=j;for(j&&i.push(g);u<m;){let k=e;for(const l of a)l>=n&&l<k&&(k=l);const f=u+1;k-n>h((e-r)/f)&&v("overflow"),r+=(k-n)*f,n=k;for(const l of a)if(l<n&&++r>e&&v("overflow"),l===n){let b=r;for(let w=s;;w+=s){const x=w<=p?c:w>=p+o?o:w-p;if(b<x)break;const q=b-x,M=s-x;i.push(I(D(x+q%M,0))),b=h(q/M);}i.push(I(D(b,0))),p=T(r,f,u===j),r=0,++u;}++r,++n;}return i.join("")};return O={version:"2.3.1",ucs2:{decode:L,encode:$},decode:E,encode:B,toASCII:function(a){return S(a,function(i){return V.test(i)?"xn--"+B(i):i})},toUnicode:function(a){return S(a,function(i){return P.test(i)?E(i.slice(4).toLowerCase()):i})}},O}var X=Q();const A=K(X),Y=["ac","com.ac","edu.ac","gov.ac","mil.ac","net.ac","org.ac","ad","ae","ac.ae","co.ae","gov.ae","mil.ae","net.ae","org.ae","sch.ae","aero","airline.aero","airport.aero","accident-investigation.aero","accident-prevention.aero","aerobatic.aero","aeroclub.aero","aerodrome.aero","agents.aero","air-surveillance.aero","air-traffic-control.aero","aircraft.aero","airtraffic.aero","ambulance.aero","association.aero","author.aero","ballooning.aero","broker.aero","caa.aero","cargo.aero","catering.aero","certification.aero","championship.aero","charter.aero","civilaviation.aero","club.aero","conference.aero","consultant.aero","consulting.aero","control.aero","council.aero","crew.aero","design.aero","dgca.aero","educator.aero","emergency.aero","engine.aero","engineer.aero","entertainment.aero","equipment.aero","exchange.aero","express.aero","federation.aero","flight.aero","freight.aero","fuel.aero","gliding.aero","government.aero","groundhandling.aero","group.aero","hanggliding.aero","homebuilt.aero","insurance.aero","journal.aero","journalist.aero","leasing.aero","logistics.aero","magazine.aero","maintenance.aero","marketplace.aero","media.aero","microlight.aero","modelling.aero","navigation.aero","parachuting.aero","paragliding.aero","passenger-association.aero","pilot.aero","press.aero","production.aero","recreation.aero","repbody.aero","res.aero","research.aero","rotorcraft.aero","safety.aero","scientist.aero","services.aero","show.aero","skydiving.aero","software.aero","student.aero","taxi.aero","trader.aero","trading.aero","trainer.aero","union.aero","workinggroup.aero","works.aero","af","com.af","edu.af","gov.af","net.af","org.af","ag","co.ag","com.ag","net.ag","nom.ag","org.ag","ai","com.ai","net.ai","off.ai","org.ai","al","com.al","edu.al","gov.al","mil.al","net.al","org.al","am","co.am","com.am","commune.am","net.am","org.am","ao","co.ao","ed.ao","edu.ao","gov.ao","gv.ao","it.ao","og.ao","org.ao","pb.ao","aq","ar","bet.ar","com.ar","coop.ar","edu.ar","gob.ar","gov.ar","int.ar","mil.ar","musica.ar","mutual.ar","net.ar","org.ar","senasa.ar","tur.ar","arpa","e164.arpa","home.arpa","in-addr.arpa","ip6.arpa","iris.arpa","uri.arpa","urn.arpa","as","gov.as","asia","at","ac.at","sth.ac.at","co.at","gv.at","or.at","au","asn.au","com.au","edu.au","gov.au","id.au","net.au","org.au","conf.au","oz.au","act.au","nsw.au","nt.au","qld.au","sa.au","tas.au","vic.au","wa.au","act.edu.au","catholic.edu.au","nsw.edu.au","nt.edu.au","qld.edu.au","sa.edu.au","tas.edu.au","vic.edu.au","wa.edu.au","qld.gov.au","sa.gov.au","tas.gov.au","vic.gov.au","wa.gov.au","schools.nsw.edu.au","aw","com.aw","ax","az","biz.az","com.az","edu.az","gov.az","info.az","int.az","mil.az","name.az","net.az","org.az","pp.az","pro.az","ba","com.ba","edu.ba","gov.ba","mil.ba","net.ba","org.ba","bb","biz.bb","co.bb","com.bb","edu.bb","gov.bb","info.bb","net.bb","org.bb","store.bb","tv.bb","*.bd","be","ac.be","bf","gov.bf","bg","0.bg","1.bg","2.bg","3.bg","4.bg","5.bg","6.bg","7.bg","8.bg","9.bg","a.bg","b.bg","c.bg","d.bg","e.bg","f.bg","g.bg","h.bg","i.bg","j.bg","k.bg","l.bg","m.bg","n.bg","o.bg","p.bg","q.bg","r.bg","s.bg","t.bg","u.bg","v.bg","w.bg","x.bg","y.bg","z.bg","bh","com.bh","edu.bh","gov.bh","net.bh","org.bh","bi","co.bi","com.bi","edu.bi","or.bi","org.bi","biz","bj","africa.bj","agro.bj","architectes.bj","assur.bj","avocats.bj","co.bj","com.bj","eco.bj","econo.bj","edu.bj","info.bj","loisirs.bj","money.bj","net.bj","org.bj","ote.bj","restaurant.bj","resto.bj","tourism.bj","univ.bj","bm","com.bm","edu.bm","gov.bm","net.bm","org.bm","bn","com.bn","edu.bn","gov.bn","net.bn","org.bn","bo","com.bo","edu.bo","gob.bo","int.bo","mil.bo","net.bo","org.bo","tv.bo","web.bo","academia.bo","agro.bo","arte.bo","blog.bo","bolivia.bo","ciencia.bo","cooperativa.bo","democracia.bo","deporte.bo","ecologia.bo","economia.bo","empresa.bo","indigena.bo","industria.bo","info.bo","medicina.bo","movimiento.bo","musica.bo","natural.bo","nombre.bo","noticias.bo","patria.bo","plurinacional.bo","politica.bo","profesional.bo","pueblo.bo","revista.bo","salud.bo","tecnologia.bo","tksat.bo","transporte.bo","wiki.bo","br","9guacu.br","abc.br","adm.br","adv.br","agr.br","aju.br","am.br","anani.br","aparecida.br","app.br","arq.br","art.br","ato.br","b.br","barueri.br","belem.br","bet.br","bhz.br","bib.br","bio.br","blog.br","bmd.br","boavista.br","bsb.br","campinagrande.br","campinas.br","caxias.br","cim.br","cng.br","cnt.br","com.br","contagem.br","coop.br","coz.br","cri.br","cuiaba.br","curitiba.br","def.br","des.br","det.br","dev.br","ecn.br","eco.br","edu.br","emp.br","enf.br","eng.br","esp.br","etc.br","eti.br","far.br","feira.br","flog.br","floripa.br","fm.br","fnd.br","fortal.br","fot.br","foz.br","fst.br","g12.br","geo.br","ggf.br","goiania.br","gov.br","ac.gov.br","al.gov.br","am.gov.br","ap.gov.br","ba.gov.br","ce.gov.br","df.gov.br","es.gov.br","go.gov.br","ma.gov.br","mg.gov.br","ms.gov.br","mt.gov.br","pa.gov.br","pb.gov.br","pe.gov.br","pi.gov.br","pr.gov.br","rj.gov.br","rn.gov.br","ro.gov.br","rr.gov.br","rs.gov.br","sc.gov.br","se.gov.br","sp.gov.br","to.gov.br","gru.br","imb.br","ind.br","inf.br","jab.br","jampa.br","jdf.br","joinville.br","jor.br","jus.br","leg.br","leilao.br","lel.br","log.br","londrina.br","macapa.br","maceio.br","manaus.br","maringa.br","mat.br","med.br","mil.br","morena.br","mp.br","mus.br","natal.br","net.br","niteroi.br","*.nom.br","not.br","ntr.br","odo.br","ong.br","org.br","osasco.br","palmas.br","poa.br","ppg.br","pro.br","psc.br","psi.br","pvh.br","qsl.br","radio.br","rec.br","recife.br","rep.br","ribeirao.br","rio.br","riobranco.br","riopreto.br","salvador.br","sampa.br","santamaria.br","santoandre.br","saobernardo.br","saogonca.br","seg.br","sjc.br","slg.br","slz.br","sorocaba.br","srv.br","taxi.br","tc.br","tec.br","teo.br","the.br","tmp.br","trd.br","tur.br","tv.br","udi.br","vet.br","vix.br","vlog.br","wiki.br","zlg.br","bs","com.bs","edu.bs","gov.bs","net.bs","org.bs","bt","com.bt","edu.bt","gov.bt","net.bt","org.bt","bv","bw","co.bw","org.bw","by","gov.by","mil.by","com.by","of.by","bz","co.bz","com.bz","edu.bz","gov.bz","net.bz","org.bz","ca","ab.ca","bc.ca","mb.ca","nb.ca","nf.ca","nl.ca","ns.ca","nt.ca","nu.ca","on.ca","pe.ca","qc.ca","sk.ca","yk.ca","gc.ca","cat","cc","cd","gov.cd","cf","cg","ch","ci","ac.ci","aéroport.ci","asso.ci","co.ci","com.ci","ed.ci","edu.ci","go.ci","gouv.ci","int.ci","net.ci","or.ci","org.ci","*.ck","!www.ck","cl","co.cl","gob.cl","gov.cl","mil.cl","cm","co.cm","com.cm","gov.cm","net.cm","cn","ac.cn","com.cn","edu.cn","gov.cn","mil.cn","net.cn","org.cn","公司.cn","網絡.cn","网络.cn","ah.cn","bj.cn","cq.cn","fj.cn","gd.cn","gs.cn","gx.cn","gz.cn","ha.cn","hb.cn","he.cn","hi.cn","hk.cn","hl.cn","hn.cn","jl.cn","js.cn","jx.cn","ln.cn","mo.cn","nm.cn","nx.cn","qh.cn","sc.cn","sd.cn","sh.cn","sn.cn","sx.cn","tj.cn","tw.cn","xj.cn","xz.cn","yn.cn","zj.cn","co","com.co","edu.co","gov.co","mil.co","net.co","nom.co","org.co","com","coop","cr","ac.cr","co.cr","ed.cr","fi.cr","go.cr","or.cr","sa.cr","cu","com.cu","edu.cu","gob.cu","inf.cu","nat.cu","net.cu","org.cu","cv","com.cv","edu.cv","id.cv","int.cv","net.cv","nome.cv","org.cv","publ.cv","cw","com.cw","edu.cw","net.cw","org.cw","cx","gov.cx","cy","ac.cy","biz.cy","com.cy","ekloges.cy","gov.cy","ltd.cy","mil.cy","net.cy","org.cy","press.cy","pro.cy","tm.cy","cz","de","dj","dk","dm","co.dm","com.dm","edu.dm","gov.dm","net.dm","org.dm","do","art.do","com.do","edu.do","gob.do","gov.do","mil.do","net.do","org.do","sld.do","web.do","dz","art.dz","asso.dz","com.dz","edu.dz","gov.dz","net.dz","org.dz","pol.dz","soc.dz","tm.dz","ec","com.ec","edu.ec","fin.ec","gob.ec","gov.ec","info.ec","k12.ec","med.ec","mil.ec","net.ec","org.ec","pro.ec","edu","ee","aip.ee","com.ee","edu.ee","fie.ee","gov.ee","lib.ee","med.ee","org.ee","pri.ee","riik.ee","eg","ac.eg","com.eg","edu.eg","eun.eg","gov.eg","info.eg","me.eg","mil.eg","name.eg","net.eg","org.eg","sci.eg","sport.eg","tv.eg","*.er","es","com.es","edu.es","gob.es","nom.es","org.es","et","biz.et","com.et","edu.et","gov.et","info.et","name.et","net.et","org.et","eu","fi","aland.fi","fj","ac.fj","biz.fj","com.fj","gov.fj","info.fj","mil.fj","name.fj","net.fj","org.fj","pro.fj","*.fk","fm","com.fm","edu.fm","net.fm","org.fm","fo","fr","asso.fr","com.fr","gouv.fr","nom.fr","prd.fr","tm.fr","avoues.fr","cci.fr","greta.fr","huissier-justice.fr","ga","gb","gd","edu.gd","gov.gd","ge","com.ge","edu.ge","gov.ge","net.ge","org.ge","pvt.ge","school.ge","gf","gg","co.gg","net.gg","org.gg","gh","com.gh","edu.gh","gov.gh","mil.gh","org.gh","gi","com.gi","edu.gi","gov.gi","ltd.gi","mod.gi","org.gi","gl","co.gl","com.gl","edu.gl","net.gl","org.gl","gm","gn","ac.gn","com.gn","edu.gn","gov.gn","net.gn","org.gn","gov","gp","asso.gp","com.gp","edu.gp","mobi.gp","net.gp","org.gp","gq","gr","com.gr","edu.gr","gov.gr","net.gr","org.gr","gs","gt","com.gt","edu.gt","gob.gt","ind.gt","mil.gt","net.gt","org.gt","gu","com.gu","edu.gu","gov.gu","guam.gu","info.gu","net.gu","org.gu","web.gu","gw","gy","co.gy","com.gy","edu.gy","gov.gy","net.gy","org.gy","hk","com.hk","edu.hk","gov.hk","idv.hk","net.hk","org.hk","个人.hk","個人.hk","公司.hk","政府.hk","敎育.hk","教育.hk","箇人.hk","組織.hk","組织.hk","網絡.hk","網络.hk","组織.hk","组织.hk","网絡.hk","网络.hk","hm","hn","com.hn","edu.hn","gob.hn","mil.hn","net.hn","org.hn","hr","com.hr","from.hr","iz.hr","name.hr","ht","adult.ht","art.ht","asso.ht","com.ht","coop.ht","edu.ht","firm.ht","gouv.ht","info.ht","med.ht","net.ht","org.ht","perso.ht","pol.ht","pro.ht","rel.ht","shop.ht","hu","2000.hu","agrar.hu","bolt.hu","casino.hu","city.hu","co.hu","erotica.hu","erotika.hu","film.hu","forum.hu","games.hu","hotel.hu","info.hu","ingatlan.hu","jogasz.hu","konyvelo.hu","lakas.hu","media.hu","news.hu","org.hu","priv.hu","reklam.hu","sex.hu","shop.hu","sport.hu","suli.hu","szex.hu","tm.hu","tozsde.hu","utazas.hu","video.hu","id","ac.id","biz.id","co.id","desa.id","go.id","mil.id","my.id","net.id","or.id","ponpes.id","sch.id","web.id","ie","gov.ie","il","ac.il","co.il","gov.il","idf.il","k12.il","muni.il","net.il","org.il","ישראל","אקדמיה.ישראל","ישוב.ישראל","צהל.ישראל","ממשל.ישראל","im","ac.im","co.im","ltd.co.im","plc.co.im","com.im","net.im","org.im","tt.im","tv.im","in","5g.in","6g.in","ac.in","ai.in","am.in","bihar.in","biz.in","business.in","ca.in","cn.in","co.in","com.in","coop.in","cs.in","delhi.in","dr.in","edu.in","er.in","firm.in","gen.in","gov.in","gujarat.in","ind.in","info.in","int.in","internet.in","io.in","me.in","mil.in","net.in","nic.in","org.in","pg.in","post.in","pro.in","res.in","travel.in","tv.in","uk.in","up.in","us.in","info","int","eu.int","io","co.io","com.io","edu.io","gov.io","mil.io","net.io","nom.io","org.io","iq","com.iq","edu.iq","gov.iq","mil.iq","net.iq","org.iq","ir","ac.ir","co.ir","gov.ir","id.ir","net.ir","org.ir","sch.ir","ایران.ir","ايران.ir","is","it","edu.it","gov.it","abr.it","abruzzo.it","aosta-valley.it","aostavalley.it","bas.it","basilicata.it","cal.it","calabria.it","cam.it","campania.it","emilia-romagna.it","emiliaromagna.it","emr.it","friuli-v-giulia.it","friuli-ve-giulia.it","friuli-vegiulia.it","friuli-venezia-giulia.it","friuli-veneziagiulia.it","friuli-vgiulia.it","friuliv-giulia.it","friulive-giulia.it","friulivegiulia.it","friulivenezia-giulia.it","friuliveneziagiulia.it","friulivgiulia.it","fvg.it","laz.it","lazio.it","lig.it","liguria.it","lom.it","lombardia.it","lombardy.it","lucania.it","mar.it","marche.it","mol.it","molise.it","piedmont.it","piemonte.it","pmn.it","pug.it","puglia.it","sar.it","sardegna.it","sardinia.it","sic.it","sicilia.it","sicily.it","taa.it","tos.it","toscana.it","trentin-sud-tirol.it","trentin-süd-tirol.it","trentin-sudtirol.it","trentin-südtirol.it","trentin-sued-tirol.it","trentin-suedtirol.it","trentino.it","trentino-a-adige.it","trentino-aadige.it","trentino-alto-adige.it","trentino-altoadige.it","trentino-s-tirol.it","trentino-stirol.it","trentino-sud-tirol.it","trentino-süd-tirol.it","trentino-sudtirol.it","trentino-südtirol.it","trentino-sued-tirol.it","trentino-suedtirol.it","trentinoa-adige.it","trentinoaadige.it","trentinoalto-adige.it","trentinoaltoadige.it","trentinos-tirol.it","trentinostirol.it","trentinosud-tirol.it","trentinosüd-tirol.it","trentinosudtirol.it","trentinosüdtirol.it","trentinosued-tirol.it","trentinosuedtirol.it","trentinsud-tirol.it","trentinsüd-tirol.it","trentinsudtirol.it","trentinsüdtirol.it","trentinsued-tirol.it","trentinsuedtirol.it","tuscany.it","umb.it","umbria.it","val-d-aosta.it","val-daosta.it","vald-aosta.it","valdaosta.it","valle-aosta.it","valle-d-aosta.it","valle-daosta.it","valleaosta.it","valled-aosta.it","valledaosta.it","vallee-aoste.it","vallée-aoste.it","vallee-d-aoste.it","vallée-d-aoste.it","valleeaoste.it","valléeaoste.it","valleedaoste.it","valléedaoste.it","vao.it","vda.it","ven.it","veneto.it","ag.it","agrigento.it","al.it","alessandria.it","alto-adige.it","altoadige.it","an.it","ancona.it","andria-barletta-trani.it","andria-trani-barletta.it","andriabarlettatrani.it","andriatranibarletta.it","ao.it","aosta.it","aoste.it","ap.it","aq.it","aquila.it","ar.it","arezzo.it","ascoli-piceno.it","ascolipiceno.it","asti.it","at.it","av.it","avellino.it","ba.it","balsan.it","balsan-sudtirol.it","balsan-südtirol.it","balsan-suedtirol.it","bari.it","barletta-trani-andria.it","barlettatraniandria.it","belluno.it","benevento.it","bergamo.it","bg.it","bi.it","biella.it","bl.it","bn.it","bo.it","bologna.it","bolzano.it","bolzano-altoadige.it","bozen.it","bozen-sudtirol.it","bozen-südtirol.it","bozen-suedtirol.it","br.it","brescia.it","brindisi.it","bs.it","bt.it","bulsan.it","bulsan-sudtirol.it","bulsan-südtirol.it","bulsan-suedtirol.it","bz.it","ca.it","cagliari.it","caltanissetta.it","campidano-medio.it","campidanomedio.it","campobasso.it","carbonia-iglesias.it","carboniaiglesias.it","carrara-massa.it","carraramassa.it","caserta.it","catania.it","catanzaro.it","cb.it","ce.it","cesena-forli.it","cesena-forlì.it","cesenaforli.it","cesenaforlì.it","ch.it","chieti.it","ci.it","cl.it","cn.it","co.it","como.it","cosenza.it","cr.it","cremona.it","crotone.it","cs.it","ct.it","cuneo.it","cz.it","dell-ogliastra.it","dellogliastra.it","en.it","enna.it","fc.it","fe.it","fermo.it","ferrara.it","fg.it","fi.it","firenze.it","florence.it","fm.it","foggia.it","forli-cesena.it","forlì-cesena.it","forlicesena.it","forlìcesena.it","fr.it","frosinone.it","ge.it","genoa.it","genova.it","go.it","gorizia.it","gr.it","grosseto.it","iglesias-carbonia.it","iglesiascarbonia.it","im.it","imperia.it","is.it","isernia.it","kr.it","la-spezia.it","laquila.it","laspezia.it","latina.it","lc.it","le.it","lecce.it","lecco.it","li.it","livorno.it","lo.it","lodi.it","lt.it","lu.it","lucca.it","macerata.it","mantova.it","massa-carrara.it","massacarrara.it","matera.it","mb.it","mc.it","me.it","medio-campidano.it","mediocampidano.it","messina.it","mi.it","milan.it","milano.it","mn.it","mo.it","modena.it","monza.it","monza-brianza.it","monza-e-della-brianza.it","monzabrianza.it","monzaebrianza.it","monzaedellabrianza.it","ms.it","mt.it","na.it","naples.it","napoli.it","no.it","novara.it","nu.it","nuoro.it","og.it","ogliastra.it","olbia-tempio.it","olbiatempio.it","or.it","oristano.it","ot.it","pa.it","padova.it","padua.it","palermo.it","parma.it","pavia.it","pc.it","pd.it","pe.it","perugia.it","pesaro-urbino.it","pesarourbino.it","pescara.it","pg.it","pi.it","piacenza.it","pisa.it","pistoia.it","pn.it","po.it","pordenone.it","potenza.it","pr.it","prato.it","pt.it","pu.it","pv.it","pz.it","ra.it","ragusa.it","ravenna.it","rc.it","re.it","reggio-calabria.it","reggio-emilia.it","reggiocalabria.it","reggioemilia.it","rg.it","ri.it","rieti.it","rimini.it","rm.it","rn.it","ro.it","roma.it","rome.it","rovigo.it","sa.it","salerno.it","sassari.it","savona.it","si.it","siena.it","siracusa.it","so.it","sondrio.it","sp.it","sr.it","ss.it","südtirol.it","suedtirol.it","sv.it","ta.it","taranto.it","te.it","tempio-olbia.it","tempioolbia.it","teramo.it","terni.it","tn.it","to.it","torino.it","tp.it","tr.it","trani-andria-barletta.it","trani-barletta-andria.it","traniandriabarletta.it","tranibarlettaandria.it","trapani.it","trento.it","treviso.it","trieste.it","ts.it","turin.it","tv.it","ud.it","udine.it","urbino-pesaro.it","urbinopesaro.it","va.it","varese.it","vb.it","vc.it","ve.it","venezia.it","venice.it","verbania.it","vercelli.it","verona.it","vi.it","vibo-valentia.it","vibovalentia.it","vicenza.it","viterbo.it","vr.it","vs.it","vt.it","vv.it","je","co.je","net.je","org.je","*.jm","jo","agri.jo","ai.jo","com.jo","edu.jo","eng.jo","fm.jo","gov.jo","mil.jo","net.jo","org.jo","per.jo","phd.jo","sch.jo","tv.jo","jobs","jp","ac.jp","ad.jp","co.jp","ed.jp","go.jp","gr.jp","lg.jp","ne.jp","or.jp","aichi.jp","akita.jp","aomori.jp","chiba.jp","ehime.jp","fukui.jp","fukuoka.jp","fukushima.jp","gifu.jp","gunma.jp","hiroshima.jp","hokkaido.jp","hyogo.jp","ibaraki.jp","ishikawa.jp","iwate.jp","kagawa.jp","kagoshima.jp","kanagawa.jp","kochi.jp","kumamoto.jp","kyoto.jp","mie.jp","miyagi.jp","miyazaki.jp","nagano.jp","nagasaki.jp","nara.jp","niigata.jp","oita.jp","okayama.jp","okinawa.jp","osaka.jp","saga.jp","saitama.jp","shiga.jp","shimane.jp","shizuoka.jp","tochigi.jp","tokushima.jp","tokyo.jp","tottori.jp","toyama.jp","wakayama.jp","yamagata.jp","yamaguchi.jp","yamanashi.jp","三重.jp","京都.jp","佐賀.jp","兵庫.jp","北海道.jp","千葉.jp","和歌山.jp","埼玉.jp","大分.jp","大阪.jp","奈良.jp","宮城.jp","宮崎.jp","富山.jp","山口.jp","山形.jp","山梨.jp","岐阜.jp","岡山.jp","岩手.jp","島根.jp","広島.jp","徳島.jp","愛媛.jp","愛知.jp","新潟.jp","東京.jp","栃木.jp","沖縄.jp","滋賀.jp","熊本.jp","石川.jp","神奈川.jp","福井.jp","福岡.jp","福島.jp","秋田.jp","群馬.jp","茨城.jp","長崎.jp","長野.jp","青森.jp","静岡.jp","香川.jp","高知.jp","鳥取.jp","鹿児島.jp","*.kawasaki.jp","!city.kawasaki.jp","*.kitakyushu.jp","!city.kitakyushu.jp","*.kobe.jp","!city.kobe.jp","*.nagoya.jp","!city.nagoya.jp","*.sapporo.jp","!city.sapporo.jp","*.sendai.jp","!city.sendai.jp","*.yokohama.jp","!city.yokohama.jp","aisai.aichi.jp","ama.aichi.jp","anjo.aichi.jp","asuke.aichi.jp","chiryu.aichi.jp","chita.aichi.jp","fuso.aichi.jp","gamagori.aichi.jp","handa.aichi.jp","hazu.aichi.jp","hekinan.aichi.jp","higashiura.aichi.jp","ichinomiya.aichi.jp","inazawa.aichi.jp","inuyama.aichi.jp","isshiki.aichi.jp","iwakura.aichi.jp","kanie.aichi.jp","kariya.aichi.jp","kasugai.aichi.jp","kira.aichi.jp","kiyosu.aichi.jp","komaki.aichi.jp","konan.aichi.jp","kota.aichi.jp","mihama.aichi.jp","miyoshi.aichi.jp","nishio.aichi.jp","nisshin.aichi.jp","obu.aichi.jp","oguchi.aichi.jp","oharu.aichi.jp","okazaki.aichi.jp","owariasahi.aichi.jp","seto.aichi.jp","shikatsu.aichi.jp","shinshiro.aichi.jp","shitara.aichi.jp","tahara.aichi.jp","takahama.aichi.jp","tobishima.aichi.jp","toei.aichi.jp","togo.aichi.jp","tokai.aichi.jp","tokoname.aichi.jp","toyoake.aichi.jp","toyohashi.aichi.jp","toyokawa.aichi.jp","toyone.aichi.jp","toyota.aichi.jp","tsushima.aichi.jp","yatomi.aichi.jp","akita.akita.jp","daisen.akita.jp","fujisato.akita.jp","gojome.akita.jp","hachirogata.akita.jp","happou.akita.jp","higashinaruse.akita.jp","honjo.akita.jp","honjyo.akita.jp","ikawa.akita.jp","kamikoani.akita.jp","kamioka.akita.jp","katagami.akita.jp","kazuno.akita.jp","kitaakita.akita.jp","kosaka.akita.jp","kyowa.akita.jp","misato.akita.jp","mitane.akita.jp","moriyoshi.akita.jp","nikaho.akita.jp","noshiro.akita.jp","odate.akita.jp","oga.akita.jp","ogata.akita.jp","semboku.akita.jp","yokote.akita.jp","yurihonjo.akita.jp","aomori.aomori.jp","gonohe.aomori.jp","hachinohe.aomori.jp","hashikami.aomori.jp","hiranai.aomori.jp","hirosaki.aomori.jp","itayanagi.aomori.jp","kuroishi.aomori.jp","misawa.aomori.jp","mutsu.aomori.jp","nakadomari.aomori.jp","noheji.aomori.jp","oirase.aomori.jp","owani.aomori.jp","rokunohe.aomori.jp","sannohe.aomori.jp","shichinohe.aomori.jp","shingo.aomori.jp","takko.aomori.jp","towada.aomori.jp","tsugaru.aomori.jp","tsuruta.aomori.jp","abiko.chiba.jp","asahi.chiba.jp","chonan.chiba.jp","chosei.chiba.jp","choshi.chiba.jp","chuo.chiba.jp","funabashi.chiba.jp","futtsu.chiba.jp","hanamigawa.chiba.jp","ichihara.chiba.jp","ichikawa.chiba.jp","ichinomiya.chiba.jp","inzai.chiba.jp","isumi.chiba.jp","kamagaya.chiba.jp","kamogawa.chiba.jp","kashiwa.chiba.jp","katori.chiba.jp","katsuura.chiba.jp","kimitsu.chiba.jp","kisarazu.chiba.jp","kozaki.chiba.jp","kujukuri.chiba.jp","kyonan.chiba.jp","matsudo.chiba.jp","midori.chiba.jp","mihama.chiba.jp","minamiboso.chiba.jp","mobara.chiba.jp","mutsuzawa.chiba.jp","nagara.chiba.jp","nagareyama.chiba.jp","narashino.chiba.jp","narita.chiba.jp","noda.chiba.jp","oamishirasato.chiba.jp","omigawa.chiba.jp","onjuku.chiba.jp","otaki.chiba.jp","sakae.chiba.jp","sakura.chiba.jp","shimofusa.chiba.jp","shirako.chiba.jp","shiroi.chiba.jp","shisui.chiba.jp","sodegaura.chiba.jp","sosa.chiba.jp","tako.chiba.jp","tateyama.chiba.jp","togane.chiba.jp","tohnosho.chiba.jp","tomisato.chiba.jp","urayasu.chiba.jp","yachimata.chiba.jp","yachiyo.chiba.jp","yokaichiba.chiba.jp","yokoshibahikari.chiba.jp","yotsukaido.chiba.jp","ainan.ehime.jp","honai.ehime.jp","ikata.ehime.jp","imabari.ehime.jp","iyo.ehime.jp","kamijima.ehime.jp","kihoku.ehime.jp","kumakogen.ehime.jp","masaki.ehime.jp","matsuno.ehime.jp","matsuyama.ehime.jp","namikata.ehime.jp","niihama.ehime.jp","ozu.ehime.jp","saijo.ehime.jp","seiyo.ehime.jp","shikokuchuo.ehime.jp","tobe.ehime.jp","toon.ehime.jp","uchiko.ehime.jp","uwajima.ehime.jp","yawatahama.ehime.jp","echizen.fukui.jp","eiheiji.fukui.jp","fukui.fukui.jp","ikeda.fukui.jp","katsuyama.fukui.jp","mihama.fukui.jp","minamiechizen.fukui.jp","obama.fukui.jp","ohi.fukui.jp","ono.fukui.jp","sabae.fukui.jp","sakai.fukui.jp","takahama.fukui.jp","tsuruga.fukui.jp","wakasa.fukui.jp","ashiya.fukuoka.jp","buzen.fukuoka.jp","chikugo.fukuoka.jp","chikuho.fukuoka.jp","chikujo.fukuoka.jp","chikushino.fukuoka.jp","chikuzen.fukuoka.jp","chuo.fukuoka.jp","dazaifu.fukuoka.jp","fukuchi.fukuoka.jp","hakata.fukuoka.jp","higashi.fukuoka.jp","hirokawa.fukuoka.jp","hisayama.fukuoka.jp","iizuka.fukuoka.jp","inatsuki.fukuoka.jp","kaho.fukuoka.jp","kasuga.fukuoka.jp","kasuya.fukuoka.jp","kawara.fukuoka.jp","keisen.fukuoka.jp","koga.fukuoka.jp","kurate.fukuoka.jp","kurogi.fukuoka.jp","kurume.fukuoka.jp","minami.fukuoka.jp","miyako.fukuoka.jp","miyama.fukuoka.jp","miyawaka.fukuoka.jp","mizumaki.fukuoka.jp","munakata.fukuoka.jp","nakagawa.fukuoka.jp","nakama.fukuoka.jp","nishi.fukuoka.jp","nogata.fukuoka.jp","ogori.fukuoka.jp","okagaki.fukuoka.jp","okawa.fukuoka.jp","oki.fukuoka.jp","omuta.fukuoka.jp","onga.fukuoka.jp","onojo.fukuoka.jp","oto.fukuoka.jp","saigawa.fukuoka.jp","sasaguri.fukuoka.jp","shingu.fukuoka.jp","shinyoshitomi.fukuoka.jp","shonai.fukuoka.jp","soeda.fukuoka.jp","sue.fukuoka.jp","tachiarai.fukuoka.jp","tagawa.fukuoka.jp","takata.fukuoka.jp","toho.fukuoka.jp","toyotsu.fukuoka.jp","tsuiki.fukuoka.jp","ukiha.fukuoka.jp","umi.fukuoka.jp","usui.fukuoka.jp","yamada.fukuoka.jp","yame.fukuoka.jp","yanagawa.fukuoka.jp","yukuhashi.fukuoka.jp","aizubange.fukushima.jp","aizumisato.fukushima.jp","aizuwakamatsu.fukushima.jp","asakawa.fukushima.jp","bandai.fukushima.jp","date.fukushima.jp","fukushima.fukushima.jp","furudono.fukushima.jp","futaba.fukushima.jp","hanawa.fukushima.jp","higashi.fukushima.jp","hirata.fukushima.jp","hirono.fukushima.jp","iitate.fukushima.jp","inawashiro.fukushima.jp","ishikawa.fukushima.jp","iwaki.fukushima.jp","izumizaki.fukushima.jp","kagamiishi.fukushima.jp","kaneyama.fukushima.jp","kawamata.fukushima.jp","kitakata.fukushima.jp","kitashiobara.fukushima.jp","koori.fukushima.jp","koriyama.fukushima.jp","kunimi.fukushima.jp","miharu.fukushima.jp","mishima.fukushima.jp","namie.fukushima.jp","nango.fukushima.jp","nishiaizu.fukushima.jp","nishigo.fukushima.jp","okuma.fukushima.jp","omotego.fukushima.jp","ono.fukushima.jp","otama.fukushima.jp","samegawa.fukushima.jp","shimogo.fukushima.jp","shirakawa.fukushima.jp","showa.fukushima.jp","soma.fukushima.jp","sukagawa.fukushima.jp","taishin.fukushima.jp","tamakawa.fukushima.jp","tanagura.fukushima.jp","tenei.fukushima.jp","yabuki.fukushima.jp","yamato.fukushima.jp","yamatsuri.fukushima.jp","yanaizu.fukushima.jp","yugawa.fukushima.jp","anpachi.gifu.jp","ena.gifu.jp","gifu.gifu.jp","ginan.gifu.jp","godo.gifu.jp","gujo.gifu.jp","hashima.gifu.jp","hichiso.gifu.jp","hida.gifu.jp","higashishirakawa.gifu.jp","ibigawa.gifu.jp","ikeda.gifu.jp","kakamigahara.gifu.jp","kani.gifu.jp","kasahara.gifu.jp","kasamatsu.gifu.jp","kawaue.gifu.jp","kitagata.gifu.jp","mino.gifu.jp","minokamo.gifu.jp","mitake.gifu.jp","mizunami.gifu.jp","motosu.gifu.jp","nakatsugawa.gifu.jp","ogaki.gifu.jp","sakahogi.gifu.jp","seki.gifu.jp","sekigahara.gifu.jp","shirakawa.gifu.jp","tajimi.gifu.jp","takayama.gifu.jp","tarui.gifu.jp","toki.gifu.jp","tomika.gifu.jp","wanouchi.gifu.jp","yamagata.gifu.jp","yaotsu.gifu.jp","yoro.gifu.jp","annaka.gunma.jp","chiyoda.gunma.jp","fujioka.gunma.jp","higashiagatsuma.gunma.jp","isesaki.gunma.jp","itakura.gunma.jp","kanna.gunma.jp","kanra.gunma.jp","katashina.gunma.jp","kawaba.gunma.jp","kiryu.gunma.jp","kusatsu.gunma.jp","maebashi.gunma.jp","meiwa.gunma.jp","midori.gunma.jp","minakami.gunma.jp","naganohara.gunma.jp","nakanojo.gunma.jp","nanmoku.gunma.jp","numata.gunma.jp","oizumi.gunma.jp","ora.gunma.jp","ota.gunma.jp","shibukawa.gunma.jp","shimonita.gunma.jp","shinto.gunma.jp","showa.gunma.jp","takasaki.gunma.jp","takayama.gunma.jp","tamamura.gunma.jp","tatebayashi.gunma.jp","tomioka.gunma.jp","tsukiyono.gunma.jp","tsumagoi.gunma.jp","ueno.gunma.jp","yoshioka.gunma.jp","asaminami.hiroshima.jp","daiwa.hiroshima.jp","etajima.hiroshima.jp","fuchu.hiroshima.jp","fukuyama.hiroshima.jp","hatsukaichi.hiroshima.jp","higashihiroshima.hiroshima.jp","hongo.hiroshima.jp","jinsekikogen.hiroshima.jp","kaita.hiroshima.jp","kui.hiroshima.jp","kumano.hiroshima.jp","kure.hiroshima.jp","mihara.hiroshima.jp","miyoshi.hiroshima.jp","naka.hiroshima.jp","onomichi.hiroshima.jp","osakikamijima.hiroshima.jp","otake.hiroshima.jp","saka.hiroshima.jp","sera.hiroshima.jp","seranishi.hiroshima.jp","shinichi.hiroshima.jp","shobara.hiroshima.jp","takehara.hiroshima.jp","abashiri.hokkaido.jp","abira.hokkaido.jp","aibetsu.hokkaido.jp","akabira.hokkaido.jp","akkeshi.hokkaido.jp","asahikawa.hokkaido.jp","ashibetsu.hokkaido.jp","ashoro.hokkaido.jp","assabu.hokkaido.jp","atsuma.hokkaido.jp","bibai.hokkaido.jp","biei.hokkaido.jp","bifuka.hokkaido.jp","bihoro.hokkaido.jp","biratori.hokkaido.jp","chippubetsu.hokkaido.jp","chitose.hokkaido.jp","date.hokkaido.jp","ebetsu.hokkaido.jp","embetsu.hokkaido.jp","eniwa.hokkaido.jp","erimo.hokkaido.jp","esan.hokkaido.jp","esashi.hokkaido.jp","fukagawa.hokkaido.jp","fukushima.hokkaido.jp","furano.hokkaido.jp","furubira.hokkaido.jp","haboro.hokkaido.jp","hakodate.hokkaido.jp","hamatonbetsu.hokkaido.jp","hidaka.hokkaido.jp","higashikagura.hokkaido.jp","higashikawa.hokkaido.jp","hiroo.hokkaido.jp","hokuryu.hokkaido.jp","hokuto.hokkaido.jp","honbetsu.hokkaido.jp","horokanai.hokkaido.jp","horonobe.hokkaido.jp","ikeda.hokkaido.jp","imakane.hokkaido.jp","ishikari.hokkaido.jp","iwamizawa.hokkaido.jp","iwanai.hokkaido.jp","kamifurano.hokkaido.jp","kamikawa.hokkaido.jp","kamishihoro.hokkaido.jp","kamisunagawa.hokkaido.jp","kamoenai.hokkaido.jp","kayabe.hokkaido.jp","kembuchi.hokkaido.jp","kikonai.hokkaido.jp","kimobetsu.hokkaido.jp","kitahiroshima.hokkaido.jp","kitami.hokkaido.jp","kiyosato.hokkaido.jp","koshimizu.hokkaido.jp","kunneppu.hokkaido.jp","kuriyama.hokkaido.jp","kuromatsunai.hokkaido.jp","kushiro.hokkaido.jp","kutchan.hokkaido.jp","kyowa.hokkaido.jp","mashike.hokkaido.jp","matsumae.hokkaido.jp","mikasa.hokkaido.jp","minamifurano.hokkaido.jp","mombetsu.hokkaido.jp","moseushi.hokkaido.jp","mukawa.hokkaido.jp","muroran.hokkaido.jp","naie.hokkaido.jp","nakagawa.hokkaido.jp","nakasatsunai.hokkaido.jp","nakatombetsu.hokkaido.jp","nanae.hokkaido.jp","nanporo.hokkaido.jp","nayoro.hokkaido.jp","nemuro.hokkaido.jp","niikappu.hokkaido.jp","niki.hokkaido.jp","nishiokoppe.hokkaido.jp","noboribetsu.hokkaido.jp","numata.hokkaido.jp","obihiro.hokkaido.jp","obira.hokkaido.jp","oketo.hokkaido.jp","okoppe.hokkaido.jp","otaru.hokkaido.jp","otobe.hokkaido.jp","otofuke.hokkaido.jp","otoineppu.hokkaido.jp","oumu.hokkaido.jp","ozora.hokkaido.jp","pippu.hokkaido.jp","rankoshi.hokkaido.jp","rebun.hokkaido.jp","rikubetsu.hokkaido.jp","rishiri.hokkaido.jp","rishirifuji.hokkaido.jp","saroma.hokkaido.jp","sarufutsu.hokkaido.jp","shakotan.hokkaido.jp","shari.hokkaido.jp","shibecha.hokkaido.jp","shibetsu.hokkaido.jp","shikabe.hokkaido.jp","shikaoi.hokkaido.jp","shimamaki.hokkaido.jp","shimizu.hokkaido.jp","shimokawa.hokkaido.jp","shinshinotsu.hokkaido.jp","shintoku.hokkaido.jp","shiranuka.hokkaido.jp","shiraoi.hokkaido.jp","shiriuchi.hokkaido.jp","sobetsu.hokkaido.jp","sunagawa.hokkaido.jp","taiki.hokkaido.jp","takasu.hokkaido.jp","takikawa.hokkaido.jp","takinoue.hokkaido.jp","teshikaga.hokkaido.jp","tobetsu.hokkaido.jp","tohma.hokkaido.jp","tomakomai.hokkaido.jp","tomari.hokkaido.jp","toya.hokkaido.jp","toyako.hokkaido.jp","toyotomi.hokkaido.jp","toyoura.hokkaido.jp","tsubetsu.hokkaido.jp","tsukigata.hokkaido.jp","urakawa.hokkaido.jp","urausu.hokkaido.jp","uryu.hokkaido.jp","utashinai.hokkaido.jp","wakkanai.hokkaido.jp","wassamu.hokkaido.jp","yakumo.hokkaido.jp","yoichi.hokkaido.jp","aioi.hyogo.jp","akashi.hyogo.jp","ako.hyogo.jp","amagasaki.hyogo.jp","aogaki.hyogo.jp","asago.hyogo.jp","ashiya.hyogo.jp","awaji.hyogo.jp","fukusaki.hyogo.jp","goshiki.hyogo.jp","harima.hyogo.jp","himeji.hyogo.jp","ichikawa.hyogo.jp","inagawa.hyogo.jp","itami.hyogo.jp","kakogawa.hyogo.jp","kamigori.hyogo.jp","kamikawa.hyogo.jp","kasai.hyogo.jp","kasuga.hyogo.jp","kawanishi.hyogo.jp","miki.hyogo.jp","minamiawaji.hyogo.jp","nishinomiya.hyogo.jp","nishiwaki.hyogo.jp","ono.hyogo.jp","sanda.hyogo.jp","sannan.hyogo.jp","sasayama.hyogo.jp","sayo.hyogo.jp","shingu.hyogo.jp","shinonsen.hyogo.jp","shiso.hyogo.jp","sumoto.hyogo.jp","taishi.hyogo.jp","taka.hyogo.jp","takarazuka.hyogo.jp","takasago.hyogo.jp","takino.hyogo.jp","tamba.hyogo.jp","tatsuno.hyogo.jp","toyooka.hyogo.jp","yabu.hyogo.jp","yashiro.hyogo.jp","yoka.hyogo.jp","yokawa.hyogo.jp","ami.ibaraki.jp","asahi.ibaraki.jp","bando.ibaraki.jp","chikusei.ibaraki.jp","daigo.ibaraki.jp","fujishiro.ibaraki.jp","hitachi.ibaraki.jp","hitachinaka.ibaraki.jp","hitachiomiya.ibaraki.jp","hitachiota.ibaraki.jp","ibaraki.ibaraki.jp","ina.ibaraki.jp","inashiki.ibaraki.jp","itako.ibaraki.jp","iwama.ibaraki.jp","joso.ibaraki.jp","kamisu.ibaraki.jp","kasama.ibaraki.jp","kashima.ibaraki.jp","kasumigaura.ibaraki.jp","koga.ibaraki.jp","miho.ibaraki.jp","mito.ibaraki.jp","moriya.ibaraki.jp","naka.ibaraki.jp","namegata.ibaraki.jp","oarai.ibaraki.jp","ogawa.ibaraki.jp","omitama.ibaraki.jp","ryugasaki.ibaraki.jp","sakai.ibaraki.jp","sakuragawa.ibaraki.jp","shimodate.ibaraki.jp","shimotsuma.ibaraki.jp","shirosato.ibaraki.jp","sowa.ibaraki.jp","suifu.ibaraki.jp","takahagi.ibaraki.jp","tamatsukuri.ibaraki.jp","tokai.ibaraki.jp","tomobe.ibaraki.jp","tone.ibaraki.jp","toride.ibaraki.jp","tsuchiura.ibaraki.jp","tsukuba.ibaraki.jp","uchihara.ibaraki.jp","ushiku.ibaraki.jp","yachiyo.ibaraki.jp","yamagata.ibaraki.jp","yawara.ibaraki.jp","yuki.ibaraki.jp","anamizu.ishikawa.jp","hakui.ishikawa.jp","hakusan.ishikawa.jp","kaga.ishikawa.jp","kahoku.ishikawa.jp","kanazawa.ishikawa.jp","kawakita.ishikawa.jp","komatsu.ishikawa.jp","nakanoto.ishikawa.jp","nanao.ishikawa.jp","nomi.ishikawa.jp","nonoichi.ishikawa.jp","noto.ishikawa.jp","shika.ishikawa.jp","suzu.ishikawa.jp","tsubata.ishikawa.jp","tsurugi.ishikawa.jp","uchinada.ishikawa.jp","wajima.ishikawa.jp","fudai.iwate.jp","fujisawa.iwate.jp","hanamaki.iwate.jp","hiraizumi.iwate.jp","hirono.iwate.jp","ichinohe.iwate.jp","ichinoseki.iwate.jp","iwaizumi.iwate.jp","iwate.iwate.jp","joboji.iwate.jp","kamaishi.iwate.jp","kanegasaki.iwate.jp","karumai.iwate.jp","kawai.iwate.jp","kitakami.iwate.jp","kuji.iwate.jp","kunohe.iwate.jp","kuzumaki.iwate.jp","miyako.iwate.jp","mizusawa.iwate.jp","morioka.iwate.jp","ninohe.iwate.jp","noda.iwate.jp","ofunato.iwate.jp","oshu.iwate.jp","otsuchi.iwate.jp","rikuzentakata.iwate.jp","shiwa.iwate.jp","shizukuishi.iwate.jp","sumita.iwate.jp","tanohata.iwate.jp","tono.iwate.jp","yahaba.iwate.jp","yamada.iwate.jp","ayagawa.kagawa.jp","higashikagawa.kagawa.jp","kanonji.kagawa.jp","kotohira.kagawa.jp","manno.kagawa.jp","marugame.kagawa.jp","mitoyo.kagawa.jp","naoshima.kagawa.jp","sanuki.kagawa.jp","tadotsu.kagawa.jp","takamatsu.kagawa.jp","tonosho.kagawa.jp","uchinomi.kagawa.jp","utazu.kagawa.jp","zentsuji.kagawa.jp","akune.kagoshima.jp","amami.kagoshima.jp","hioki.kagoshima.jp","isa.kagoshima.jp","isen.kagoshima.jp","izumi.kagoshima.jp","kagoshima.kagoshima.jp","kanoya.kagoshima.jp","kawanabe.kagoshima.jp","kinko.kagoshima.jp","kouyama.kagoshima.jp","makurazaki.kagoshima.jp","matsumoto.kagoshima.jp","minamitane.kagoshima.jp","nakatane.kagoshima.jp","nishinoomote.kagoshima.jp","satsumasendai.kagoshima.jp","soo.kagoshima.jp","tarumizu.kagoshima.jp","yusui.kagoshima.jp","aikawa.kanagawa.jp","atsugi.kanagawa.jp","ayase.kanagawa.jp","chigasaki.kanagawa.jp","ebina.kanagawa.jp","fujisawa.kanagawa.jp","hadano.kanagawa.jp","hakone.kanagawa.jp","hiratsuka.kanagawa.jp","isehara.kanagawa.jp","kaisei.kanagawa.jp","kamakura.kanagawa.jp","kiyokawa.kanagawa.jp","matsuda.kanagawa.jp","minamiashigara.kanagawa.jp","miura.kanagawa.jp","nakai.kanagawa.jp","ninomiya.kanagawa.jp","odawara.kanagawa.jp","oi.kanagawa.jp","oiso.kanagawa.jp","sagamihara.kanagawa.jp","samukawa.kanagawa.jp","tsukui.kanagawa.jp","yamakita.kanagawa.jp","yamato.kanagawa.jp","yokosuka.kanagawa.jp","yugawara.kanagawa.jp","zama.kanagawa.jp","zushi.kanagawa.jp","aki.kochi.jp","geisei.kochi.jp","hidaka.kochi.jp","higashitsuno.kochi.jp","ino.kochi.jp","kagami.kochi.jp","kami.kochi.jp","kitagawa.kochi.jp","kochi.kochi.jp","mihara.kochi.jp","motoyama.kochi.jp","muroto.kochi.jp","nahari.kochi.jp","nakamura.kochi.jp","nankoku.kochi.jp","nishitosa.kochi.jp","niyodogawa.kochi.jp","ochi.kochi.jp","okawa.kochi.jp","otoyo.kochi.jp","otsuki.kochi.jp","sakawa.kochi.jp","sukumo.kochi.jp","susaki.kochi.jp","tosa.kochi.jp","tosashimizu.kochi.jp","toyo.kochi.jp","tsuno.kochi.jp","umaji.kochi.jp","yasuda.kochi.jp","yusuhara.kochi.jp","amakusa.kumamoto.jp","arao.kumamoto.jp","aso.kumamoto.jp","choyo.kumamoto.jp","gyokuto.kumamoto.jp","kamiamakusa.kumamoto.jp","kikuchi.kumamoto.jp","kumamoto.kumamoto.jp","mashiki.kumamoto.jp","mifune.kumamoto.jp","minamata.kumamoto.jp","minamioguni.kumamoto.jp","nagasu.kumamoto.jp","nishihara.kumamoto.jp","oguni.kumamoto.jp","ozu.kumamoto.jp","sumoto.kumamoto.jp","takamori.kumamoto.jp","uki.kumamoto.jp","uto.kumamoto.jp","yamaga.kumamoto.jp","yamato.kumamoto.jp","yatsushiro.kumamoto.jp","ayabe.kyoto.jp","fukuchiyama.kyoto.jp","higashiyama.kyoto.jp","ide.kyoto.jp","ine.kyoto.jp","joyo.kyoto.jp","kameoka.kyoto.jp","kamo.kyoto.jp","kita.kyoto.jp","kizu.kyoto.jp","kumiyama.kyoto.jp","kyotamba.kyoto.jp","kyotanabe.kyoto.jp","kyotango.kyoto.jp","maizuru.kyoto.jp","minami.kyoto.jp","minamiyamashiro.kyoto.jp","miyazu.kyoto.jp","muko.kyoto.jp","nagaokakyo.kyoto.jp","nakagyo.kyoto.jp","nantan.kyoto.jp","oyamazaki.kyoto.jp","sakyo.kyoto.jp","seika.kyoto.jp","tanabe.kyoto.jp","uji.kyoto.jp","ujitawara.kyoto.jp","wazuka.kyoto.jp","yamashina.kyoto.jp","yawata.kyoto.jp","asahi.mie.jp","inabe.mie.jp","ise.mie.jp","kameyama.mie.jp","kawagoe.mie.jp","kiho.mie.jp","kisosaki.mie.jp","kiwa.mie.jp","komono.mie.jp","kumano.mie.jp","kuwana.mie.jp","matsusaka.mie.jp","meiwa.mie.jp","mihama.mie.jp","minamiise.mie.jp","misugi.mie.jp","miyama.mie.jp","nabari.mie.jp","shima.mie.jp","suzuka.mie.jp","tado.mie.jp","taiki.mie.jp","taki.mie.jp","tamaki.mie.jp","toba.mie.jp","tsu.mie.jp","udono.mie.jp","ureshino.mie.jp","watarai.mie.jp","yokkaichi.mie.jp","furukawa.miyagi.jp","higashimatsushima.miyagi.jp","ishinomaki.miyagi.jp","iwanuma.miyagi.jp","kakuda.miyagi.jp","kami.miyagi.jp","kawasaki.miyagi.jp","marumori.miyagi.jp","matsushima.miyagi.jp","minamisanriku.miyagi.jp","misato.miyagi.jp","murata.miyagi.jp","natori.miyagi.jp","ogawara.miyagi.jp","ohira.miyagi.jp","onagawa.miyagi.jp","osaki.miyagi.jp","rifu.miyagi.jp","semine.miyagi.jp","shibata.miyagi.jp","shichikashuku.miyagi.jp","shikama.miyagi.jp","shiogama.miyagi.jp","shiroishi.miyagi.jp","tagajo.miyagi.jp","taiwa.miyagi.jp","tome.miyagi.jp","tomiya.miyagi.jp","wakuya.miyagi.jp","watari.miyagi.jp","yamamoto.miyagi.jp","zao.miyagi.jp","aya.miyazaki.jp","ebino.miyazaki.jp","gokase.miyazaki.jp","hyuga.miyazaki.jp","kadogawa.miyazaki.jp","kawaminami.miyazaki.jp","kijo.miyazaki.jp","kitagawa.miyazaki.jp","kitakata.miyazaki.jp","kitaura.miyazaki.jp","kobayashi.miyazaki.jp","kunitomi.miyazaki.jp","kushima.miyazaki.jp","mimata.miyazaki.jp","miyakonojo.miyazaki.jp","miyazaki.miyazaki.jp","morotsuka.miyazaki.jp","nichinan.miyazaki.jp","nishimera.miyazaki.jp","nobeoka.miyazaki.jp","saito.miyazaki.jp","shiiba.miyazaki.jp","shintomi.miyazaki.jp","takaharu.miyazaki.jp","takanabe.miyazaki.jp","takazaki.miyazaki.jp","tsuno.miyazaki.jp","achi.nagano.jp","agematsu.nagano.jp","anan.nagano.jp","aoki.nagano.jp","asahi.nagano.jp","azumino.nagano.jp","chikuhoku.nagano.jp","chikuma.nagano.jp","chino.nagano.jp","fujimi.nagano.jp","hakuba.nagano.jp","hara.nagano.jp","hiraya.nagano.jp","iida.nagano.jp","iijima.nagano.jp","iiyama.nagano.jp","iizuna.nagano.jp","ikeda.nagano.jp","ikusaka.nagano.jp","ina.nagano.jp","karuizawa.nagano.jp","kawakami.nagano.jp","kiso.nagano.jp","kisofukushima.nagano.jp","kitaaiki.nagano.jp","komagane.nagano.jp","komoro.nagano.jp","matsukawa.nagano.jp","matsumoto.nagano.jp","miasa.nagano.jp","minamiaiki.nagano.jp","minamimaki.nagano.jp","minamiminowa.nagano.jp","minowa.nagano.jp","miyada.nagano.jp","miyota.nagano.jp","mochizuki.nagano.jp","nagano.nagano.jp","nagawa.nagano.jp","nagiso.nagano.jp","nakagawa.nagano.jp","nakano.nagano.jp","nozawaonsen.nagano.jp","obuse.nagano.jp","ogawa.nagano.jp","okaya.nagano.jp","omachi.nagano.jp","omi.nagano.jp","ookuwa.nagano.jp","ooshika.nagano.jp","otaki.nagano.jp","otari.nagano.jp","sakae.nagano.jp","sakaki.nagano.jp","saku.nagano.jp","sakuho.nagano.jp","shimosuwa.nagano.jp","shinanomachi.nagano.jp","shiojiri.nagano.jp","suwa.nagano.jp","suzaka.nagano.jp","takagi.nagano.jp","takamori.nagano.jp","takayama.nagano.jp","tateshina.nagano.jp","tatsuno.nagano.jp","togakushi.nagano.jp","togura.nagano.jp","tomi.nagano.jp","ueda.nagano.jp","wada.nagano.jp","yamagata.nagano.jp","yamanouchi.nagano.jp","yasaka.nagano.jp","yasuoka.nagano.jp","chijiwa.nagasaki.jp","futsu.nagasaki.jp","goto.nagasaki.jp","hasami.nagasaki.jp","hirado.nagasaki.jp","iki.nagasaki.jp","isahaya.nagasaki.jp","kawatana.nagasaki.jp","kuchinotsu.nagasaki.jp","matsuura.nagasaki.jp","nagasaki.nagasaki.jp","obama.nagasaki.jp","omura.nagasaki.jp","oseto.nagasaki.jp","saikai.nagasaki.jp","sasebo.nagasaki.jp","seihi.nagasaki.jp","shimabara.nagasaki.jp","shinkamigoto.nagasaki.jp","togitsu.nagasaki.jp","tsushima.nagasaki.jp","unzen.nagasaki.jp","ando.nara.jp","gose.nara.jp","heguri.nara.jp","higashiyoshino.nara.jp","ikaruga.nara.jp","ikoma.nara.jp","kamikitayama.nara.jp","kanmaki.nara.jp","kashiba.nara.jp","kashihara.nara.jp","katsuragi.nara.jp","kawai.nara.jp","kawakami.nara.jp","kawanishi.nara.jp","koryo.nara.jp","kurotaki.nara.jp","mitsue.nara.jp","miyake.nara.jp","nara.nara.jp","nosegawa.nara.jp","oji.nara.jp","ouda.nara.jp","oyodo.nara.jp","sakurai.nara.jp","sango.nara.jp","shimoichi.nara.jp","shimokitayama.nara.jp","shinjo.nara.jp","soni.nara.jp","takatori.nara.jp","tawaramoto.nara.jp","tenkawa.nara.jp","tenri.nara.jp","uda.nara.jp","yamatokoriyama.nara.jp","yamatotakada.nara.jp","yamazoe.nara.jp","yoshino.nara.jp","aga.niigata.jp","agano.niigata.jp","gosen.niigata.jp","itoigawa.niigata.jp","izumozaki.niigata.jp","joetsu.niigata.jp","kamo.niigata.jp","kariwa.niigata.jp","kashiwazaki.niigata.jp","minamiuonuma.niigata.jp","mitsuke.niigata.jp","muika.niigata.jp","murakami.niigata.jp","myoko.niigata.jp","nagaoka.niigata.jp","niigata.niigata.jp","ojiya.niigata.jp","omi.niigata.jp","sado.niigata.jp","sanjo.niigata.jp","seiro.niigata.jp","seirou.niigata.jp","sekikawa.niigata.jp","shibata.niigata.jp","tagami.niigata.jp","tainai.niigata.jp","tochio.niigata.jp","tokamachi.niigata.jp","tsubame.niigata.jp","tsunan.niigata.jp","uonuma.niigata.jp","yahiko.niigata.jp","yoita.niigata.jp","yuzawa.niigata.jp","beppu.oita.jp","bungoono.oita.jp","bungotakada.oita.jp","hasama.oita.jp","hiji.oita.jp","himeshima.oita.jp","hita.oita.jp","kamitsue.oita.jp","kokonoe.oita.jp","kuju.oita.jp","kunisaki.oita.jp","kusu.oita.jp","oita.oita.jp","saiki.oita.jp","taketa.oita.jp","tsukumi.oita.jp","usa.oita.jp","usuki.oita.jp","yufu.oita.jp","akaiwa.okayama.jp","asakuchi.okayama.jp","bizen.okayama.jp","hayashima.okayama.jp","ibara.okayama.jp","kagamino.okayama.jp","kasaoka.okayama.jp","kibichuo.okayama.jp","kumenan.okayama.jp","kurashiki.okayama.jp","maniwa.okayama.jp","misaki.okayama.jp","nagi.okayama.jp","niimi.okayama.jp","nishiawakura.okayama.jp","okayama.okayama.jp","satosho.okayama.jp","setouchi.okayama.jp","shinjo.okayama.jp","shoo.okayama.jp","soja.okayama.jp","takahashi.okayama.jp","tamano.okayama.jp","tsuyama.okayama.jp","wake.okayama.jp","yakage.okayama.jp","aguni.okinawa.jp","ginowan.okinawa.jp","ginoza.okinawa.jp","gushikami.okinawa.jp","haebaru.okinawa.jp","higashi.okinawa.jp","hirara.okinawa.jp","iheya.okinawa.jp","ishigaki.okinawa.jp","ishikawa.okinawa.jp","itoman.okinawa.jp","izena.okinawa.jp","kadena.okinawa.jp","kin.okinawa.jp","kitadaito.okinawa.jp","kitanakagusuku.okinawa.jp","kumejima.okinawa.jp","kunigami.okinawa.jp","minamidaito.okinawa.jp","motobu.okinawa.jp","nago.okinawa.jp","naha.okinawa.jp","nakagusuku.okinawa.jp","nakijin.okinawa.jp","nanjo.okinawa.jp","nishihara.okinawa.jp","ogimi.okinawa.jp","okinawa.okinawa.jp","onna.okinawa.jp","shimoji.okinawa.jp","taketomi.okinawa.jp","tarama.okinawa.jp","tokashiki.okinawa.jp","tomigusuku.okinawa.jp","tonaki.okinawa.jp","urasoe.okinawa.jp","uruma.okinawa.jp","yaese.okinawa.jp","yomitan.okinawa.jp","yonabaru.okinawa.jp","yonaguni.okinawa.jp","zamami.okinawa.jp","abeno.osaka.jp","chihayaakasaka.osaka.jp","chuo.osaka.jp","daito.osaka.jp","fujiidera.osaka.jp","habikino.osaka.jp","hannan.osaka.jp","higashiosaka.osaka.jp","higashisumiyoshi.osaka.jp","higashiyodogawa.osaka.jp","hirakata.osaka.jp","ibaraki.osaka.jp","ikeda.osaka.jp","izumi.osaka.jp","izumiotsu.osaka.jp","izumisano.osaka.jp","kadoma.osaka.jp","kaizuka.osaka.jp","kanan.osaka.jp","kashiwara.osaka.jp","katano.osaka.jp","kawachinagano.osaka.jp","kishiwada.osaka.jp","kita.osaka.jp","kumatori.osaka.jp","matsubara.osaka.jp","minato.osaka.jp","minoh.osaka.jp","misaki.osaka.jp","moriguchi.osaka.jp","neyagawa.osaka.jp","nishi.osaka.jp","nose.osaka.jp","osakasayama.osaka.jp","sakai.osaka.jp","sayama.osaka.jp","sennan.osaka.jp","settsu.osaka.jp","shijonawate.osaka.jp","shimamoto.osaka.jp","suita.osaka.jp","tadaoka.osaka.jp","taishi.osaka.jp","tajiri.osaka.jp","takaishi.osaka.jp","takatsuki.osaka.jp","tondabayashi.osaka.jp","toyonaka.osaka.jp","toyono.osaka.jp","yao.osaka.jp","ariake.saga.jp","arita.saga.jp","fukudomi.saga.jp","genkai.saga.jp","hamatama.saga.jp","hizen.saga.jp","imari.saga.jp","kamimine.saga.jp","kanzaki.saga.jp","karatsu.saga.jp","kashima.saga.jp","kitagata.saga.jp","kitahata.saga.jp","kiyama.saga.jp","kouhoku.saga.jp","kyuragi.saga.jp","nishiarita.saga.jp","ogi.saga.jp","omachi.saga.jp","ouchi.saga.jp","saga.saga.jp","shiroishi.saga.jp","taku.saga.jp","tara.saga.jp","tosu.saga.jp","yoshinogari.saga.jp","arakawa.saitama.jp","asaka.saitama.jp","chichibu.saitama.jp","fujimi.saitama.jp","fujimino.saitama.jp","fukaya.saitama.jp","hanno.saitama.jp","hanyu.saitama.jp","hasuda.saitama.jp","hatogaya.saitama.jp","hatoyama.saitama.jp","hidaka.saitama.jp","higashichichibu.saitama.jp","higashimatsuyama.saitama.jp","honjo.saitama.jp","ina.saitama.jp","iruma.saitama.jp","iwatsuki.saitama.jp","kamiizumi.saitama.jp","kamikawa.saitama.jp","kamisato.saitama.jp","kasukabe.saitama.jp","kawagoe.saitama.jp","kawaguchi.saitama.jp","kawajima.saitama.jp","kazo.saitama.jp","kitamoto.saitama.jp","koshigaya.saitama.jp","kounosu.saitama.jp","kuki.saitama.jp","kumagaya.saitama.jp","matsubushi.saitama.jp","minano.saitama.jp","misato.saitama.jp","miyashiro.saitama.jp","miyoshi.saitama.jp","moroyama.saitama.jp","nagatoro.saitama.jp","namegawa.saitama.jp","niiza.saitama.jp","ogano.saitama.jp","ogawa.saitama.jp","ogose.saitama.jp","okegawa.saitama.jp","omiya.saitama.jp","otaki.saitama.jp","ranzan.saitama.jp","ryokami.saitama.jp","saitama.saitama.jp","sakado.saitama.jp","satte.saitama.jp","sayama.saitama.jp","shiki.saitama.jp","shiraoka.saitama.jp","soka.saitama.jp","sugito.saitama.jp","toda.saitama.jp","tokigawa.saitama.jp","tokorozawa.saitama.jp","tsurugashima.saitama.jp","urawa.saitama.jp","warabi.saitama.jp","yashio.saitama.jp","yokoze.saitama.jp","yono.saitama.jp","yorii.saitama.jp","yoshida.saitama.jp","yoshikawa.saitama.jp","yoshimi.saitama.jp","aisho.shiga.jp","gamo.shiga.jp","higashiomi.shiga.jp","hikone.shiga.jp","koka.shiga.jp","konan.shiga.jp","kosei.shiga.jp","koto.shiga.jp","kusatsu.shiga.jp","maibara.shiga.jp","moriyama.shiga.jp","nagahama.shiga.jp","nishiazai.shiga.jp","notogawa.shiga.jp","omihachiman.shiga.jp","otsu.shiga.jp","ritto.shiga.jp","ryuoh.shiga.jp","takashima.shiga.jp","takatsuki.shiga.jp","torahime.shiga.jp","toyosato.shiga.jp","yasu.shiga.jp","akagi.shimane.jp","ama.shimane.jp","gotsu.shimane.jp","hamada.shimane.jp","higashiizumo.shimane.jp","hikawa.shimane.jp","hikimi.shimane.jp","izumo.shimane.jp","kakinoki.shimane.jp","masuda.shimane.jp","matsue.shimane.jp","misato.shimane.jp","nishinoshima.shimane.jp","ohda.shimane.jp","okinoshima.shimane.jp","okuizumo.shimane.jp","shimane.shimane.jp","tamayu.shimane.jp","tsuwano.shimane.jp","unnan.shimane.jp","yakumo.shimane.jp","yasugi.shimane.jp","yatsuka.shimane.jp","arai.shizuoka.jp","atami.shizuoka.jp","fuji.shizuoka.jp","fujieda.shizuoka.jp","fujikawa.shizuoka.jp","fujinomiya.shizuoka.jp","fukuroi.shizuoka.jp","gotemba.shizuoka.jp","haibara.shizuoka.jp","hamamatsu.shizuoka.jp","higashiizu.shizuoka.jp","ito.shizuoka.jp","iwata.shizuoka.jp","izu.shizuoka.jp","izunokuni.shizuoka.jp","kakegawa.shizuoka.jp","kannami.shizuoka.jp","kawanehon.shizuoka.jp","kawazu.shizuoka.jp","kikugawa.shizuoka.jp","kosai.shizuoka.jp","makinohara.shizuoka.jp","matsuzaki.shizuoka.jp","minamiizu.shizuoka.jp","mishima.shizuoka.jp","morimachi.shizuoka.jp","nishiizu.shizuoka.jp","numazu.shizuoka.jp","omaezaki.shizuoka.jp","shimada.shizuoka.jp","shimizu.shizuoka.jp","shimoda.shizuoka.jp","shizuoka.shizuoka.jp","susono.shizuoka.jp","yaizu.shizuoka.jp","yoshida.shizuoka.jp","ashikaga.tochigi.jp","bato.tochigi.jp","haga.tochigi.jp","ichikai.tochigi.jp","iwafune.tochigi.jp","kaminokawa.tochigi.jp","kanuma.tochigi.jp","karasuyama.tochigi.jp","kuroiso.tochigi.jp","mashiko.tochigi.jp","mibu.tochigi.jp","moka.tochigi.jp","motegi.tochigi.jp","nasu.tochigi.jp","nasushiobara.tochigi.jp","nikko.tochigi.jp","nishikata.tochigi.jp","nogi.tochigi.jp","ohira.tochigi.jp","ohtawara.tochigi.jp","oyama.tochigi.jp","sakura.tochigi.jp","sano.tochigi.jp","shimotsuke.tochigi.jp","shioya.tochigi.jp","takanezawa.tochigi.jp","tochigi.tochigi.jp","tsuga.tochigi.jp","ujiie.tochigi.jp","utsunomiya.tochigi.jp","yaita.tochigi.jp","aizumi.tokushima.jp","anan.tokushima.jp","ichiba.tokushima.jp","itano.tokushima.jp","kainan.tokushima.jp","komatsushima.tokushima.jp","matsushige.tokushima.jp","mima.tokushima.jp","minami.tokushima.jp","miyoshi.tokushima.jp","mugi.tokushima.jp","nakagawa.tokushima.jp","naruto.tokushima.jp","sanagochi.tokushima.jp","shishikui.tokushima.jp","tokushima.tokushima.jp","wajiki.tokushima.jp","adachi.tokyo.jp","akiruno.tokyo.jp","akishima.tokyo.jp","aogashima.tokyo.jp","arakawa.tokyo.jp","bunkyo.tokyo.jp","chiyoda.tokyo.jp","chofu.tokyo.jp","chuo.tokyo.jp","edogawa.tokyo.jp","fuchu.tokyo.jp","fussa.tokyo.jp","hachijo.tokyo.jp","hachioji.tokyo.jp","hamura.tokyo.jp","higashikurume.tokyo.jp","higashimurayama.tokyo.jp","higashiyamato.tokyo.jp","hino.tokyo.jp","hinode.tokyo.jp","hinohara.tokyo.jp","inagi.tokyo.jp","itabashi.tokyo.jp","katsushika.tokyo.jp","kita.tokyo.jp","kiyose.tokyo.jp","kodaira.tokyo.jp","koganei.tokyo.jp","kokubunji.tokyo.jp","komae.tokyo.jp","koto.tokyo.jp","kouzushima.tokyo.jp","kunitachi.tokyo.jp","machida.tokyo.jp","meguro.tokyo.jp","minato.tokyo.jp","mitaka.tokyo.jp","mizuho.tokyo.jp","musashimurayama.tokyo.jp","musashino.tokyo.jp","nakano.tokyo.jp","nerima.tokyo.jp","ogasawara.tokyo.jp","okutama.tokyo.jp","ome.tokyo.jp","oshima.tokyo.jp","ota.tokyo.jp","setagaya.tokyo.jp","shibuya.tokyo.jp","shinagawa.tokyo.jp","shinjuku.tokyo.jp","suginami.tokyo.jp","sumida.tokyo.jp","tachikawa.tokyo.jp","taito.tokyo.jp","tama.tokyo.jp","toshima.tokyo.jp","chizu.tottori.jp","hino.tottori.jp","kawahara.tottori.jp","koge.tottori.jp","kotoura.tottori.jp","misasa.tottori.jp","nanbu.tottori.jp","nichinan.tottori.jp","sakaiminato.tottori.jp","tottori.tottori.jp","wakasa.tottori.jp","yazu.tottori.jp","yonago.tottori.jp","asahi.toyama.jp","fuchu.toyama.jp","fukumitsu.toyama.jp","funahashi.toyama.jp","himi.toyama.jp","imizu.toyama.jp","inami.toyama.jp","johana.toyama.jp","kamiichi.toyama.jp","kurobe.toyama.jp","nakaniikawa.toyama.jp","namerikawa.toyama.jp","nanto.toyama.jp","nyuzen.toyama.jp","oyabe.toyama.jp","taira.toyama.jp","takaoka.toyama.jp","tateyama.toyama.jp","toga.toyama.jp","tonami.toyama.jp","toyama.toyama.jp","unazuki.toyama.jp","uozu.toyama.jp","yamada.toyama.jp","arida.wakayama.jp","aridagawa.wakayama.jp","gobo.wakayama.jp","hashimoto.wakayama.jp","hidaka.wakayama.jp","hirogawa.wakayama.jp","inami.wakayama.jp","iwade.wakayama.jp","kainan.wakayama.jp","kamitonda.wakayama.jp","katsuragi.wakayama.jp","kimino.wakayama.jp","kinokawa.wakayama.jp","kitayama.wakayama.jp","koya.wakayama.jp","koza.wakayama.jp","kozagawa.wakayama.jp","kudoyama.wakayama.jp","kushimoto.wakayama.jp","mihama.wakayama.jp","misato.wakayama.jp","nachikatsuura.wakayama.jp","shingu.wakayama.jp","shirahama.wakayama.jp","taiji.wakayama.jp","tanabe.wakayama.jp","wakayama.wakayama.jp","yuasa.wakayama.jp","yura.wakayama.jp","asahi.yamagata.jp","funagata.yamagata.jp","higashine.yamagata.jp","iide.yamagata.jp","kahoku.yamagata.jp","kaminoyama.yamagata.jp","kaneyama.yamagata.jp","kawanishi.yamagata.jp","mamurogawa.yamagata.jp","mikawa.yamagata.jp","murayama.yamagata.jp","nagai.yamagata.jp","nakayama.yamagata.jp","nanyo.yamagata.jp","nishikawa.yamagata.jp","obanazawa.yamagata.jp","oe.yamagata.jp","oguni.yamagata.jp","ohkura.yamagata.jp","oishida.yamagata.jp","sagae.yamagata.jp","sakata.yamagata.jp","sakegawa.yamagata.jp","shinjo.yamagata.jp","shirataka.yamagata.jp","shonai.yamagata.jp","takahata.yamagata.jp","tendo.yamagata.jp","tozawa.yamagata.jp","tsuruoka.yamagata.jp","yamagata.yamagata.jp","yamanobe.yamagata.jp","yonezawa.yamagata.jp","yuza.yamagata.jp","abu.yamaguchi.jp","hagi.yamaguchi.jp","hikari.yamaguchi.jp","hofu.yamaguchi.jp","iwakuni.yamaguchi.jp","kudamatsu.yamaguchi.jp","mitou.yamaguchi.jp","nagato.yamaguchi.jp","oshima.yamaguchi.jp","shimonoseki.yamaguchi.jp","shunan.yamaguchi.jp","tabuse.yamaguchi.jp","tokuyama.yamaguchi.jp","toyota.yamaguchi.jp","ube.yamaguchi.jp","yuu.yamaguchi.jp","chuo.yamanashi.jp","doshi.yamanashi.jp","fuefuki.yamanashi.jp","fujikawa.yamanashi.jp","fujikawaguchiko.yamanashi.jp","fujiyoshida.yamanashi.jp","hayakawa.yamanashi.jp","hokuto.yamanashi.jp","ichikawamisato.yamanashi.jp","kai.yamanashi.jp","kofu.yamanashi.jp","koshu.yamanashi.jp","kosuge.yamanashi.jp","minami-alps.yamanashi.jp","minobu.yamanashi.jp","nakamichi.yamanashi.jp","nanbu.yamanashi.jp","narusawa.yamanashi.jp","nirasaki.yamanashi.jp","nishikatsura.yamanashi.jp","oshino.yamanashi.jp","otsuki.yamanashi.jp","showa.yamanashi.jp","tabayama.yamanashi.jp","tsuru.yamanashi.jp","uenohara.yamanashi.jp","yamanakako.yamanashi.jp","yamanashi.yamanashi.jp","ke","ac.ke","co.ke","go.ke","info.ke","me.ke","mobi.ke","ne.ke","or.ke","sc.ke","kg","com.kg","edu.kg","gov.kg","mil.kg","net.kg","org.kg","*.kh","ki","biz.ki","com.ki","edu.ki","gov.ki","info.ki","net.ki","org.ki","km","ass.km","com.km","edu.km","gov.km","mil.km","nom.km","org.km","prd.km","tm.km","asso.km","coop.km","gouv.km","medecin.km","notaires.km","pharmaciens.km","presse.km","veterinaire.km","kn","edu.kn","gov.kn","net.kn","org.kn","kp","com.kp","edu.kp","gov.kp","org.kp","rep.kp","tra.kp","kr","ac.kr","co.kr","es.kr","go.kr","hs.kr","kg.kr","mil.kr","ms.kr","ne.kr","or.kr","pe.kr","re.kr","sc.kr","busan.kr","chungbuk.kr","chungnam.kr","daegu.kr","daejeon.kr","gangwon.kr","gwangju.kr","gyeongbuk.kr","gyeonggi.kr","gyeongnam.kr","incheon.kr","jeju.kr","jeonbuk.kr","jeonnam.kr","seoul.kr","ulsan.kr","kw","com.kw","edu.kw","emb.kw","gov.kw","ind.kw","net.kw","org.kw","ky","com.ky","edu.ky","net.ky","org.ky","kz","com.kz","edu.kz","gov.kz","mil.kz","net.kz","org.kz","la","com.la","edu.la","gov.la","info.la","int.la","net.la","org.la","per.la","lb","com.lb","edu.lb","gov.lb","net.lb","org.lb","lc","co.lc","com.lc","edu.lc","gov.lc","net.lc","org.lc","li","lk","ac.lk","assn.lk","com.lk","edu.lk","gov.lk","grp.lk","hotel.lk","int.lk","ltd.lk","net.lk","ngo.lk","org.lk","sch.lk","soc.lk","web.lk","lr","com.lr","edu.lr","gov.lr","net.lr","org.lr","ls","ac.ls","biz.ls","co.ls","edu.ls","gov.ls","info.ls","net.ls","org.ls","sc.ls","lt","gov.lt","lu","lv","asn.lv","com.lv","conf.lv","edu.lv","gov.lv","id.lv","mil.lv","net.lv","org.lv","ly","com.ly","edu.ly","gov.ly","id.ly","med.ly","net.ly","org.ly","plc.ly","sch.ly","ma","ac.ma","co.ma","gov.ma","net.ma","org.ma","press.ma","mc","asso.mc","tm.mc","md","me","ac.me","co.me","edu.me","gov.me","its.me","net.me","org.me","priv.me","mg","co.mg","com.mg","edu.mg","gov.mg","mil.mg","nom.mg","org.mg","prd.mg","mh","mil","mk","com.mk","edu.mk","gov.mk","inf.mk","name.mk","net.mk","org.mk","ml","com.ml","edu.ml","gouv.ml","gov.ml","net.ml","org.ml","presse.ml","*.mm","mn","edu.mn","gov.mn","org.mn","mo","com.mo","edu.mo","gov.mo","net.mo","org.mo","mobi","mp","mq","mr","gov.mr","ms","com.ms","edu.ms","gov.ms","net.ms","org.ms","mt","com.mt","edu.mt","net.mt","org.mt","mu","ac.mu","co.mu","com.mu","gov.mu","net.mu","or.mu","org.mu","museum","mv","aero.mv","biz.mv","com.mv","coop.mv","edu.mv","gov.mv","info.mv","int.mv","mil.mv","museum.mv","name.mv","net.mv","org.mv","pro.mv","mw","ac.mw","biz.mw","co.mw","com.mw","coop.mw","edu.mw","gov.mw","int.mw","net.mw","org.mw","mx","com.mx","edu.mx","gob.mx","net.mx","org.mx","my","biz.my","com.my","edu.my","gov.my","mil.my","name.my","net.my","org.my","mz","ac.mz","adv.mz","co.mz","edu.mz","gov.mz","mil.mz","net.mz","org.mz","na","alt.na","co.na","com.na","gov.na","net.na","org.na","name","nc","asso.nc","nom.nc","ne","net","nf","arts.nf","com.nf","firm.nf","info.nf","net.nf","other.nf","per.nf","rec.nf","store.nf","web.nf","ng","com.ng","edu.ng","gov.ng","i.ng","mil.ng","mobi.ng","name.ng","net.ng","org.ng","sch.ng","ni","ac.ni","biz.ni","co.ni","com.ni","edu.ni","gob.ni","in.ni","info.ni","int.ni","mil.ni","net.ni","nom.ni","org.ni","web.ni","nl","no","fhs.no","folkebibl.no","fylkesbibl.no","idrett.no","museum.no","priv.no","vgs.no","dep.no","herad.no","kommune.no","mil.no","stat.no","aa.no","ah.no","bu.no","fm.no","hl.no","hm.no","jan-mayen.no","mr.no","nl.no","nt.no","of.no","ol.no","oslo.no","rl.no","sf.no","st.no","svalbard.no","tm.no","tr.no","va.no","vf.no","gs.aa.no","gs.ah.no","gs.bu.no","gs.fm.no","gs.hl.no","gs.hm.no","gs.jan-mayen.no","gs.mr.no","gs.nl.no","gs.nt.no","gs.of.no","gs.ol.no","gs.oslo.no","gs.rl.no","gs.sf.no","gs.st.no","gs.svalbard.no","gs.tm.no","gs.tr.no","gs.va.no","gs.vf.no","akrehamn.no","åkrehamn.no","algard.no","ålgård.no","arna.no","bronnoysund.no","brønnøysund.no","brumunddal.no","bryne.no","drobak.no","drøbak.no","egersund.no","fetsund.no","floro.no","florø.no","fredrikstad.no","hokksund.no","honefoss.no","hønefoss.no","jessheim.no","jorpeland.no","jørpeland.no","kirkenes.no","kopervik.no","krokstadelva.no","langevag.no","langevåg.no","leirvik.no","mjondalen.no","mjøndalen.no","mo-i-rana.no","mosjoen.no","mosjøen.no","nesoddtangen.no","orkanger.no","osoyro.no","osøyro.no","raholt.no","råholt.no","sandnessjoen.no","sandnessjøen.no","skedsmokorset.no","slattum.no","spjelkavik.no","stathelle.no","stavern.no","stjordalshalsen.no","stjørdalshalsen.no","tananger.no","tranby.no","vossevangen.no","aarborte.no","aejrie.no","afjord.no","åfjord.no","agdenes.no","nes.akershus.no","aknoluokta.no","ákŋoluokta.no","al.no","ål.no","alaheadju.no","álaheadju.no","alesund.no","ålesund.no","alstahaug.no","alta.no","áltá.no","alvdal.no","amli.no","åmli.no","amot.no","åmot.no","andasuolo.no","andebu.no","andoy.no","andøy.no","ardal.no","årdal.no","aremark.no","arendal.no","ås.no","aseral.no","åseral.no","asker.no","askim.no","askoy.no","askøy.no","askvoll.no","asnes.no","åsnes.no","audnedaln.no","aukra.no","aure.no","aurland.no","aurskog-holand.no","aurskog-høland.no","austevoll.no","austrheim.no","averoy.no","averøy.no","badaddja.no","bådåddjå.no","bærum.no","bahcavuotna.no","báhcavuotna.no","bahccavuotna.no","báhccavuotna.no","baidar.no","báidár.no","bajddar.no","bájddar.no","balat.no","bálát.no","balestrand.no","ballangen.no","balsfjord.no","bamble.no","bardu.no","barum.no","batsfjord.no","båtsfjord.no","bearalvahki.no","bearalváhki.no","beardu.no","beiarn.no","berg.no","bergen.no","berlevag.no","berlevåg.no","bievat.no","bievát.no","bindal.no","birkenes.no","bjarkoy.no","bjarkøy.no","bjerkreim.no","bjugn.no","bodo.no","bodø.no","bokn.no","bomlo.no","bømlo.no","bremanger.no","bronnoy.no","brønnøy.no","budejju.no","nes.buskerud.no","bygland.no","bykle.no","cahcesuolo.no","čáhcesuolo.no","davvenjarga.no","davvenjárga.no","davvesiida.no","deatnu.no","dielddanuorri.no","divtasvuodna.no","divttasvuotna.no","donna.no","dønna.no","dovre.no","drammen.no","drangedal.no","dyroy.no","dyrøy.no","eid.no","eidfjord.no","eidsberg.no","eidskog.no","eidsvoll.no","eigersund.no","elverum.no","enebakk.no","engerdal.no","etne.no","etnedal.no","evenassi.no","evenášši.no","evenes.no","evje-og-hornnes.no","farsund.no","fauske.no","fedje.no","fet.no","finnoy.no","finnøy.no","fitjar.no","fjaler.no","fjell.no","fla.no","flå.no","flakstad.no","flatanger.no","flekkefjord.no","flesberg.no","flora.no","folldal.no","forde.no","førde.no","forsand.no","fosnes.no","fræna.no","frana.no","frei.no","frogn.no","froland.no","frosta.no","froya.no","frøya.no","fuoisku.no","fuossko.no","fusa.no","fyresdal.no","gaivuotna.no","gáivuotna.no","galsa.no","gálsá.no","gamvik.no","gangaviika.no","gáŋgaviika.no","gaular.no","gausdal.no","giehtavuoatna.no","gildeskal.no","gildeskål.no","giske.no","gjemnes.no","gjerdrum.no","gjerstad.no","gjesdal.no","gjovik.no","gjøvik.no","gloppen.no","gol.no","gran.no","grane.no","granvin.no","gratangen.no","grimstad.no","grong.no","grue.no","gulen.no","guovdageaidnu.no","ha.no","hå.no","habmer.no","hábmer.no","hadsel.no","hægebostad.no","hagebostad.no","halden.no","halsa.no","hamar.no","hamaroy.no","hammarfeasta.no","hámmárfeasta.no","hammerfest.no","hapmir.no","hápmir.no","haram.no","hareid.no","harstad.no","hasvik.no","hattfjelldal.no","haugesund.no","os.hedmark.no","valer.hedmark.no","våler.hedmark.no","hemne.no","hemnes.no","hemsedal.no","hitra.no","hjartdal.no","hjelmeland.no","hobol.no","hobøl.no","hof.no","hol.no","hole.no","holmestrand.no","holtalen.no","holtålen.no","os.hordaland.no","hornindal.no","horten.no","hoyanger.no","høyanger.no","hoylandet.no","høylandet.no","hurdal.no","hurum.no","hvaler.no","hyllestad.no","ibestad.no","inderoy.no","inderøy.no","iveland.no","ivgu.no","jevnaker.no","jolster.no","jølster.no","jondal.no","kafjord.no","kåfjord.no","karasjohka.no","kárášjohka.no","karasjok.no","karlsoy.no","karmoy.no","karmøy.no","kautokeino.no","klabu.no","klæbu.no","klepp.no","kongsberg.no","kongsvinger.no","kraanghke.no","kråanghke.no","kragero.no","kragerø.no","kristiansand.no","kristiansund.no","krodsherad.no","krødsherad.no","kvæfjord.no","kvænangen.no","kvafjord.no","kvalsund.no","kvam.no","kvanangen.no","kvinesdal.no","kvinnherad.no","kviteseid.no","kvitsoy.no","kvitsøy.no","laakesvuemie.no","lærdal.no","lahppi.no","láhppi.no","lardal.no","larvik.no","lavagis.no","lavangen.no","leangaviika.no","leaŋgaviika.no","lebesby.no","leikanger.no","leirfjord.no","leka.no","leksvik.no","lenvik.no","lerdal.no","lesja.no","levanger.no","lier.no","lierne.no","lillehammer.no","lillesand.no","lindas.no","lindås.no","lindesnes.no","loabat.no","loabát.no","lodingen.no","lødingen.no","lom.no","loppa.no","lorenskog.no","lørenskog.no","loten.no","løten.no","lund.no","lunner.no","luroy.no","lurøy.no","luster.no","lyngdal.no","lyngen.no","malatvuopmi.no","málatvuopmi.no","malselv.no","målselv.no","malvik.no","mandal.no","marker.no","marnardal.no","masfjorden.no","masoy.no","måsøy.no","matta-varjjat.no","mátta-várjjat.no","meland.no","meldal.no","melhus.no","meloy.no","meløy.no","meraker.no","meråker.no","midsund.no","midtre-gauldal.no","moareke.no","moåreke.no","modalen.no","modum.no","molde.no","heroy.more-og-romsdal.no","sande.more-og-romsdal.no","herøy.møre-og-romsdal.no","sande.møre-og-romsdal.no","moskenes.no","moss.no","mosvik.no","muosat.no","muosát.no","naamesjevuemie.no","nååmesjevuemie.no","nærøy.no","namdalseid.no","namsos.no","namsskogan.no","nannestad.no","naroy.no","narviika.no","narvik.no","naustdal.no","navuotna.no","návuotna.no","nedre-eiker.no","nesna.no","nesodden.no","nesseby.no","nesset.no","nissedal.no","nittedal.no","nord-aurdal.no","nord-fron.no","nord-odal.no","norddal.no","nordkapp.no","bo.nordland.no","bø.nordland.no","heroy.nordland.no","herøy.nordland.no","nordre-land.no","nordreisa.no","nore-og-uvdal.no","notodden.no","notteroy.no","nøtterøy.no","odda.no","oksnes.no","øksnes.no","omasvuotna.no","oppdal.no","oppegard.no","oppegård.no","orkdal.no","orland.no","ørland.no","orskog.no","ørskog.no","orsta.no","ørsta.no","osen.no","osteroy.no","osterøy.no","valer.ostfold.no","våler.østfold.no","ostre-toten.no","østre-toten.no","overhalla.no","ovre-eiker.no","øvre-eiker.no","oyer.no","øyer.no","oygarden.no","øygarden.no","oystre-slidre.no","øystre-slidre.no","porsanger.no","porsangu.no","porsáŋgu.no","porsgrunn.no","rade.no","råde.no","radoy.no","radøy.no","rælingen.no","rahkkeravju.no","ráhkkerávju.no","raisa.no","ráisa.no","rakkestad.no","ralingen.no","rana.no","randaberg.no","rauma.no","rendalen.no","rennebu.no","rennesoy.no","rennesøy.no","rindal.no","ringebu.no","ringerike.no","ringsaker.no","risor.no","risør.no","rissa.no","roan.no","rodoy.no","rødøy.no","rollag.no","romsa.no","romskog.no","rømskog.no","roros.no","røros.no","rost.no","røst.no","royken.no","røyken.no","royrvik.no","røyrvik.no","ruovat.no","rygge.no","salangen.no","salat.no","sálat.no","sálát.no","saltdal.no","samnanger.no","sandefjord.no","sandnes.no","sandoy.no","sandøy.no","sarpsborg.no","sauda.no","sauherad.no","sel.no","selbu.no","selje.no","seljord.no","siellak.no","sigdal.no","siljan.no","sirdal.no","skanit.no","skánit.no","skanland.no","skånland.no","skaun.no","skedsmo.no","ski.no","skien.no","skierva.no","skiervá.no","skiptvet.no","skjak.no","skjåk.no","skjervoy.no","skjervøy.no","skodje.no","smola.no","smøla.no","snaase.no","snåase.no","snasa.no","snåsa.no","snillfjord.no","snoasa.no","sogndal.no","sogne.no","søgne.no","sokndal.no","sola.no","solund.no","somna.no","sømna.no","sondre-land.no","søndre-land.no","songdalen.no","sor-aurdal.no","sør-aurdal.no","sor-fron.no","sør-fron.no","sor-odal.no","sør-odal.no","sor-varanger.no","sør-varanger.no","sorfold.no","sørfold.no","sorreisa.no","sørreisa.no","sortland.no","sorum.no","sørum.no","spydeberg.no","stange.no","stavanger.no","steigen.no","steinkjer.no","stjordal.no","stjørdal.no","stokke.no","stor-elvdal.no","stord.no","stordal.no","storfjord.no","strand.no","stranda.no","stryn.no","sula.no","suldal.no","sund.no","sunndal.no","surnadal.no","sveio.no","svelvik.no","sykkylven.no","tana.no","bo.telemark.no","bø.telemark.no","time.no","tingvoll.no","tinn.no","tjeldsund.no","tjome.no","tjøme.no","tokke.no","tolga.no","tonsberg.no","tønsberg.no","torsken.no","træna.no","trana.no","tranoy.no","tranøy.no","troandin.no","trogstad.no","trøgstad.no","tromsa.no","tromso.no","tromsø.no","trondheim.no","trysil.no","tvedestrand.no","tydal.no","tynset.no","tysfjord.no","tysnes.no","tysvær.no","tysvar.no","ullensaker.no","ullensvang.no","ulvik.no","unjarga.no","unjárga.no","utsira.no","vaapste.no","vadso.no","vadsø.no","værøy.no","vaga.no","vågå.no","vagan.no","vågan.no","vagsoy.no","vågsøy.no","vaksdal.no","valle.no","vang.no","vanylven.no","vardo.no","vardø.no","varggat.no","várggát.no","varoy.no","vefsn.no","vega.no","vegarshei.no","vegårshei.no","vennesla.no","verdal.no","verran.no","vestby.no","sande.vestfold.no","vestnes.no","vestre-slidre.no","vestre-toten.no","vestvagoy.no","vestvågøy.no","vevelstad.no","vik.no","vikna.no","vindafjord.no","voagat.no","volda.no","voss.no","*.np","nr","biz.nr","com.nr","edu.nr","gov.nr","info.nr","net.nr","org.nr","nu","nz","ac.nz","co.nz","cri.nz","geek.nz","gen.nz","govt.nz","health.nz","iwi.nz","kiwi.nz","maori.nz","māori.nz","mil.nz","net.nz","org.nz","parliament.nz","school.nz","om","co.om","com.om","edu.om","gov.om","med.om","museum.om","net.om","org.om","pro.om","onion","org","pa","abo.pa","ac.pa","com.pa","edu.pa","gob.pa","ing.pa","med.pa","net.pa","nom.pa","org.pa","sld.pa","pe","com.pe","edu.pe","gob.pe","mil.pe","net.pe","nom.pe","org.pe","pf","com.pf","edu.pf","org.pf","*.pg","ph","com.ph","edu.ph","gov.ph","i.ph","mil.ph","net.ph","ngo.ph","org.ph","pk","ac.pk","biz.pk","com.pk","edu.pk","fam.pk","gkp.pk","gob.pk","gog.pk","gok.pk","gon.pk","gop.pk","gos.pk","gov.pk","net.pk","org.pk","web.pk","pl","com.pl","net.pl","org.pl","agro.pl","aid.pl","atm.pl","auto.pl","biz.pl","edu.pl","gmina.pl","gsm.pl","info.pl","mail.pl","media.pl","miasta.pl","mil.pl","nieruchomosci.pl","nom.pl","pc.pl","powiat.pl","priv.pl","realestate.pl","rel.pl","sex.pl","shop.pl","sklep.pl","sos.pl","szkola.pl","targi.pl","tm.pl","tourism.pl","travel.pl","turystyka.pl","gov.pl","ap.gov.pl","griw.gov.pl","ic.gov.pl","is.gov.pl","kmpsp.gov.pl","konsulat.gov.pl","kppsp.gov.pl","kwp.gov.pl","kwpsp.gov.pl","mup.gov.pl","mw.gov.pl","oia.gov.pl","oirm.gov.pl","oke.gov.pl","oow.gov.pl","oschr.gov.pl","oum.gov.pl","pa.gov.pl","pinb.gov.pl","piw.gov.pl","po.gov.pl","pr.gov.pl","psp.gov.pl","psse.gov.pl","pup.gov.pl","rzgw.gov.pl","sa.gov.pl","sdn.gov.pl","sko.gov.pl","so.gov.pl","sr.gov.pl","starostwo.gov.pl","ug.gov.pl","ugim.gov.pl","um.gov.pl","umig.gov.pl","upow.gov.pl","uppo.gov.pl","us.gov.pl","uw.gov.pl","uzs.gov.pl","wif.gov.pl","wiih.gov.pl","winb.gov.pl","wios.gov.pl","witd.gov.pl","wiw.gov.pl","wkz.gov.pl","wsa.gov.pl","wskr.gov.pl","wsse.gov.pl","wuoz.gov.pl","wzmiuw.gov.pl","zp.gov.pl","zpisdn.gov.pl","augustow.pl","babia-gora.pl","bedzin.pl","beskidy.pl","bialowieza.pl","bialystok.pl","bielawa.pl","bieszczady.pl","boleslawiec.pl","bydgoszcz.pl","bytom.pl","cieszyn.pl","czeladz.pl","czest.pl","dlugoleka.pl","elblag.pl","elk.pl","glogow.pl","gniezno.pl","gorlice.pl","grajewo.pl","ilawa.pl","jaworzno.pl","jelenia-gora.pl","jgora.pl","kalisz.pl","karpacz.pl","kartuzy.pl","kaszuby.pl","katowice.pl","kazimierz-dolny.pl","kepno.pl","ketrzyn.pl","klodzko.pl","kobierzyce.pl","kolobrzeg.pl","konin.pl","konskowola.pl","kutno.pl","lapy.pl","lebork.pl","legnica.pl","lezajsk.pl","limanowa.pl","lomza.pl","lowicz.pl","lubin.pl","lukow.pl","malbork.pl","malopolska.pl","mazowsze.pl","mazury.pl","mielec.pl","mielno.pl","mragowo.pl","naklo.pl","nowaruda.pl","nysa.pl","olawa.pl","olecko.pl","olkusz.pl","olsztyn.pl","opoczno.pl","opole.pl","ostroda.pl","ostroleka.pl","ostrowiec.pl","ostrowwlkp.pl","pila.pl","pisz.pl","podhale.pl","podlasie.pl","polkowice.pl","pomorskie.pl","pomorze.pl","prochowice.pl","pruszkow.pl","przeworsk.pl","pulawy.pl","radom.pl","rawa-maz.pl","rybnik.pl","rzeszow.pl","sanok.pl","sejny.pl","skoczow.pl","slask.pl","slupsk.pl","sosnowiec.pl","stalowa-wola.pl","starachowice.pl","stargard.pl","suwalki.pl","swidnica.pl","swiebodzin.pl","swinoujscie.pl","szczecin.pl","szczytno.pl","tarnobrzeg.pl","tgory.pl","turek.pl","tychy.pl","ustka.pl","walbrzych.pl","warmia.pl","warszawa.pl","waw.pl","wegrow.pl","wielun.pl","wlocl.pl","wloclawek.pl","wodzislaw.pl","wolomin.pl","wroclaw.pl","zachpomor.pl","zagan.pl","zarow.pl","zgora.pl","zgorzelec.pl","pm","pn","co.pn","edu.pn","gov.pn","net.pn","org.pn","post","pr","biz.pr","com.pr","edu.pr","gov.pr","info.pr","isla.pr","name.pr","net.pr","org.pr","pro.pr","ac.pr","est.pr","prof.pr","pro","aaa.pro","aca.pro","acct.pro","avocat.pro","bar.pro","cpa.pro","eng.pro","jur.pro","law.pro","med.pro","recht.pro","ps","com.ps","edu.ps","gov.ps","net.ps","org.ps","plo.ps","sec.ps","pt","com.pt","edu.pt","gov.pt","int.pt","net.pt","nome.pt","org.pt","publ.pt","pw","belau.pw","co.pw","ed.pw","go.pw","or.pw","py","com.py","coop.py","edu.py","gov.py","mil.py","net.py","org.py","qa","com.qa","edu.qa","gov.qa","mil.qa","name.qa","net.qa","org.qa","sch.qa","re","asso.re","com.re","ro","arts.ro","com.ro","firm.ro","info.ro","nom.ro","nt.ro","org.ro","rec.ro","store.ro","tm.ro","www.ro","rs","ac.rs","co.rs","edu.rs","gov.rs","in.rs","org.rs","ru","rw","ac.rw","co.rw","coop.rw","gov.rw","mil.rw","net.rw","org.rw","sa","com.sa","edu.sa","gov.sa","med.sa","net.sa","org.sa","pub.sa","sch.sa","sb","com.sb","edu.sb","gov.sb","net.sb","org.sb","sc","com.sc","edu.sc","gov.sc","net.sc","org.sc","sd","com.sd","edu.sd","gov.sd","info.sd","med.sd","net.sd","org.sd","tv.sd","se","a.se","ac.se","b.se","bd.se","brand.se","c.se","d.se","e.se","f.se","fh.se","fhsk.se","fhv.se","g.se","h.se","i.se","k.se","komforb.se","kommunalforbund.se","komvux.se","l.se","lanbib.se","m.se","n.se","naturbruksgymn.se","o.se","org.se","p.se","parti.se","pp.se","press.se","r.se","s.se","t.se","tm.se","u.se","w.se","x.se","y.se","z.se","sg","com.sg","edu.sg","gov.sg","net.sg","org.sg","sh","com.sh","gov.sh","mil.sh","net.sh","org.sh","si","sj","sk","sl","com.sl","edu.sl","gov.sl","net.sl","org.sl","sm","sn","art.sn","com.sn","edu.sn","gouv.sn","org.sn","perso.sn","univ.sn","so","com.so","edu.so","gov.so","me.so","net.so","org.so","sr","ss","biz.ss","co.ss","com.ss","edu.ss","gov.ss","me.ss","net.ss","org.ss","sch.ss","st","co.st","com.st","consulado.st","edu.st","embaixada.st","mil.st","net.st","org.st","principe.st","saotome.st","store.st","su","sv","com.sv","edu.sv","gob.sv","org.sv","red.sv","sx","gov.sx","sy","com.sy","edu.sy","gov.sy","mil.sy","net.sy","org.sy","sz","ac.sz","co.sz","org.sz","tc","td","tel","tf","tg","th","ac.th","co.th","go.th","in.th","mi.th","net.th","or.th","tj","ac.tj","biz.tj","co.tj","com.tj","edu.tj","go.tj","gov.tj","int.tj","mil.tj","name.tj","net.tj","nic.tj","org.tj","test.tj","web.tj","tk","tl","gov.tl","tm","co.tm","com.tm","edu.tm","gov.tm","mil.tm","net.tm","nom.tm","org.tm","tn","com.tn","ens.tn","fin.tn","gov.tn","ind.tn","info.tn","intl.tn","mincom.tn","nat.tn","net.tn","org.tn","perso.tn","tourism.tn","to","com.to","edu.to","gov.to","mil.to","net.to","org.to","tr","av.tr","bbs.tr","bel.tr","biz.tr","com.tr","dr.tr","edu.tr","gen.tr","gov.tr","info.tr","k12.tr","kep.tr","mil.tr","name.tr","net.tr","org.tr","pol.tr","tel.tr","tsk.tr","tv.tr","web.tr","nc.tr","gov.nc.tr","tt","biz.tt","co.tt","com.tt","edu.tt","gov.tt","info.tt","mil.tt","name.tt","net.tt","org.tt","pro.tt","tv","tw","club.tw","com.tw","ebiz.tw","edu.tw","game.tw","gov.tw","idv.tw","mil.tw","net.tw","org.tw","tz","ac.tz","co.tz","go.tz","hotel.tz","info.tz","me.tz","mil.tz","mobi.tz","ne.tz","or.tz","sc.tz","tv.tz","ua","com.ua","edu.ua","gov.ua","in.ua","net.ua","org.ua","cherkassy.ua","cherkasy.ua","chernigov.ua","chernihiv.ua","chernivtsi.ua","chernovtsy.ua","ck.ua","cn.ua","cr.ua","crimea.ua","cv.ua","dn.ua","dnepropetrovsk.ua","dnipropetrovsk.ua","donetsk.ua","dp.ua","if.ua","ivano-frankivsk.ua","kh.ua","kharkiv.ua","kharkov.ua","kherson.ua","khmelnitskiy.ua","khmelnytskyi.ua","kiev.ua","kirovograd.ua","km.ua","kr.ua","kropyvnytskyi.ua","krym.ua","ks.ua","kv.ua","kyiv.ua","lg.ua","lt.ua","lugansk.ua","luhansk.ua","lutsk.ua","lv.ua","lviv.ua","mk.ua","mykolaiv.ua","nikolaev.ua","od.ua","odesa.ua","odessa.ua","pl.ua","poltava.ua","rivne.ua","rovno.ua","rv.ua","sb.ua","sebastopol.ua","sevastopol.ua","sm.ua","sumy.ua","te.ua","ternopil.ua","uz.ua","uzhgorod.ua","uzhhorod.ua","vinnica.ua","vinnytsia.ua","vn.ua","volyn.ua","yalta.ua","zakarpattia.ua","zaporizhzhe.ua","zaporizhzhia.ua","zhitomir.ua","zhytomyr.ua","zp.ua","zt.ua","ug","ac.ug","co.ug","com.ug","go.ug","ne.ug","or.ug","org.ug","sc.ug","uk","ac.uk","co.uk","gov.uk","ltd.uk","me.uk","net.uk","nhs.uk","org.uk","plc.uk","police.uk","*.sch.uk","us","dni.us","fed.us","isa.us","kids.us","nsn.us","ak.us","al.us","ar.us","as.us","az.us","ca.us","co.us","ct.us","dc.us","de.us","fl.us","ga.us","gu.us","hi.us","ia.us","id.us","il.us","in.us","ks.us","ky.us","la.us","ma.us","md.us","me.us","mi.us","mn.us","mo.us","ms.us","mt.us","nc.us","nd.us","ne.us","nh.us","nj.us","nm.us","nv.us","ny.us","oh.us","ok.us","or.us","pa.us","pr.us","ri.us","sc.us","sd.us","tn.us","tx.us","ut.us","va.us","vi.us","vt.us","wa.us","wi.us","wv.us","wy.us","k12.ak.us","k12.al.us","k12.ar.us","k12.as.us","k12.az.us","k12.ca.us","k12.co.us","k12.ct.us","k12.dc.us","k12.fl.us","k12.ga.us","k12.gu.us","k12.ia.us","k12.id.us","k12.il.us","k12.in.us","k12.ks.us","k12.ky.us","k12.la.us","k12.ma.us","k12.md.us","k12.me.us","k12.mi.us","k12.mn.us","k12.mo.us","k12.ms.us","k12.mt.us","k12.nc.us","k12.ne.us","k12.nh.us","k12.nj.us","k12.nm.us","k12.nv.us","k12.ny.us","k12.oh.us","k12.ok.us","k12.or.us","k12.pa.us","k12.pr.us","k12.sc.us","k12.tn.us","k12.tx.us","k12.ut.us","k12.va.us","k12.vi.us","k12.vt.us","k12.wa.us","k12.wi.us","cc.ak.us","lib.ak.us","cc.al.us","lib.al.us","cc.ar.us","lib.ar.us","cc.as.us","lib.as.us","cc.az.us","lib.az.us","cc.ca.us","lib.ca.us","cc.co.us","lib.co.us","cc.ct.us","lib.ct.us","cc.dc.us","lib.dc.us","cc.de.us","cc.fl.us","cc.ga.us","cc.gu.us","cc.hi.us","cc.ia.us","cc.id.us","cc.il.us","cc.in.us","cc.ks.us","cc.ky.us","cc.la.us","cc.ma.us","cc.md.us","cc.me.us","cc.mi.us","cc.mn.us","cc.mo.us","cc.ms.us","cc.mt.us","cc.nc.us","cc.nd.us","cc.ne.us","cc.nh.us","cc.nj.us","cc.nm.us","cc.nv.us","cc.ny.us","cc.oh.us","cc.ok.us","cc.or.us","cc.pa.us","cc.pr.us","cc.ri.us","cc.sc.us","cc.sd.us","cc.tn.us","cc.tx.us","cc.ut.us","cc.va.us","cc.vi.us","cc.vt.us","cc.wa.us","cc.wi.us","cc.wv.us","cc.wy.us","k12.wy.us","lib.fl.us","lib.ga.us","lib.gu.us","lib.hi.us","lib.ia.us","lib.id.us","lib.il.us","lib.in.us","lib.ks.us","lib.ky.us","lib.la.us","lib.ma.us","lib.md.us","lib.me.us","lib.mi.us","lib.mn.us","lib.mo.us","lib.ms.us","lib.mt.us","lib.nc.us","lib.nd.us","lib.ne.us","lib.nh.us","lib.nj.us","lib.nm.us","lib.nv.us","lib.ny.us","lib.oh.us","lib.ok.us","lib.or.us","lib.pa.us","lib.pr.us","lib.ri.us","lib.sc.us","lib.sd.us","lib.tn.us","lib.tx.us","lib.ut.us","lib.va.us","lib.vi.us","lib.vt.us","lib.wa.us","lib.wi.us","lib.wy.us","chtr.k12.ma.us","paroch.k12.ma.us","pvt.k12.ma.us","ann-arbor.mi.us","cog.mi.us","dst.mi.us","eaton.mi.us","gen.mi.us","mus.mi.us","tec.mi.us","washtenaw.mi.us","uy","com.uy","edu.uy","gub.uy","mil.uy","net.uy","org.uy","uz","co.uz","com.uz","net.uz","org.uz","va","vc","com.vc","edu.vc","gov.vc","mil.vc","net.vc","org.vc","ve","arts.ve","bib.ve","co.ve","com.ve","e12.ve","edu.ve","firm.ve","gob.ve","gov.ve","info.ve","int.ve","mil.ve","net.ve","nom.ve","org.ve","rar.ve","rec.ve","store.ve","tec.ve","web.ve","vg","vi","co.vi","com.vi","k12.vi","net.vi","org.vi","vn","ac.vn","ai.vn","biz.vn","com.vn","edu.vn","gov.vn","health.vn","id.vn","info.vn","int.vn","io.vn","name.vn","net.vn","org.vn","pro.vn","angiang.vn","bacgiang.vn","backan.vn","baclieu.vn","bacninh.vn","baria-vungtau.vn","bentre.vn","binhdinh.vn","binhduong.vn","binhphuoc.vn","binhthuan.vn","camau.vn","cantho.vn","caobang.vn","daklak.vn","daknong.vn","danang.vn","dienbien.vn","dongnai.vn","dongthap.vn","gialai.vn","hagiang.vn","haiduong.vn","haiphong.vn","hanam.vn","hanoi.vn","hatinh.vn","haugiang.vn","hoabinh.vn","hungyen.vn","khanhhoa.vn","kiengiang.vn","kontum.vn","laichau.vn","lamdong.vn","langson.vn","laocai.vn","longan.vn","namdinh.vn","nghean.vn","ninhbinh.vn","ninhthuan.vn","phutho.vn","phuyen.vn","quangbinh.vn","quangnam.vn","quangngai.vn","quangninh.vn","quangtri.vn","soctrang.vn","sonla.vn","tayninh.vn","thaibinh.vn","thainguyen.vn","thanhhoa.vn","thanhphohochiminh.vn","thuathienhue.vn","tiengiang.vn","travinh.vn","tuyenquang.vn","vinhlong.vn","vinhphuc.vn","yenbai.vn","vu","com.vu","edu.vu","net.vu","org.vu","wf","ws","com.ws","edu.ws","gov.ws","net.ws","org.ws","yt","امارات","հայ","বাংলা","бг","البحرين","бел","中国","中國","الجزائر","مصر","ею","ευ","موريتانيا","გე","ελ","香港","個人.香港","公司.香港","政府.香港","教育.香港","組織.香港","網絡.香港","ಭಾರತ","ଭାରତ","ভাৰত","भारतम्","भारोत","ڀارت","ഭാരതം","भारत","بارت","بھارت","భారత్","ભારત","ਭਾਰਤ","ভারত","இந்தியா","ایران","ايران","عراق","الاردن","한국","қаз","ລາວ","ලංකා","இலங்கை","المغرب","мкд","мон","澳門","澳门","مليسيا","عمان","پاکستان","پاكستان","فلسطين","срб","ак.срб","обр.срб","од.срб","орг.срб","пр.срб","упр.срб","рф","قطر","السعودية","السعودیة","السعودیۃ","السعوديه","سودان","新加坡","சிங்கப்பூர்","سورية","سوريا","ไทย","ทหาร.ไทย","ธุรกิจ.ไทย","เน็ต.ไทย","รัฐบาล.ไทย","ศึกษา.ไทย","องค์กร.ไทย","تونس","台灣","台湾","臺灣","укр","اليمن","xxx","ye","com.ye","edu.ye","gov.ye","mil.ye","net.ye","org.ye","ac.za","agric.za","alt.za","co.za","edu.za","gov.za","grondar.za","law.za","mil.za","net.za","ngo.za","nic.za","nis.za","nom.za","org.za","school.za","tm.za","web.za","zm","ac.zm","biz.zm","co.zm","com.zm","edu.zm","gov.zm","info.zm","mil.zm","net.zm","org.zm","sch.zm","zw","ac.zw","co.zw","gov.zw","mil.zw","org.zw","aaa","aarp","abb","abbott","abbvie","abc","able","abogado","abudhabi","academy","accenture","accountant","accountants","aco","actor","ads","adult","aeg","aetna","afl","africa","agakhan","agency","aig","airbus","airforce","airtel","akdn","alibaba","alipay","allfinanz","allstate","ally","alsace","alstom","amazon","americanexpress","americanfamily","amex","amfam","amica","amsterdam","analytics","android","anquan","anz","aol","apartments","app","apple","aquarelle","arab","aramco","archi","army","art","arte","asda","associates","athleta","attorney","auction","audi","audible","audio","auspost","author","auto","autos","aws","axa","azure","baby","baidu","banamex","band","bank","bar","barcelona","barclaycard","barclays","barefoot","bargains","baseball","basketball","bauhaus","bayern","bbc","bbt","bbva","bcg","bcn","beats","beauty","beer","bentley","berlin","best","bestbuy","bet","bharti","bible","bid","bike","bing","bingo","bio","black","blackfriday","blockbuster","blog","bloomberg","blue","bms","bmw","bnpparibas","boats","boehringer","bofa","bom","bond","boo","book","booking","bosch","bostik","boston","bot","boutique","box","bradesco","bridgestone","broadway","broker","brother","brussels","build","builders","business","buy","buzz","bzh","cab","cafe","cal","call","calvinklein","cam","camera","camp","canon","capetown","capital","capitalone","car","caravan","cards","care","career","careers","cars","casa","case","cash","casino","catering","catholic","cba","cbn","cbre","center","ceo","cern","cfa","cfd","chanel","channel","charity","chase","chat","cheap","chintai","christmas","chrome","church","cipriani","circle","cisco","citadel","citi","citic","city","claims","cleaning","click","clinic","clinique","clothing","cloud","club","clubmed","coach","codes","coffee","college","cologne","commbank","community","company","compare","computer","comsec","condos","construction","consulting","contact","contractors","cooking","cool","corsica","country","coupon","coupons","courses","cpa","credit","creditcard","creditunion","cricket","crown","crs","cruise","cruises","cuisinella","cymru","cyou","dad","dance","data","date","dating","datsun","day","dclk","dds","deal","dealer","deals","degree","delivery","dell","deloitte","delta","democrat","dental","dentist","desi","design","dev","dhl","diamonds","diet","digital","direct","directory","discount","discover","dish","diy","dnp","docs","doctor","dog","domains","dot","download","drive","dtv","dubai","dunlop","dupont","durban","dvag","dvr","earth","eat","eco","edeka","education","email","emerck","energy","engineer","engineering","enterprises","epson","equipment","ericsson","erni","esq","estate","eurovision","eus","events","exchange","expert","exposed","express","extraspace","fage","fail","fairwinds","faith","family","fan","fans","farm","farmers","fashion","fast","fedex","feedback","ferrari","ferrero","fidelity","fido","film","final","finance","financial","fire","firestone","firmdale","fish","fishing","fit","fitness","flickr","flights","flir","florist","flowers","fly","foo","food","football","ford","forex","forsale","forum","foundation","fox","free","fresenius","frl","frogans","frontier","ftr","fujitsu","fun","fund","furniture","futbol","fyi","gal","gallery","gallo","gallup","game","games","gap","garden","gay","gbiz","gdn","gea","gent","genting","george","ggee","gift","gifts","gives","giving","glass","gle","global","globo","gmail","gmbh","gmo","gmx","godaddy","gold","goldpoint","golf","goo","goodyear","goog","google","gop","got","grainger","graphics","gratis","green","gripe","grocery","group","gucci","guge","guide","guitars","guru","hair","hamburg","hangout","haus","hbo","hdfc","hdfcbank","health","healthcare","help","helsinki","here","hermes","hiphop","hisamitsu","hitachi","hiv","hkt","hockey","holdings","holiday","homedepot","homegoods","homes","homesense","honda","horse","hospital","host","hosting","hot","hotels","hotmail","house","how","hsbc","hughes","hyatt","hyundai","ibm","icbc","ice","icu","ieee","ifm","ikano","imamat","imdb","immo","immobilien","inc","industries","infiniti","ing","ink","institute","insurance","insure","international","intuit","investments","ipiranga","irish","ismaili","ist","istanbul","itau","itv","jaguar","java","jcb","jeep","jetzt","jewelry","jio","jll","jmp","jnj","joburg","jot","joy","jpmorgan","jprs","juegos","juniper","kaufen","kddi","kerryhotels","kerrylogistics","kerryproperties","kfh","kia","kids","kim","kindle","kitchen","kiwi","koeln","komatsu","kosher","kpmg","kpn","krd","kred","kuokgroup","kyoto","lacaixa","lamborghini","lamer","lancaster","land","landrover","lanxess","lasalle","lat","latino","latrobe","law","lawyer","lds","lease","leclerc","lefrak","legal","lego","lexus","lgbt","lidl","life","lifeinsurance","lifestyle","lighting","like","lilly","limited","limo","lincoln","link","lipsy","live","living","llc","llp","loan","loans","locker","locus","lol","london","lotte","lotto","love","lpl","lplfinancial","ltd","ltda","lundbeck","luxe","luxury","madrid","maif","maison","makeup","man","management","mango","map","market","marketing","markets","marriott","marshalls","mattel","mba","mckinsey","med","media","meet","melbourne","meme","memorial","men","menu","merck","merckmsd","miami","microsoft","mini","mint","mit","mitsubishi","mlb","mls","mma","mobile","moda","moe","moi","mom","monash","money","monster","mormon","mortgage","moscow","moto","motorcycles","mov","movie","msd","mtn","mtr","music","nab","nagoya","navy","nba","nec","netbank","netflix","network","neustar","new","news","next","nextdirect","nexus","nfl","ngo","nhk","nico","nike","nikon","ninja","nissan","nissay","nokia","norton","now","nowruz","nowtv","nra","nrw","ntt","nyc","obi","observer","office","okinawa","olayan","olayangroup","ollo","omega","one","ong","onl","online","ooo","open","oracle","orange","organic","origins","osaka","otsuka","ott","ovh","page","panasonic","paris","pars","partners","parts","party","pay","pccw","pet","pfizer","pharmacy","phd","philips","phone","photo","photography","photos","physio","pics","pictet","pictures","pid","pin","ping","pink","pioneer","pizza","place","play","playstation","plumbing","plus","pnc","pohl","poker","politie","porn","pramerica","praxi","press","prime","prod","productions","prof","progressive","promo","properties","property","protection","pru","prudential","pub","pwc","qpon","quebec","quest","racing","radio","read","realestate","realtor","realty","recipes","red","redstone","redumbrella","rehab","reise","reisen","reit","reliance","ren","rent","rentals","repair","report","republican","rest","restaurant","review","reviews","rexroth","rich","richardli","ricoh","ril","rio","rip","rocks","rodeo","rogers","room","rsvp","rugby","ruhr","run","rwe","ryukyu","saarland","safe","safety","sakura","sale","salon","samsclub","samsung","sandvik","sandvikcoromant","sanofi","sap","sarl","sas","save","saxo","sbi","sbs","scb","schaeffler","schmidt","scholarships","school","schule","schwarz","science","scot","search","seat","secure","security","seek","select","sener","services","seven","sew","sex","sexy","sfr","shangrila","sharp","shell","shia","shiksha","shoes","shop","shopping","shouji","show","silk","sina","singles","site","ski","skin","sky","skype","sling","smart","smile","sncf","soccer","social","softbank","software","sohu","solar","solutions","song","sony","soy","spa","space","sport","spot","srl","stada","staples","star","statebank","statefarm","stc","stcgroup","stockholm","storage","store","stream","studio","study","style","sucks","supplies","supply","support","surf","surgery","suzuki","swatch","swiss","sydney","systems","tab","taipei","talk","taobao","target","tatamotors","tatar","tattoo","tax","taxi","tci","tdk","team","tech","technology","temasek","tennis","teva","thd","theater","theatre","tiaa","tickets","tienda","tips","tires","tirol","tjmaxx","tjx","tkmaxx","tmall","today","tokyo","tools","top","toray","toshiba","total","tours","town","toyota","toys","trade","trading","training","travel","travelers","travelersinsurance","trust","trv","tube","tui","tunes","tushu","tvs","ubank","ubs","unicom","university","uno","uol","ups","vacations","vana","vanguard","vegas","ventures","verisign","versicherung","vet","viajes","video","vig","viking","villas","vin","vip","virgin","visa","vision","viva","vivo","vlaanderen","vodka","volvo","vote","voting","voto","voyage","wales","walmart","walter","wang","wanggou","watch","watches","weather","weatherchannel","webcam","weber","website","wed","wedding","weibo","weir","whoswho","wien","wiki","williamhill","win","windows","wine","winners","wme","wolterskluwer","woodside","work","works","world","wow","wtc","wtf","xbox","xerox","xihuan","xin","कॉम","セール","佛山","慈善","集团","在线","点看","คอม","八卦","موقع","公益","公司","香格里拉","网站","移动","我爱你","москва","католик","онлайн","сайт","联通","קום","时尚","微博","淡马锡","ファッション","орг","नेट","ストア","アマゾン","삼성","商标","商店","商城","дети","ポイント","新闻","家電","كوم","中文网","中信","娱乐","谷歌","電訊盈科","购物","クラウド","通販","网店","संगठन","餐厅","网络","ком","亚马逊","食品","飞利浦","手机","ارامكو","العليان","بازار","ابوظبي","كاثوليك","همراه","닷컴","政府","شبكة","بيتك","عرب","机构","组织机构","健康","招聘","рус","大拿","みんな","グーグル","世界","書籍","网址","닷넷","コム","天主教","游戏","vermögensberater","vermögensberatung","企业","信息","嘉里大酒店","嘉里","广东","政务","xyz","yachts","yahoo","yamaxun","yandex","yodobashi","yoga","yokohama","you","youtube","yun","zappos","zara","zero","zip","zone","zuerich","co.krd","edu.krd","art.pl","gliwice.pl","krakow.pl","poznan.pl","wroc.pl","zakopane.pl","lib.de.us","12chars.dev","12chars.it","12chars.pro","cc.ua","inf.ua","ltd.ua","611.to","a2hosted.com","cpserver.com","aaa.vodka","*.on-acorn.io","activetrail.biz","adaptable.app","adobeaemcloud.com","*.dev.adobeaemcloud.com","aem.live","hlx.live","adobeaemcloud.net","aem.page","hlx.page","hlx3.page","adobeio-static.net","adobeioruntime.net","africa.com","beep.pl","airkitapps.com","airkitapps-au.com","airkitapps.eu","aivencloud.com","akadns.net","akamai.net","akamai-staging.net","akamaiedge.net","akamaiedge-staging.net","akamaihd.net","akamaihd-staging.net","akamaiorigin.net","akamaiorigin-staging.net","akamaized.net","akamaized-staging.net","edgekey.net","edgekey-staging.net","edgesuite.net","edgesuite-staging.net","barsy.ca","*.compute.estate","*.alces.network","kasserver.com","altervista.org","alwaysdata.net","myamaze.net","execute-api.cn-north-1.amazonaws.com.cn","execute-api.cn-northwest-1.amazonaws.com.cn","execute-api.af-south-1.amazonaws.com","execute-api.ap-east-1.amazonaws.com","execute-api.ap-northeast-1.amazonaws.com","execute-api.ap-northeast-2.amazonaws.com","execute-api.ap-northeast-3.amazonaws.com","execute-api.ap-south-1.amazonaws.com","execute-api.ap-south-2.amazonaws.com","execute-api.ap-southeast-1.amazonaws.com","execute-api.ap-southeast-2.amazonaws.com","execute-api.ap-southeast-3.amazonaws.com","execute-api.ap-southeast-4.amazonaws.com","execute-api.ap-southeast-5.amazonaws.com","execute-api.ca-central-1.amazonaws.com","execute-api.ca-west-1.amazonaws.com","execute-api.eu-central-1.amazonaws.com","execute-api.eu-central-2.amazonaws.com","execute-api.eu-north-1.amazonaws.com","execute-api.eu-south-1.amazonaws.com","execute-api.eu-south-2.amazonaws.com","execute-api.eu-west-1.amazonaws.com","execute-api.eu-west-2.amazonaws.com","execute-api.eu-west-3.amazonaws.com","execute-api.il-central-1.amazonaws.com","execute-api.me-central-1.amazonaws.com","execute-api.me-south-1.amazonaws.com","execute-api.sa-east-1.amazonaws.com","execute-api.us-east-1.amazonaws.com","execute-api.us-east-2.amazonaws.com","execute-api.us-gov-east-1.amazonaws.com","execute-api.us-gov-west-1.amazonaws.com","execute-api.us-west-1.amazonaws.com","execute-api.us-west-2.amazonaws.com","cloudfront.net","auth.af-south-1.amazoncognito.com","auth.ap-east-1.amazoncognito.com","auth.ap-northeast-1.amazoncognito.com","auth.ap-northeast-2.amazoncognito.com","auth.ap-northeast-3.amazoncognito.com","auth.ap-south-1.amazoncognito.com","auth.ap-south-2.amazoncognito.com","auth.ap-southeast-1.amazoncognito.com","auth.ap-southeast-2.amazoncognito.com","auth.ap-southeast-3.amazoncognito.com","auth.ap-southeast-4.amazoncognito.com","auth.ca-central-1.amazoncognito.com","auth.ca-west-1.amazoncognito.com","auth.eu-central-1.amazoncognito.com","auth.eu-central-2.amazoncognito.com","auth.eu-north-1.amazoncognito.com","auth.eu-south-1.amazoncognito.com","auth.eu-south-2.amazoncognito.com","auth.eu-west-1.amazoncognito.com","auth.eu-west-2.amazoncognito.com","auth.eu-west-3.amazoncognito.com","auth.il-central-1.amazoncognito.com","auth.me-central-1.amazoncognito.com","auth.me-south-1.amazoncognito.com","auth.sa-east-1.amazoncognito.com","auth.us-east-1.amazoncognito.com","auth-fips.us-east-1.amazoncognito.com","auth.us-east-2.amazoncognito.com","auth-fips.us-east-2.amazoncognito.com","auth-fips.us-gov-west-1.amazoncognito.com","auth.us-west-1.amazoncognito.com","auth-fips.us-west-1.amazoncognito.com","auth.us-west-2.amazoncognito.com","auth-fips.us-west-2.amazoncognito.com","*.compute.amazonaws.com.cn","*.compute.amazonaws.com","*.compute-1.amazonaws.com","us-east-1.amazonaws.com","emrappui-prod.cn-north-1.amazonaws.com.cn","emrnotebooks-prod.cn-north-1.amazonaws.com.cn","emrstudio-prod.cn-north-1.amazonaws.com.cn","emrappui-prod.cn-northwest-1.amazonaws.com.cn","emrnotebooks-prod.cn-northwest-1.amazonaws.com.cn","emrstudio-prod.cn-northwest-1.amazonaws.com.cn","emrappui-prod.af-south-1.amazonaws.com","emrnotebooks-prod.af-south-1.amazonaws.com","emrstudio-prod.af-south-1.amazonaws.com","emrappui-prod.ap-east-1.amazonaws.com","emrnotebooks-prod.ap-east-1.amazonaws.com","emrstudio-prod.ap-east-1.amazonaws.com","emrappui-prod.ap-northeast-1.amazonaws.com","emrnotebooks-prod.ap-northeast-1.amazonaws.com","emrstudio-prod.ap-northeast-1.amazonaws.com","emrappui-prod.ap-northeast-2.amazonaws.com","emrnotebooks-prod.ap-northeast-2.amazonaws.com","emrstudio-prod.ap-northeast-2.amazonaws.com","emrappui-prod.ap-northeast-3.amazonaws.com","emrnotebooks-prod.ap-northeast-3.amazonaws.com","emrstudio-prod.ap-northeast-3.amazonaws.com","emrappui-prod.ap-south-1.amazonaws.com","emrnotebooks-prod.ap-south-1.amazonaws.com","emrstudio-prod.ap-south-1.amazonaws.com","emrappui-prod.ap-south-2.amazonaws.com","emrnotebooks-prod.ap-south-2.amazonaws.com","emrstudio-prod.ap-south-2.amazonaws.com","emrappui-prod.ap-southeast-1.amazonaws.com","emrnotebooks-prod.ap-southeast-1.amazonaws.com","emrstudio-prod.ap-southeast-1.amazonaws.com","emrappui-prod.ap-southeast-2.amazonaws.com","emrnotebooks-prod.ap-southeast-2.amazonaws.com","emrstudio-prod.ap-southeast-2.amazonaws.com","emrappui-prod.ap-southeast-3.amazonaws.com","emrnotebooks-prod.ap-southeast-3.amazonaws.com","emrstudio-prod.ap-southeast-3.amazonaws.com","emrappui-prod.ap-southeast-4.amazonaws.com","emrnotebooks-prod.ap-southeast-4.amazonaws.com","emrstudio-prod.ap-southeast-4.amazonaws.com","emrappui-prod.ca-central-1.amazonaws.com","emrnotebooks-prod.ca-central-1.amazonaws.com","emrstudio-prod.ca-central-1.amazonaws.com","emrappui-prod.ca-west-1.amazonaws.com","emrnotebooks-prod.ca-west-1.amazonaws.com","emrstudio-prod.ca-west-1.amazonaws.com","emrappui-prod.eu-central-1.amazonaws.com","emrnotebooks-prod.eu-central-1.amazonaws.com","emrstudio-prod.eu-central-1.amazonaws.com","emrappui-prod.eu-central-2.amazonaws.com","emrnotebooks-prod.eu-central-2.amazonaws.com","emrstudio-prod.eu-central-2.amazonaws.com","emrappui-prod.eu-north-1.amazonaws.com","emrnotebooks-prod.eu-north-1.amazonaws.com","emrstudio-prod.eu-north-1.amazonaws.com","emrappui-prod.eu-south-1.amazonaws.com","emrnotebooks-prod.eu-south-1.amazonaws.com","emrstudio-prod.eu-south-1.amazonaws.com","emrappui-prod.eu-south-2.amazonaws.com","emrnotebooks-prod.eu-south-2.amazonaws.com","emrstudio-prod.eu-south-2.amazonaws.com","emrappui-prod.eu-west-1.amazonaws.com","emrnotebooks-prod.eu-west-1.amazonaws.com","emrstudio-prod.eu-west-1.amazonaws.com","emrappui-prod.eu-west-2.amazonaws.com","emrnotebooks-prod.eu-west-2.amazonaws.com","emrstudio-prod.eu-west-2.amazonaws.com","emrappui-prod.eu-west-3.amazonaws.com","emrnotebooks-prod.eu-west-3.amazonaws.com","emrstudio-prod.eu-west-3.amazonaws.com","emrappui-prod.il-central-1.amazonaws.com","emrnotebooks-prod.il-central-1.amazonaws.com","emrstudio-prod.il-central-1.amazonaws.com","emrappui-prod.me-central-1.amazonaws.com","emrnotebooks-prod.me-central-1.amazonaws.com","emrstudio-prod.me-central-1.amazonaws.com","emrappui-prod.me-south-1.amazonaws.com","emrnotebooks-prod.me-south-1.amazonaws.com","emrstudio-prod.me-south-1.amazonaws.com","emrappui-prod.sa-east-1.amazonaws.com","emrnotebooks-prod.sa-east-1.amazonaws.com","emrstudio-prod.sa-east-1.amazonaws.com","emrappui-prod.us-east-1.amazonaws.com","emrnotebooks-prod.us-east-1.amazonaws.com","emrstudio-prod.us-east-1.amazonaws.com","emrappui-prod.us-east-2.amazonaws.com","emrnotebooks-prod.us-east-2.amazonaws.com","emrstudio-prod.us-east-2.amazonaws.com","emrappui-prod.us-gov-east-1.amazonaws.com","emrnotebooks-prod.us-gov-east-1.amazonaws.com","emrstudio-prod.us-gov-east-1.amazonaws.com","emrappui-prod.us-gov-west-1.amazonaws.com","emrnotebooks-prod.us-gov-west-1.amazonaws.com","emrstudio-prod.us-gov-west-1.amazonaws.com","emrappui-prod.us-west-1.amazonaws.com","emrnotebooks-prod.us-west-1.amazonaws.com","emrstudio-prod.us-west-1.amazonaws.com","emrappui-prod.us-west-2.amazonaws.com","emrnotebooks-prod.us-west-2.amazonaws.com","emrstudio-prod.us-west-2.amazonaws.com","*.cn-north-1.airflow.amazonaws.com.cn","*.cn-northwest-1.airflow.amazonaws.com.cn","*.af-south-1.airflow.amazonaws.com","*.ap-east-1.airflow.amazonaws.com","*.ap-northeast-1.airflow.amazonaws.com","*.ap-northeast-2.airflow.amazonaws.com","*.ap-northeast-3.airflow.amazonaws.com","*.ap-south-1.airflow.amazonaws.com","*.ap-south-2.airflow.amazonaws.com","*.ap-southeast-1.airflow.amazonaws.com","*.ap-southeast-2.airflow.amazonaws.com","*.ap-southeast-3.airflow.amazonaws.com","*.ap-southeast-4.airflow.amazonaws.com","*.ca-central-1.airflow.amazonaws.com","*.ca-west-1.airflow.amazonaws.com","*.eu-central-1.airflow.amazonaws.com","*.eu-central-2.airflow.amazonaws.com","*.eu-north-1.airflow.amazonaws.com","*.eu-south-1.airflow.amazonaws.com","*.eu-south-2.airflow.amazonaws.com","*.eu-west-1.airflow.amazonaws.com","*.eu-west-2.airflow.amazonaws.com","*.eu-west-3.airflow.amazonaws.com","*.il-central-1.airflow.amazonaws.com","*.me-central-1.airflow.amazonaws.com","*.me-south-1.airflow.amazonaws.com","*.sa-east-1.airflow.amazonaws.com","*.us-east-1.airflow.amazonaws.com","*.us-east-2.airflow.amazonaws.com","*.us-west-1.airflow.amazonaws.com","*.us-west-2.airflow.amazonaws.com","s3.dualstack.cn-north-1.amazonaws.com.cn","s3-accesspoint.dualstack.cn-north-1.amazonaws.com.cn","s3-website.dualstack.cn-north-1.amazonaws.com.cn","s3.cn-north-1.amazonaws.com.cn","s3-accesspoint.cn-north-1.amazonaws.com.cn","s3-deprecated.cn-north-1.amazonaws.com.cn","s3-object-lambda.cn-north-1.amazonaws.com.cn","s3-website.cn-north-1.amazonaws.com.cn","s3.dualstack.cn-northwest-1.amazonaws.com.cn","s3-accesspoint.dualstack.cn-northwest-1.amazonaws.com.cn","s3.cn-northwest-1.amazonaws.com.cn","s3-accesspoint.cn-northwest-1.amazonaws.com.cn","s3-object-lambda.cn-northwest-1.amazonaws.com.cn","s3-website.cn-northwest-1.amazonaws.com.cn","s3.dualstack.af-south-1.amazonaws.com","s3-accesspoint.dualstack.af-south-1.amazonaws.com","s3-website.dualstack.af-south-1.amazonaws.com","s3.af-south-1.amazonaws.com","s3-accesspoint.af-south-1.amazonaws.com","s3-object-lambda.af-south-1.amazonaws.com","s3-website.af-south-1.amazonaws.com","s3.dualstack.ap-east-1.amazonaws.com","s3-accesspoint.dualstack.ap-east-1.amazonaws.com","s3.ap-east-1.amazonaws.com","s3-accesspoint.ap-east-1.amazonaws.com","s3-object-lambda.ap-east-1.amazonaws.com","s3-website.ap-east-1.amazonaws.com","s3.dualstack.ap-northeast-1.amazonaws.com","s3-accesspoint.dualstack.ap-northeast-1.amazonaws.com","s3-website.dualstack.ap-northeast-1.amazonaws.com","s3.ap-northeast-1.amazonaws.com","s3-accesspoint.ap-northeast-1.amazonaws.com","s3-object-lambda.ap-northeast-1.amazonaws.com","s3-website.ap-northeast-1.amazonaws.com","s3.dualstack.ap-northeast-2.amazonaws.com","s3-accesspoint.dualstack.ap-northeast-2.amazonaws.com","s3-website.dualstack.ap-northeast-2.amazonaws.com","s3.ap-northeast-2.amazonaws.com","s3-accesspoint.ap-northeast-2.amazonaws.com","s3-object-lambda.ap-northeast-2.amazonaws.com","s3-website.ap-northeast-2.amazonaws.com","s3.dualstack.ap-northeast-3.amazonaws.com","s3-accesspoint.dualstack.ap-northeast-3.amazonaws.com","s3-website.dualstack.ap-northeast-3.amazonaws.com","s3.ap-northeast-3.amazonaws.com","s3-accesspoint.ap-northeast-3.amazonaws.com","s3-object-lambda.ap-northeast-3.amazonaws.com","s3-website.ap-northeast-3.amazonaws.com","s3.dualstack.ap-south-1.amazonaws.com","s3-accesspoint.dualstack.ap-south-1.amazonaws.com","s3-website.dualstack.ap-south-1.amazonaws.com","s3.ap-south-1.amazonaws.com","s3-accesspoint.ap-south-1.amazonaws.com","s3-object-lambda.ap-south-1.amazonaws.com","s3-website.ap-south-1.amazonaws.com","s3.dualstack.ap-south-2.amazonaws.com","s3-accesspoint.dualstack.ap-south-2.amazonaws.com","s3-website.dualstack.ap-south-2.amazonaws.com","s3.ap-south-2.amazonaws.com","s3-accesspoint.ap-south-2.amazonaws.com","s3-object-lambda.ap-south-2.amazonaws.com","s3-website.ap-south-2.amazonaws.com","s3.dualstack.ap-southeast-1.amazonaws.com","s3-accesspoint.dualstack.ap-southeast-1.amazonaws.com","s3-website.dualstack.ap-southeast-1.amazonaws.com","s3.ap-southeast-1.amazonaws.com","s3-accesspoint.ap-southeast-1.amazonaws.com","s3-object-lambda.ap-southeast-1.amazonaws.com","s3-website.ap-southeast-1.amazonaws.com","s3.dualstack.ap-southeast-2.amazonaws.com","s3-accesspoint.dualstack.ap-southeast-2.amazonaws.com","s3-website.dualstack.ap-southeast-2.amazonaws.com","s3.ap-southeast-2.amazonaws.com","s3-accesspoint.ap-southeast-2.amazonaws.com","s3-object-lambda.ap-southeast-2.amazonaws.com","s3-website.ap-southeast-2.amazonaws.com","s3.dualstack.ap-southeast-3.amazonaws.com","s3-accesspoint.dualstack.ap-southeast-3.amazonaws.com","s3-website.dualstack.ap-southeast-3.amazonaws.com","s3.ap-southeast-3.amazonaws.com","s3-accesspoint.ap-southeast-3.amazonaws.com","s3-object-lambda.ap-southeast-3.amazonaws.com","s3-website.ap-southeast-3.amazonaws.com","s3.dualstack.ap-southeast-4.amazonaws.com","s3-accesspoint.dualstack.ap-southeast-4.amazonaws.com","s3-website.dualstack.ap-southeast-4.amazonaws.com","s3.ap-southeast-4.amazonaws.com","s3-accesspoint.ap-southeast-4.amazonaws.com","s3-object-lambda.ap-southeast-4.amazonaws.com","s3-website.ap-southeast-4.amazonaws.com","s3.dualstack.ap-southeast-5.amazonaws.com","s3-accesspoint.dualstack.ap-southeast-5.amazonaws.com","s3-website.dualstack.ap-southeast-5.amazonaws.com","s3.ap-southeast-5.amazonaws.com","s3-accesspoint.ap-southeast-5.amazonaws.com","s3-deprecated.ap-southeast-5.amazonaws.com","s3-object-lambda.ap-southeast-5.amazonaws.com","s3-website.ap-southeast-5.amazonaws.com","s3.dualstack.ca-central-1.amazonaws.com","s3-accesspoint.dualstack.ca-central-1.amazonaws.com","s3-accesspoint-fips.dualstack.ca-central-1.amazonaws.com","s3-fips.dualstack.ca-central-1.amazonaws.com","s3-website.dualstack.ca-central-1.amazonaws.com","s3.ca-central-1.amazonaws.com","s3-accesspoint.ca-central-1.amazonaws.com","s3-accesspoint-fips.ca-central-1.amazonaws.com","s3-fips.ca-central-1.amazonaws.com","s3-object-lambda.ca-central-1.amazonaws.com","s3-website.ca-central-1.amazonaws.com","s3.dualstack.ca-west-1.amazonaws.com","s3-accesspoint.dualstack.ca-west-1.amazonaws.com","s3-accesspoint-fips.dualstack.ca-west-1.amazonaws.com","s3-fips.dualstack.ca-west-1.amazonaws.com","s3-website.dualstack.ca-west-1.amazonaws.com","s3.ca-west-1.amazonaws.com","s3-accesspoint.ca-west-1.amazonaws.com","s3-accesspoint-fips.ca-west-1.amazonaws.com","s3-fips.ca-west-1.amazonaws.com","s3-object-lambda.ca-west-1.amazonaws.com","s3-website.ca-west-1.amazonaws.com","s3.dualstack.eu-central-1.amazonaws.com","s3-accesspoint.dualstack.eu-central-1.amazonaws.com","s3-website.dualstack.eu-central-1.amazonaws.com","s3.eu-central-1.amazonaws.com","s3-accesspoint.eu-central-1.amazonaws.com","s3-object-lambda.eu-central-1.amazonaws.com","s3-website.eu-central-1.amazonaws.com","s3.dualstack.eu-central-2.amazonaws.com","s3-accesspoint.dualstack.eu-central-2.amazonaws.com","s3-website.dualstack.eu-central-2.amazonaws.com","s3.eu-central-2.amazonaws.com","s3-accesspoint.eu-central-2.amazonaws.com","s3-object-lambda.eu-central-2.amazonaws.com","s3-website.eu-central-2.amazonaws.com","s3.dualstack.eu-north-1.amazonaws.com","s3-accesspoint.dualstack.eu-north-1.amazonaws.com","s3.eu-north-1.amazonaws.com","s3-accesspoint.eu-north-1.amazonaws.com","s3-object-lambda.eu-north-1.amazonaws.com","s3-website.eu-north-1.amazonaws.com","s3.dualstack.eu-south-1.amazonaws.com","s3-accesspoint.dualstack.eu-south-1.amazonaws.com","s3-website.dualstack.eu-south-1.amazonaws.com","s3.eu-south-1.amazonaws.com","s3-accesspoint.eu-south-1.amazonaws.com","s3-object-lambda.eu-south-1.amazonaws.com","s3-website.eu-south-1.amazonaws.com","s3.dualstack.eu-south-2.amazonaws.com","s3-accesspoint.dualstack.eu-south-2.amazonaws.com","s3-website.dualstack.eu-south-2.amazonaws.com","s3.eu-south-2.amazonaws.com","s3-accesspoint.eu-south-2.amazonaws.com","s3-object-lambda.eu-south-2.amazonaws.com","s3-website.eu-south-2.amazonaws.com","s3.dualstack.eu-west-1.amazonaws.com","s3-accesspoint.dualstack.eu-west-1.amazonaws.com","s3-website.dualstack.eu-west-1.amazonaws.com","s3.eu-west-1.amazonaws.com","s3-accesspoint.eu-west-1.amazonaws.com","s3-deprecated.eu-west-1.amazonaws.com","s3-object-lambda.eu-west-1.amazonaws.com","s3-website.eu-west-1.amazonaws.com","s3.dualstack.eu-west-2.amazonaws.com","s3-accesspoint.dualstack.eu-west-2.amazonaws.com","s3.eu-west-2.amazonaws.com","s3-accesspoint.eu-west-2.amazonaws.com","s3-object-lambda.eu-west-2.amazonaws.com","s3-website.eu-west-2.amazonaws.com","s3.dualstack.eu-west-3.amazonaws.com","s3-accesspoint.dualstack.eu-west-3.amazonaws.com","s3-website.dualstack.eu-west-3.amazonaws.com","s3.eu-west-3.amazonaws.com","s3-accesspoint.eu-west-3.amazonaws.com","s3-object-lambda.eu-west-3.amazonaws.com","s3-website.eu-west-3.amazonaws.com","s3.dualstack.il-central-1.amazonaws.com","s3-accesspoint.dualstack.il-central-1.amazonaws.com","s3-website.dualstack.il-central-1.amazonaws.com","s3.il-central-1.amazonaws.com","s3-accesspoint.il-central-1.amazonaws.com","s3-object-lambda.il-central-1.amazonaws.com","s3-website.il-central-1.amazonaws.com","s3.dualstack.me-central-1.amazonaws.com","s3-accesspoint.dualstack.me-central-1.amazonaws.com","s3-website.dualstack.me-central-1.amazonaws.com","s3.me-central-1.amazonaws.com","s3-accesspoint.me-central-1.amazonaws.com","s3-object-lambda.me-central-1.amazonaws.com","s3-website.me-central-1.amazonaws.com","s3.dualstack.me-south-1.amazonaws.com","s3-accesspoint.dualstack.me-south-1.amazonaws.com","s3.me-south-1.amazonaws.com","s3-accesspoint.me-south-1.amazonaws.com","s3-object-lambda.me-south-1.amazonaws.com","s3-website.me-south-1.amazonaws.com","s3.amazonaws.com","s3-1.amazonaws.com","s3-ap-east-1.amazonaws.com","s3-ap-northeast-1.amazonaws.com","s3-ap-northeast-2.amazonaws.com","s3-ap-northeast-3.amazonaws.com","s3-ap-south-1.amazonaws.com","s3-ap-southeast-1.amazonaws.com","s3-ap-southeast-2.amazonaws.com","s3-ca-central-1.amazonaws.com","s3-eu-central-1.amazonaws.com","s3-eu-north-1.amazonaws.com","s3-eu-west-1.amazonaws.com","s3-eu-west-2.amazonaws.com","s3-eu-west-3.amazonaws.com","s3-external-1.amazonaws.com","s3-fips-us-gov-east-1.amazonaws.com","s3-fips-us-gov-west-1.amazonaws.com","mrap.accesspoint.s3-global.amazonaws.com","s3-me-south-1.amazonaws.com","s3-sa-east-1.amazonaws.com","s3-us-east-2.amazonaws.com","s3-us-gov-east-1.amazonaws.com","s3-us-gov-west-1.amazonaws.com","s3-us-west-1.amazonaws.com","s3-us-west-2.amazonaws.com","s3-website-ap-northeast-1.amazonaws.com","s3-website-ap-southeast-1.amazonaws.com","s3-website-ap-southeast-2.amazonaws.com","s3-website-eu-west-1.amazonaws.com","s3-website-sa-east-1.amazonaws.com","s3-website-us-east-1.amazonaws.com","s3-website-us-gov-west-1.amazonaws.com","s3-website-us-west-1.amazonaws.com","s3-website-us-west-2.amazonaws.com","s3.dualstack.sa-east-1.amazonaws.com","s3-accesspoint.dualstack.sa-east-1.amazonaws.com","s3-website.dualstack.sa-east-1.amazonaws.com","s3.sa-east-1.amazonaws.com","s3-accesspoint.sa-east-1.amazonaws.com","s3-object-lambda.sa-east-1.amazonaws.com","s3-website.sa-east-1.amazonaws.com","s3.dualstack.us-east-1.amazonaws.com","s3-accesspoint.dualstack.us-east-1.amazonaws.com","s3-accesspoint-fips.dualstack.us-east-1.amazonaws.com","s3-fips.dualstack.us-east-1.amazonaws.com","s3-website.dualstack.us-east-1.amazonaws.com","s3.us-east-1.amazonaws.com","s3-accesspoint.us-east-1.amazonaws.com","s3-accesspoint-fips.us-east-1.amazonaws.com","s3-deprecated.us-east-1.amazonaws.com","s3-fips.us-east-1.amazonaws.com","s3-object-lambda.us-east-1.amazonaws.com","s3-website.us-east-1.amazonaws.com","s3.dualstack.us-east-2.amazonaws.com","s3-accesspoint.dualstack.us-east-2.amazonaws.com","s3-accesspoint-fips.dualstack.us-east-2.amazonaws.com","s3-fips.dualstack.us-east-2.amazonaws.com","s3-website.dualstack.us-east-2.amazonaws.com","s3.us-east-2.amazonaws.com","s3-accesspoint.us-east-2.amazonaws.com","s3-accesspoint-fips.us-east-2.amazonaws.com","s3-deprecated.us-east-2.amazonaws.com","s3-fips.us-east-2.amazonaws.com","s3-object-lambda.us-east-2.amazonaws.com","s3-website.us-east-2.amazonaws.com","s3.dualstack.us-gov-east-1.amazonaws.com","s3-accesspoint.dualstack.us-gov-east-1.amazonaws.com","s3-accesspoint-fips.dualstack.us-gov-east-1.amazonaws.com","s3-fips.dualstack.us-gov-east-1.amazonaws.com","s3.us-gov-east-1.amazonaws.com","s3-accesspoint.us-gov-east-1.amazonaws.com","s3-accesspoint-fips.us-gov-east-1.amazonaws.com","s3-fips.us-gov-east-1.amazonaws.com","s3-object-lambda.us-gov-east-1.amazonaws.com","s3-website.us-gov-east-1.amazonaws.com","s3.dualstack.us-gov-west-1.amazonaws.com","s3-accesspoint.dualstack.us-gov-west-1.amazonaws.com","s3-accesspoint-fips.dualstack.us-gov-west-1.amazonaws.com","s3-fips.dualstack.us-gov-west-1.amazonaws.com","s3.us-gov-west-1.amazonaws.com","s3-accesspoint.us-gov-west-1.amazonaws.com","s3-accesspoint-fips.us-gov-west-1.amazonaws.com","s3-fips.us-gov-west-1.amazonaws.com","s3-object-lambda.us-gov-west-1.amazonaws.com","s3-website.us-gov-west-1.amazonaws.com","s3.dualstack.us-west-1.amazonaws.com","s3-accesspoint.dualstack.us-west-1.amazonaws.com","s3-accesspoint-fips.dualstack.us-west-1.amazonaws.com","s3-fips.dualstack.us-west-1.amazonaws.com","s3-website.dualstack.us-west-1.amazonaws.com","s3.us-west-1.amazonaws.com","s3-accesspoint.us-west-1.amazonaws.com","s3-accesspoint-fips.us-west-1.amazonaws.com","s3-fips.us-west-1.amazonaws.com","s3-object-lambda.us-west-1.amazonaws.com","s3-website.us-west-1.amazonaws.com","s3.dualstack.us-west-2.amazonaws.com","s3-accesspoint.dualstack.us-west-2.amazonaws.com","s3-accesspoint-fips.dualstack.us-west-2.amazonaws.com","s3-fips.dualstack.us-west-2.amazonaws.com","s3-website.dualstack.us-west-2.amazonaws.com","s3.us-west-2.amazonaws.com","s3-accesspoint.us-west-2.amazonaws.com","s3-accesspoint-fips.us-west-2.amazonaws.com","s3-deprecated.us-west-2.amazonaws.com","s3-fips.us-west-2.amazonaws.com","s3-object-lambda.us-west-2.amazonaws.com","s3-website.us-west-2.amazonaws.com","labeling.ap-northeast-1.sagemaker.aws","labeling.ap-northeast-2.sagemaker.aws","labeling.ap-south-1.sagemaker.aws","labeling.ap-southeast-1.sagemaker.aws","labeling.ap-southeast-2.sagemaker.aws","labeling.ca-central-1.sagemaker.aws","labeling.eu-central-1.sagemaker.aws","labeling.eu-west-1.sagemaker.aws","labeling.eu-west-2.sagemaker.aws","labeling.us-east-1.sagemaker.aws","labeling.us-east-2.sagemaker.aws","labeling.us-west-2.sagemaker.aws","notebook.af-south-1.sagemaker.aws","notebook.ap-east-1.sagemaker.aws","notebook.ap-northeast-1.sagemaker.aws","notebook.ap-northeast-2.sagemaker.aws","notebook.ap-northeast-3.sagemaker.aws","notebook.ap-south-1.sagemaker.aws","notebook.ap-south-2.sagemaker.aws","notebook.ap-southeast-1.sagemaker.aws","notebook.ap-southeast-2.sagemaker.aws","notebook.ap-southeast-3.sagemaker.aws","notebook.ap-southeast-4.sagemaker.aws","notebook.ca-central-1.sagemaker.aws","notebook-fips.ca-central-1.sagemaker.aws","notebook.ca-west-1.sagemaker.aws","notebook-fips.ca-west-1.sagemaker.aws","notebook.eu-central-1.sagemaker.aws","notebook.eu-central-2.sagemaker.aws","notebook.eu-north-1.sagemaker.aws","notebook.eu-south-1.sagemaker.aws","notebook.eu-south-2.sagemaker.aws","notebook.eu-west-1.sagemaker.aws","notebook.eu-west-2.sagemaker.aws","notebook.eu-west-3.sagemaker.aws","notebook.il-central-1.sagemaker.aws","notebook.me-central-1.sagemaker.aws","notebook.me-south-1.sagemaker.aws","notebook.sa-east-1.sagemaker.aws","notebook.us-east-1.sagemaker.aws","notebook-fips.us-east-1.sagemaker.aws","notebook.us-east-2.sagemaker.aws","notebook-fips.us-east-2.sagemaker.aws","notebook.us-gov-east-1.sagemaker.aws","notebook-fips.us-gov-east-1.sagemaker.aws","notebook.us-gov-west-1.sagemaker.aws","notebook-fips.us-gov-west-1.sagemaker.aws","notebook.us-west-1.sagemaker.aws","notebook-fips.us-west-1.sagemaker.aws","notebook.us-west-2.sagemaker.aws","notebook-fips.us-west-2.sagemaker.aws","notebook.cn-north-1.sagemaker.com.cn","notebook.cn-northwest-1.sagemaker.com.cn","studio.af-south-1.sagemaker.aws","studio.ap-east-1.sagemaker.aws","studio.ap-northeast-1.sagemaker.aws","studio.ap-northeast-2.sagemaker.aws","studio.ap-northeast-3.sagemaker.aws","studio.ap-south-1.sagemaker.aws","studio.ap-southeast-1.sagemaker.aws","studio.ap-southeast-2.sagemaker.aws","studio.ap-southeast-3.sagemaker.aws","studio.ca-central-1.sagemaker.aws","studio.eu-central-1.sagemaker.aws","studio.eu-north-1.sagemaker.aws","studio.eu-south-1.sagemaker.aws","studio.eu-south-2.sagemaker.aws","studio.eu-west-1.sagemaker.aws","studio.eu-west-2.sagemaker.aws","studio.eu-west-3.sagemaker.aws","studio.il-central-1.sagemaker.aws","studio.me-central-1.sagemaker.aws","studio.me-south-1.sagemaker.aws","studio.sa-east-1.sagemaker.aws","studio.us-east-1.sagemaker.aws","studio.us-east-2.sagemaker.aws","studio.us-gov-east-1.sagemaker.aws","studio-fips.us-gov-east-1.sagemaker.aws","studio.us-gov-west-1.sagemaker.aws","studio-fips.us-gov-west-1.sagemaker.aws","studio.us-west-1.sagemaker.aws","studio.us-west-2.sagemaker.aws","studio.cn-north-1.sagemaker.com.cn","studio.cn-northwest-1.sagemaker.com.cn","*.experiments.sagemaker.aws","analytics-gateway.ap-northeast-1.amazonaws.com","analytics-gateway.ap-northeast-2.amazonaws.com","analytics-gateway.ap-south-1.amazonaws.com","analytics-gateway.ap-southeast-1.amazonaws.com","analytics-gateway.ap-southeast-2.amazonaws.com","analytics-gateway.eu-central-1.amazonaws.com","analytics-gateway.eu-west-1.amazonaws.com","analytics-gateway.us-east-1.amazonaws.com","analytics-gateway.us-east-2.amazonaws.com","analytics-gateway.us-west-2.amazonaws.com","amplifyapp.com","*.awsapprunner.com","webview-assets.aws-cloud9.af-south-1.amazonaws.com","vfs.cloud9.af-south-1.amazonaws.com","webview-assets.cloud9.af-south-1.amazonaws.com","webview-assets.aws-cloud9.ap-east-1.amazonaws.com","vfs.cloud9.ap-east-1.amazonaws.com","webview-assets.cloud9.ap-east-1.amazonaws.com","webview-assets.aws-cloud9.ap-northeast-1.amazonaws.com","vfs.cloud9.ap-northeast-1.amazonaws.com","webview-assets.cloud9.ap-northeast-1.amazonaws.com","webview-assets.aws-cloud9.ap-northeast-2.amazonaws.com","vfs.cloud9.ap-northeast-2.amazonaws.com","webview-assets.cloud9.ap-northeast-2.amazonaws.com","webview-assets.aws-cloud9.ap-northeast-3.amazonaws.com","vfs.cloud9.ap-northeast-3.amazonaws.com","webview-assets.cloud9.ap-northeast-3.amazonaws.com","webview-assets.aws-cloud9.ap-south-1.amazonaws.com","vfs.cloud9.ap-south-1.amazonaws.com","webview-assets.cloud9.ap-south-1.amazonaws.com","webview-assets.aws-cloud9.ap-southeast-1.amazonaws.com","vfs.cloud9.ap-southeast-1.amazonaws.com","webview-assets.cloud9.ap-southeast-1.amazonaws.com","webview-assets.aws-cloud9.ap-southeast-2.amazonaws.com","vfs.cloud9.ap-southeast-2.amazonaws.com","webview-assets.cloud9.ap-southeast-2.amazonaws.com","webview-assets.aws-cloud9.ca-central-1.amazonaws.com","vfs.cloud9.ca-central-1.amazonaws.com","webview-assets.cloud9.ca-central-1.amazonaws.com","webview-assets.aws-cloud9.eu-central-1.amazonaws.com","vfs.cloud9.eu-central-1.amazonaws.com","webview-assets.cloud9.eu-central-1.amazonaws.com","webview-assets.aws-cloud9.eu-north-1.amazonaws.com","vfs.cloud9.eu-north-1.amazonaws.com","webview-assets.cloud9.eu-north-1.amazonaws.com","webview-assets.aws-cloud9.eu-south-1.amazonaws.com","vfs.cloud9.eu-south-1.amazonaws.com","webview-assets.cloud9.eu-south-1.amazonaws.com","webview-assets.aws-cloud9.eu-west-1.amazonaws.com","vfs.cloud9.eu-west-1.amazonaws.com","webview-assets.cloud9.eu-west-1.amazonaws.com","webview-assets.aws-cloud9.eu-west-2.amazonaws.com","vfs.cloud9.eu-west-2.amazonaws.com","webview-assets.cloud9.eu-west-2.amazonaws.com","webview-assets.aws-cloud9.eu-west-3.amazonaws.com","vfs.cloud9.eu-west-3.amazonaws.com","webview-assets.cloud9.eu-west-3.amazonaws.com","webview-assets.aws-cloud9.il-central-1.amazonaws.com","vfs.cloud9.il-central-1.amazonaws.com","webview-assets.aws-cloud9.me-south-1.amazonaws.com","vfs.cloud9.me-south-1.amazonaws.com","webview-assets.cloud9.me-south-1.amazonaws.com","webview-assets.aws-cloud9.sa-east-1.amazonaws.com","vfs.cloud9.sa-east-1.amazonaws.com","webview-assets.cloud9.sa-east-1.amazonaws.com","webview-assets.aws-cloud9.us-east-1.amazonaws.com","vfs.cloud9.us-east-1.amazonaws.com","webview-assets.cloud9.us-east-1.amazonaws.com","webview-assets.aws-cloud9.us-east-2.amazonaws.com","vfs.cloud9.us-east-2.amazonaws.com","webview-assets.cloud9.us-east-2.amazonaws.com","webview-assets.aws-cloud9.us-west-1.amazonaws.com","vfs.cloud9.us-west-1.amazonaws.com","webview-assets.cloud9.us-west-1.amazonaws.com","webview-assets.aws-cloud9.us-west-2.amazonaws.com","vfs.cloud9.us-west-2.amazonaws.com","webview-assets.cloud9.us-west-2.amazonaws.com","awsapps.com","cn-north-1.eb.amazonaws.com.cn","cn-northwest-1.eb.amazonaws.com.cn","elasticbeanstalk.com","af-south-1.elasticbeanstalk.com","ap-east-1.elasticbeanstalk.com","ap-northeast-1.elasticbeanstalk.com","ap-northeast-2.elasticbeanstalk.com","ap-northeast-3.elasticbeanstalk.com","ap-south-1.elasticbeanstalk.com","ap-southeast-1.elasticbeanstalk.com","ap-southeast-2.elasticbeanstalk.com","ap-southeast-3.elasticbeanstalk.com","ca-central-1.elasticbeanstalk.com","eu-central-1.elasticbeanstalk.com","eu-north-1.elasticbeanstalk.com","eu-south-1.elasticbeanstalk.com","eu-west-1.elasticbeanstalk.com","eu-west-2.elasticbeanstalk.com","eu-west-3.elasticbeanstalk.com","il-central-1.elasticbeanstalk.com","me-south-1.elasticbeanstalk.com","sa-east-1.elasticbeanstalk.com","us-east-1.elasticbeanstalk.com","us-east-2.elasticbeanstalk.com","us-gov-east-1.elasticbeanstalk.com","us-gov-west-1.elasticbeanstalk.com","us-west-1.elasticbeanstalk.com","us-west-2.elasticbeanstalk.com","*.elb.amazonaws.com.cn","*.elb.amazonaws.com","awsglobalaccelerator.com","*.private.repost.aws","eero.online","eero-stage.online","apigee.io","panel.dev","siiites.com","appspacehosted.com","appspaceusercontent.com","appudo.net","on-aptible.com","f5.si","arvanedge.ir","user.aseinet.ne.jp","gv.vc","d.gv.vc","user.party.eus","pimienta.org","poivron.org","potager.org","sweetpepper.org","myasustor.com","cdn.prod.atlassian-dev.net","translated.page","myfritz.link","myfritz.net","onavstack.net","*.awdev.ca","*.advisor.ws","ecommerce-shop.pl","b-data.io","balena-devices.com","base.ec","official.ec","buyshop.jp","fashionstore.jp","handcrafted.jp","kawaiishop.jp","supersale.jp","theshop.jp","shopselect.net","base.shop","beagleboard.io","*.beget.app","pages.gay","bnr.la","bitbucket.io","blackbaudcdn.net","of.je","bluebite.io","boomla.net","boutir.com","boxfuse.io","square7.ch","bplaced.com","bplaced.de","square7.de","bplaced.net","square7.net","*.s.brave.io","shop.brendly.hr","shop.brendly.rs","browsersafetymark.io","radio.am","radio.fm","uk0.bigv.io","dh.bytemark.co.uk","vm.bytemark.co.uk","cafjs.com","canva-apps.cn","*.my.canvasite.cn","canva-apps.com","*.my.canva.site","drr.ac","uwu.ai","carrd.co","crd.co","ju.mp","api.gov.uk","cdn77-storage.com","rsc.contentproxy9.cz","r.cdn77.net","cdn77-ssl.net","c.cdn77.org","rsc.cdn77.org","ssl.origin.cdn77-secure.org","za.bz","br.com","cn.com","de.com","eu.com","jpn.com","mex.com","ru.com","sa.com","uk.com","us.com","za.com","com.de","gb.net","hu.net","jp.net","se.net","uk.net","ae.org","com.se","cx.ua","discourse.group","discourse.team","clerk.app","clerkstage.app","*.lcl.dev","*.lclstage.dev","*.stg.dev","*.stgstage.dev","cleverapps.cc","*.services.clever-cloud.com","cleverapps.io","cleverapps.tech","clickrising.net","cloudns.asia","cloudns.be","cloud-ip.biz","cloudns.biz","cloudns.cc","cloudns.ch","cloudns.cl","cloudns.club","dnsabr.com","ip-ddns.com","cloudns.cx","cloudns.eu","cloudns.in","cloudns.info","ddns-ip.net","dns-cloud.net","dns-dynamic.net","cloudns.nz","cloudns.org","ip-dynamic.org","cloudns.ph","cloudns.pro","cloudns.pw","cloudns.us","c66.me","cloud66.ws","cloud66.zone","jdevcloud.com","wpdevcloud.com","cloudaccess.host","freesite.host","cloudaccess.net","*.cloudera.site","cf-ipfs.com","cloudflare-ipfs.com","trycloudflare.com","pages.dev","r2.dev","workers.dev","cloudflare.net","cdn.cloudflare.net","cdn.cloudflareanycast.net","cdn.cloudflarecn.net","cdn.cloudflareglobal.net","cust.cloudscale.ch","objects.lpg.cloudscale.ch","objects.rma.cloudscale.ch","wnext.app","cnpy.gdn","*.otap.co","co.ca","co.com","codeberg.page","csb.app","preview.csb.app","co.nl","co.no","webhosting.be","hosting-cluster.nl","ctfcloud.net","convex.site","ac.ru","edu.ru","gov.ru","int.ru","mil.ru","test.ru","dyn.cosidns.de","dnsupdater.de","dynamisches-dns.de","internet-dns.de","l-o-g-i-n.de","dynamic-dns.info","feste-ip.net","knx-server.net","static-access.net","craft.me","realm.cz","on.crisp.email","*.cryptonomic.net","curv.dev","cfolks.pl","cyon.link","cyon.site","platform0.app","fnwk.site","folionetwork.site","biz.dk","co.dk","firm.dk","reg.dk","store.dk","dyndns.dappnode.io","builtwithdark.com","darklang.io","demo.datadetect.com","instance.datadetect.com","edgestack.me","dattolocal.com","dattorelay.com","dattoweb.com","mydatto.com","dattolocal.net","mydatto.net","ddnss.de","dyn.ddnss.de","dyndns.ddnss.de","dyn-ip24.de","dyndns1.de","home-webserver.de","dyn.home-webserver.de","myhome-server.de","ddnss.org","debian.net","definima.io","definima.net","deno.dev","deno-staging.dev","dedyn.io","deta.app","deta.dev","dfirma.pl","dkonto.pl","you2.pl","ondigitalocean.app","*.digitaloceanspaces.com","us.kg","rss.my.id","diher.solutions","discordsays.com","discordsez.com","jozi.biz","dnshome.de","online.th","shop.th","drayddns.com","shoparena.pl","dreamhosters.com","durumis.com","mydrobo.com","drud.io","drud.us","duckdns.org","dy.fi","tunk.org","dyndns.biz","for-better.biz","for-more.biz","for-some.biz","for-the.biz","selfip.biz","webhop.biz","ftpaccess.cc","game-server.cc","myphotos.cc","scrapping.cc","blogdns.com","cechire.com","dnsalias.com","dnsdojo.com","doesntexist.com","dontexist.com","doomdns.com","dyn-o-saur.com","dynalias.com","dyndns-at-home.com","dyndns-at-work.com","dyndns-blog.com","dyndns-free.com","dyndns-home.com","dyndns-ip.com","dyndns-mail.com","dyndns-office.com","dyndns-pics.com","dyndns-remote.com","dyndns-server.com","dyndns-web.com","dyndns-wiki.com","dyndns-work.com","est-a-la-maison.com","est-a-la-masion.com","est-le-patron.com","est-mon-blogueur.com","from-ak.com","from-al.com","from-ar.com","from-ca.com","from-ct.com","from-dc.com","from-de.com","from-fl.com","from-ga.com","from-hi.com","from-ia.com","from-id.com","from-il.com","from-in.com","from-ks.com","from-ky.com","from-ma.com","from-md.com","from-mi.com","from-mn.com","from-mo.com","from-ms.com","from-mt.com","from-nc.com","from-nd.com","from-ne.com","from-nh.com","from-nj.com","from-nm.com","from-nv.com","from-oh.com","from-ok.com","from-or.com","from-pa.com","from-pr.com","from-ri.com","from-sc.com","from-sd.com","from-tn.com","from-tx.com","from-ut.com","from-va.com","from-vt.com","from-wa.com","from-wi.com","from-wv.com","from-wy.com","getmyip.com","gotdns.com","hobby-site.com","homelinux.com","homeunix.com","iamallama.com","is-a-anarchist.com","is-a-blogger.com","is-a-bookkeeper.com","is-a-bulls-fan.com","is-a-caterer.com","is-a-chef.com","is-a-conservative.com","is-a-cpa.com","is-a-cubicle-slave.com","is-a-democrat.com","is-a-designer.com","is-a-doctor.com","is-a-financialadvisor.com","is-a-geek.com","is-a-green.com","is-a-guru.com","is-a-hard-worker.com","is-a-hunter.com","is-a-landscaper.com","is-a-lawyer.com","is-a-liberal.com","is-a-libertarian.com","is-a-llama.com","is-a-musician.com","is-a-nascarfan.com","is-a-nurse.com","is-a-painter.com","is-a-personaltrainer.com","is-a-photographer.com","is-a-player.com","is-a-republican.com","is-a-rockstar.com","is-a-socialist.com","is-a-student.com","is-a-teacher.com","is-a-techie.com","is-a-therapist.com","is-an-accountant.com","is-an-actor.com","is-an-actress.com","is-an-anarchist.com","is-an-artist.com","is-an-engineer.com","is-an-entertainer.com","is-certified.com","is-gone.com","is-into-anime.com","is-into-cars.com","is-into-cartoons.com","is-into-games.com","is-leet.com","is-not-certified.com","is-slick.com","is-uberleet.com","is-with-theband.com","isa-geek.com","isa-hockeynut.com","issmarterthanyou.com","likes-pie.com","likescandy.com","neat-url.com","saves-the-whales.com","selfip.com","sells-for-less.com","sells-for-u.com","servebbs.com","simple-url.com","space-to-rent.com","teaches-yoga.com","writesthisblog.com","ath.cx","fuettertdasnetz.de","isteingeek.de","istmein.de","lebtimnetz.de","leitungsen.de","traeumtgerade.de","barrel-of-knowledge.info","barrell-of-knowledge.info","dyndns.info","for-our.info","groks-the.info","groks-this.info","here-for-more.info","knowsitall.info","selfip.info","webhop.info","forgot.her.name","forgot.his.name","at-band-camp.net","blogdns.net","broke-it.net","buyshouses.net","dnsalias.net","dnsdojo.net","does-it.net","dontexist.net","dynalias.net","dynathome.net","endofinternet.net","from-az.net","from-co.net","from-la.net","from-ny.net","gets-it.net","ham-radio-op.net","homeftp.net","homeip.net","homelinux.net","homeunix.net","in-the-band.net","is-a-chef.net","is-a-geek.net","isa-geek.net","kicks-ass.net","office-on-the.net","podzone.net","scrapper-site.net","selfip.net","sells-it.net","servebbs.net","serveftp.net","thruhere.net","webhop.net","merseine.nu","mine.nu","shacknet.nu","blogdns.org","blogsite.org","boldlygoingnowhere.org","dnsalias.org","dnsdojo.org","doesntexist.org","dontexist.org","doomdns.org","dvrdns.org","dynalias.org","dyndns.org","go.dyndns.org","home.dyndns.org","endofinternet.org","endoftheinternet.org","from-me.org","game-host.org","gotdns.org","hobby-site.org","homedns.org","homeftp.org","homelinux.org","homeunix.org","is-a-bruinsfan.org","is-a-candidate.org","is-a-celticsfan.org","is-a-chef.org","is-a-geek.org","is-a-knight.org","is-a-linux-user.org","is-a-patsfan.org","is-a-soxfan.org","is-found.org","is-lost.org","is-saved.org","is-very-bad.org","is-very-evil.org","is-very-good.org","is-very-nice.org","is-very-sweet.org","isa-geek.org","kicks-ass.org","misconfused.org","podzone.org","readmyblog.org","selfip.org","sellsyourhome.org","servebbs.org","serveftp.org","servegame.org","stuff-4-sale.org","webhop.org","better-than.tv","dyndns.tv","on-the-web.tv","worse-than.tv","is-by.us","land-4-sale.us","stuff-4-sale.us","dyndns.ws","mypets.ws","ddnsfree.com","ddnsgeek.com","giize.com","gleeze.com","kozow.com","loseyourip.com","ooguy.com","theworkpc.com","casacam.net","dynu.net","accesscam.org","camdvr.org","freeddns.org","mywire.org","webredirect.org","myddns.rocks","dynv6.net","e4.cz","easypanel.app","easypanel.host","*.ewp.live","twmail.cc","twmail.net","twmail.org","mymailer.com.tw","url.tw","at.emf.camp","rt.ht","elementor.cloud","elementor.cool","en-root.fr","mytuleap.com","tuleap-partners.com","encr.app","encoreapi.com","eu.encoway.cloud","eu.org","al.eu.org","asso.eu.org","at.eu.org","au.eu.org","be.eu.org","bg.eu.org","ca.eu.org","cd.eu.org","ch.eu.org","cn.eu.org","cy.eu.org","cz.eu.org","de.eu.org","dk.eu.org","edu.eu.org","ee.eu.org","es.eu.org","fi.eu.org","fr.eu.org","gr.eu.org","hr.eu.org","hu.eu.org","ie.eu.org","il.eu.org","in.eu.org","int.eu.org","is.eu.org","it.eu.org","jp.eu.org","kr.eu.org","lt.eu.org","lu.eu.org","lv.eu.org","me.eu.org","mk.eu.org","mt.eu.org","my.eu.org","net.eu.org","ng.eu.org","nl.eu.org","no.eu.org","nz.eu.org","pl.eu.org","pt.eu.org","ro.eu.org","ru.eu.org","se.eu.org","si.eu.org","sk.eu.org","tr.eu.org","uk.eu.org","us.eu.org","eurodir.ru","eu-1.evennode.com","eu-2.evennode.com","eu-3.evennode.com","eu-4.evennode.com","us-1.evennode.com","us-2.evennode.com","us-3.evennode.com","us-4.evennode.com","relay.evervault.app","relay.evervault.dev","expo.app","staging.expo.app","onfabrica.com","ru.net","adygeya.ru","bashkiria.ru","bir.ru","cbg.ru","com.ru","dagestan.ru","grozny.ru","kalmykia.ru","kustanai.ru","marine.ru","mordovia.ru","msk.ru","mytis.ru","nalchik.ru","nov.ru","pyatigorsk.ru","spb.ru","vladikavkaz.ru","vladimir.ru","abkhazia.su","adygeya.su","aktyubinsk.su","arkhangelsk.su","armenia.su","ashgabad.su","azerbaijan.su","balashov.su","bashkiria.su","bryansk.su","bukhara.su","chimkent.su","dagestan.su","east-kazakhstan.su","exnet.su","georgia.su","grozny.su","ivanovo.su","jambyl.su","kalmykia.su","kaluga.su","karacol.su","karaganda.su","karelia.su","khakassia.su","krasnodar.su","kurgan.su","kustanai.su","lenug.su","mangyshlak.su","mordovia.su","msk.su","murmansk.su","nalchik.su","navoi.su","north-kazakhstan.su","nov.su","obninsk.su","penza.su","pokrovsk.su","sochi.su","spb.su","tashkent.su","termez.su","togliatti.su","troitsk.su","tselinograd.su","tula.su","tuva.su","vladikavkaz.su","vladimir.su","vologda.su","channelsdvr.net","u.channelsdvr.net","edgecompute.app","fastly-edge.com","fastly-terrarium.com","freetls.fastly.net","map.fastly.net","a.prod.fastly.net","global.prod.fastly.net","a.ssl.fastly.net","b.ssl.fastly.net","global.ssl.fastly.net","fastlylb.net","map.fastlylb.net","*.user.fm","fastvps-server.com","fastvps.host","myfast.host","fastvps.site","myfast.space","conn.uk","copro.uk","hosp.uk","fedorainfracloud.org","fedorapeople.org","cloud.fedoraproject.org","app.os.fedoraproject.org","app.os.stg.fedoraproject.org","mydobiss.com","fh-muenster.io","filegear.me","firebaseapp.com","fldrv.com","flutterflow.app","fly.dev","shw.io","edgeapp.net","forgeblocks.com","id.forgerock.io","framer.ai","framer.app","framercanvas.com","framer.media","framer.photos","framer.website","framer.wiki","0e.vc","freebox-os.com","freeboxos.com","fbx-os.fr","fbxos.fr","freebox-os.fr","freeboxos.fr","freedesktop.org","freemyip.com","*.frusky.de","wien.funkfeuer.at","daemon.asia","dix.asia","mydns.bz","0am.jp","0g0.jp","0j0.jp","0t0.jp","mydns.jp","pgw.jp","wjg.jp","keyword-on.net","live-on.net","server-on.net","mydns.tw","mydns.vc","*.futurecms.at","*.ex.futurecms.at","*.in.futurecms.at","futurehosting.at","futuremailing.at","*.ex.ortsinfo.at","*.kunden.ortsinfo.at","*.statics.cloud","aliases121.com","campaign.gov.uk","service.gov.uk","independent-commission.uk","independent-inquest.uk","independent-inquiry.uk","independent-panel.uk","independent-review.uk","public-inquiry.uk","royal-commission.uk","gehirn.ne.jp","usercontent.jp","gentapps.com","gentlentapis.com","lab.ms","cdn-edges.net","localcert.net","localhostcert.net","gsj.bz","githubusercontent.com","githubpreview.dev","github.io","gitlab.io","gitapp.si","gitpage.si","glitch.me","nog.community","co.ro","shop.ro","lolipop.io","angry.jp","babyblue.jp","babymilk.jp","backdrop.jp","bambina.jp","bitter.jp","blush.jp","boo.jp","boy.jp","boyfriend.jp","but.jp","candypop.jp","capoo.jp","catfood.jp","cheap.jp","chicappa.jp","chillout.jp","chips.jp","chowder.jp","chu.jp","ciao.jp","cocotte.jp","coolblog.jp","cranky.jp","cutegirl.jp","daa.jp","deca.jp","deci.jp","digick.jp","egoism.jp","fakefur.jp","fem.jp","flier.jp","floppy.jp","fool.jp","frenchkiss.jp","girlfriend.jp","girly.jp","gloomy.jp","gonna.jp","greater.jp","hacca.jp","heavy.jp","her.jp","hiho.jp","hippy.jp","holy.jp","hungry.jp","icurus.jp","itigo.jp","jellybean.jp","kikirara.jp","kill.jp","kilo.jp","kuron.jp","littlestar.jp","lolipopmc.jp","lolitapunk.jp","lomo.jp","lovepop.jp","lovesick.jp","main.jp","mods.jp","mond.jp","mongolian.jp","moo.jp","namaste.jp","nikita.jp","nobushi.jp","noor.jp","oops.jp","parallel.jp","parasite.jp","pecori.jp","peewee.jp","penne.jp","pepper.jp","perma.jp","pigboat.jp","pinoko.jp","punyu.jp","pupu.jp","pussycat.jp","pya.jp","raindrop.jp","readymade.jp","sadist.jp","schoolbus.jp","secret.jp","staba.jp","stripper.jp","sub.jp","sunnyday.jp","thick.jp","tonkotsu.jp","under.jp","upper.jp","velvet.jp","verse.jp","versus.jp","vivian.jp","watson.jp","weblike.jp","whitesnow.jp","zombie.jp","heteml.net","graphic.design","goip.de","blogspot.ae","blogspot.al","blogspot.am","*.hosted.app","*.run.app","web.app","blogspot.com.ar","blogspot.co.at","blogspot.com.au","blogspot.ba","blogspot.be","blogspot.bg","blogspot.bj","blogspot.com.br","blogspot.com.by","blogspot.ca","blogspot.cf","blogspot.ch","blogspot.cl","blogspot.com.co","*.0emm.com","appspot.com","*.r.appspot.com","blogspot.com","codespot.com","googleapis.com","googlecode.com","pagespeedmobilizer.com","withgoogle.com","withyoutube.com","blogspot.cv","blogspot.com.cy","blogspot.cz","blogspot.de","*.gateway.dev","blogspot.dk","blogspot.com.ee","blogspot.com.eg","blogspot.com.es","blogspot.fi","blogspot.fr","cloud.goog","translate.goog","*.usercontent.goog","blogspot.gr","blogspot.hk","blogspot.hr","blogspot.hu","blogspot.co.id","blogspot.ie","blogspot.co.il","blogspot.in","blogspot.is","blogspot.it","blogspot.jp","blogspot.co.ke","blogspot.kr","blogspot.li","blogspot.lt","blogspot.lu","blogspot.md","blogspot.mk","blogspot.com.mt","blogspot.mx","blogspot.my","cloudfunctions.net","blogspot.com.ng","blogspot.nl","blogspot.no","blogspot.co.nz","blogspot.pe","blogspot.pt","blogspot.qa","blogspot.re","blogspot.ro","blogspot.rs","blogspot.ru","blogspot.se","blogspot.sg","blogspot.si","blogspot.sk","blogspot.sn","blogspot.td","blogspot.com.tr","blogspot.tw","blogspot.ug","blogspot.co.uk","blogspot.com.uy","blogspot.vn","blogspot.co.za","goupile.fr","pymnt.uk","cloudapps.digital","london.cloudapps.digital","gov.nl","grafana-dev.net","grayjayleagues.com","günstigbestellen.de","günstigliefern.de","fin.ci","free.hr","caa.li","ua.rs","conf.se","häkkinen.fi","hrsn.dev","hashbang.sh","hasura.app","hasura-app.io","hatenablog.com","hatenadiary.com","hateblo.jp","hatenablog.jp","hatenadiary.jp","hatenadiary.org","pages.it.hs-heilbronn.de","pages-research.it.hs-heilbronn.de","heiyu.space","helioho.st","heliohost.us","hepforge.org","herokuapp.com","herokussl.com","heyflow.page","heyflow.site","ravendb.cloud","ravendb.community","development.run","ravendb.run","homesklep.pl","*.kin.one","*.id.pub","*.kin.pub","secaas.hk","hoplix.shop","orx.biz","biz.gl","biz.ng","co.biz.ng","dl.biz.ng","go.biz.ng","lg.biz.ng","on.biz.ng","col.ng","firm.ng","gen.ng","ltd.ng","ngo.ng","plc.ng","ie.ua","hostyhosting.io","hf.space","static.hf.space","hypernode.io","iobb.net","co.cz","*.moonscale.io","moonscale.net","gr.com","iki.fi","ibxos.it","iliadboxos.it","smushcdn.com","wphostedmail.com","wpmucdn.com","tempurl.host","wpmudev.host","dyn-berlin.de","in-berlin.de","in-brb.de","in-butter.de","in-dsl.de","in-vpn.de","in-dsl.net","in-vpn.net","in-dsl.org","in-vpn.org","biz.at","info.at","info.cx","ac.leg.br","al.leg.br","am.leg.br","ap.leg.br","ba.leg.br","ce.leg.br","df.leg.br","es.leg.br","go.leg.br","ma.leg.br","mg.leg.br","ms.leg.br","mt.leg.br","pa.leg.br","pb.leg.br","pe.leg.br","pi.leg.br","pr.leg.br","rj.leg.br","rn.leg.br","ro.leg.br","rr.leg.br","rs.leg.br","sc.leg.br","se.leg.br","sp.leg.br","to.leg.br","pixolino.com","na4u.ru","apps-1and1.com","live-website.com","apps-1and1.net","websitebuilder.online","app-ionos.space","iopsys.se","*.dweb.link","ipifony.net","ir.md","is-a-good.dev","is-a.dev","iservschule.de","mein-iserv.de","schulplattform.de","schulserver.de","test-iserv.de","iserv.dev","mel.cloudlets.com.au","cloud.interhostsolutions.be","alp1.ae.flow.ch","appengine.flow.ch","es-1.axarnet.cloud","diadem.cloud","vip.jelastic.cloud","jele.cloud","it1.eur.aruba.jenv-aruba.cloud","it1.jenv-aruba.cloud","keliweb.cloud","cs.keliweb.cloud","oxa.cloud","tn.oxa.cloud","uk.oxa.cloud","primetel.cloud","uk.primetel.cloud","ca.reclaim.cloud","uk.reclaim.cloud","us.reclaim.cloud","ch.trendhosting.cloud","de.trendhosting.cloud","jele.club","dopaas.com","paas.hosted-by-previder.com","rag-cloud.hosteur.com","rag-cloud-ch.hosteur.com","jcloud.ik-server.com","jcloud-ver-jpc.ik-server.com","demo.jelastic.com","paas.massivegrid.com","jed.wafaicloud.com","ryd.wafaicloud.com","j.scaleforce.com.cy","jelastic.dogado.eu","fi.cloudplatform.fi","demo.datacenter.fi","paas.datacenter.fi","jele.host","mircloud.host","paas.beebyte.io","sekd1.beebyteapp.io","jele.io","jc.neen.it","jcloud.kz","cloudjiffy.net","fra1-de.cloudjiffy.net","west1-us.cloudjiffy.net","jls-sto1.elastx.net","jls-sto2.elastx.net","jls-sto3.elastx.net","fr-1.paas.massivegrid.net","lon-1.paas.massivegrid.net","lon-2.paas.massivegrid.net","ny-1.paas.massivegrid.net","ny-2.paas.massivegrid.net","sg-1.paas.massivegrid.net","jelastic.saveincloud.net","nordeste-idc.saveincloud.net","j.scaleforce.net","sdscloud.pl","unicloud.pl","mircloud.ru","enscaled.sg","jele.site","jelastic.team","orangecloud.tn","j.layershift.co.uk","phx.enscaled.us","mircloud.us","myjino.ru","*.hosting.myjino.ru","*.landing.myjino.ru","*.spectrum.myjino.ru","*.vps.myjino.ru","jotelulu.cloud","webadorsite.com","jouwweb.site","*.cns.joyent.com","*.triton.zone","js.org","kaas.gg","khplay.nl","kapsi.fi","ezproxy.kuleuven.be","kuleuven.cloud","keymachine.de","kinghost.net","uni5.net","knightpoint.systems","koobin.events","webthings.io","krellian.net","oya.to","git-repos.de","lcube-server.de","svn-repos.de","leadpages.co","lpages.co","lpusercontent.com","lelux.site","libp2p.direct","runcontainers.dev","co.business","co.education","co.events","co.financial","co.network","co.place","co.technology","linkyard-cloud.ch","linkyard.cloud","members.linode.com","*.nodebalancer.linode.com","*.linodeobjects.com","ip.linodeusercontent.com","we.bs","filegear-sg.me","ggff.net","*.user.localcert.dev","lodz.pl","pabianice.pl","plock.pl","sieradz.pl","skierniewice.pl","zgierz.pl","loginline.app","loginline.dev","loginline.io","loginline.services","loginline.site","lohmus.me","servers.run","krasnik.pl","leczna.pl","lubartow.pl","lublin.pl","poniatowa.pl","swidnik.pl","glug.org.uk","lug.org.uk","lugs.org.uk","barsy.bg","barsy.club","barsycenter.com","barsyonline.com","barsy.de","barsy.dev","barsy.eu","barsy.gr","barsy.in","barsy.info","barsy.io","barsy.me","barsy.menu","barsyonline.menu","barsy.mobi","barsy.net","barsy.online","barsy.org","barsy.pro","barsy.pub","barsy.ro","barsy.rs","barsy.shop","barsyonline.shop","barsy.site","barsy.store","barsy.support","barsy.uk","barsy.co.uk","barsyonline.co.uk","*.magentosite.cloud","hb.cldmail.ru","matlab.cloud","modelscape.com","mwcloudnonprod.com","polyspace.com","mayfirst.info","mayfirst.org","mazeplay.com","mcdir.me","mcdir.ru","vps.mcdir.ru","mcpre.ru","mediatech.by","mediatech.dev","hra.health","medusajs.app","miniserver.com","memset.net","messerli.app","atmeta.com","apps.fbsbx.com","*.cloud.metacentrum.cz","custom.metacentrum.cz","flt.cloud.muni.cz","usr.cloud.muni.cz","meteorapp.com","eu.meteorapp.com","co.pl","*.azurecontainer.io","azure-api.net","azure-mobile.net","azureedge.net","azurefd.net","azurestaticapps.net","1.azurestaticapps.net","2.azurestaticapps.net","3.azurestaticapps.net","4.azurestaticapps.net","5.azurestaticapps.net","6.azurestaticapps.net","7.azurestaticapps.net","centralus.azurestaticapps.net","eastasia.azurestaticapps.net","eastus2.azurestaticapps.net","westeurope.azurestaticapps.net","westus2.azurestaticapps.net","azurewebsites.net","cloudapp.net","trafficmanager.net","blob.core.windows.net","servicebus.windows.net","routingthecloud.com","sn.mynetname.net","routingthecloud.net","routingthecloud.org","csx.cc","mydbserver.com","webspaceconfig.de","mittwald.info","mittwaldserver.info","typo3server.info","project.space","modx.dev","bmoattachments.org","net.ru","org.ru","pp.ru","hostedpi.com","caracal.mythic-beasts.com","customer.mythic-beasts.com","fentiger.mythic-beasts.com","lynx.mythic-beasts.com","ocelot.mythic-beasts.com","oncilla.mythic-beasts.com","onza.mythic-beasts.com","sphinx.mythic-beasts.com","vs.mythic-beasts.com","x.mythic-beasts.com","yali.mythic-beasts.com","cust.retrosnub.co.uk","ui.nabu.casa","cloud.nospamproxy.com","netfy.app","netlify.app","4u.com","nfshost.com","ipfs.nftstorage.link","ngo.us","ngrok.app","ngrok-free.app","ngrok.dev","ngrok-free.dev","ngrok.io","ap.ngrok.io","au.ngrok.io","eu.ngrok.io","in.ngrok.io","jp.ngrok.io","sa.ngrok.io","us.ngrok.io","ngrok.pizza","ngrok.pro","torun.pl","nh-serv.co.uk","nimsite.uk","mmafan.biz","myftp.biz","no-ip.biz","no-ip.ca","fantasyleague.cc","gotdns.ch","3utilities.com","blogsyte.com","ciscofreak.com","damnserver.com","ddnsking.com","ditchyourip.com","dnsiskinky.com","dynns.com","geekgalaxy.com","health-carereform.com","homesecuritymac.com","homesecuritypc.com","myactivedirectory.com","mysecuritycamera.com","myvnc.com","net-freaks.com","onthewifi.com","point2this.com","quicksytes.com","securitytactics.com","servebeer.com","servecounterstrike.com","serveexchange.com","serveftp.com","servegame.com","servehalflife.com","servehttp.com","servehumour.com","serveirc.com","servemp3.com","servep2p.com","servepics.com","servequake.com","servesarcasm.com","stufftoread.com","unusualperson.com","workisboring.com","dvrcam.info","ilovecollege.info","no-ip.info","brasilia.me","ddns.me","dnsfor.me","hopto.me","loginto.me","noip.me","webhop.me","bounceme.net","ddns.net","eating-organic.net","mydissent.net","myeffect.net","mymediapc.net","mypsx.net","mysecuritycamera.net","nhlfan.net","no-ip.net","pgafan.net","privatizehealthinsurance.net","redirectme.net","serveblog.net","serveminecraft.net","sytes.net","cable-modem.org","collegefan.org","couchpotatofries.org","hopto.org","mlbfan.org","myftp.org","mysecuritycamera.org","nflfan.org","no-ip.org","read-books.org","ufcfan.org","zapto.org","no-ip.co.uk","golffan.us","noip.us","pointto.us","stage.nodeart.io","*.developer.app","noop.app","*.northflank.app","*.build.run","*.code.run","*.database.run","*.migration.run","noticeable.news","notion.site","dnsking.ch","mypi.co","n4t.co","001www.com","myiphost.com","forumz.info","soundcast.me","tcp4.me","dnsup.net","hicam.net","now-dns.net","ownip.net","vpndns.net","dynserv.org","now-dns.org","x443.pw","now-dns.top","ntdll.top","freeddns.us","nsupdate.info","nerdpol.ovh","nyc.mn","prvcy.page","obl.ong","observablehq.cloud","static.observableusercontent.com","omg.lol","cloudycluster.net","omniwe.site","123webseite.at","123website.be","simplesite.com.br","123website.ch","simplesite.com","123webseite.de","123hjemmeside.dk","123miweb.es","123kotisivu.fi","123siteweb.fr","simplesite.gr","123homepage.it","123website.lu","123website.nl","123hjemmeside.no","service.one","simplesite.pl","123paginaweb.pt","123minsida.se","is-a-fullstack.dev","is-cool.dev","is-not-a.dev","localplayer.dev","is-local.org","opensocial.site","opencraft.hosting","16-b.it","32-b.it","64-b.it","orsites.com","operaunite.com","*.customer-oci.com","*.oci.customer-oci.com","*.ocp.customer-oci.com","*.ocs.customer-oci.com","*.oraclecloudapps.com","*.oraclegovcloudapps.com","*.oraclegovcloudapps.uk","tech.orange","can.re","authgear-staging.com","authgearapps.com","skygearapp.com","outsystemscloud.com","*.hosting.ovh.net","*.webpaas.ovh.net","ownprovider.com","own.pm","*.owo.codes","ox.rs","oy.lc","pgfog.com","pagexl.com","gotpantheon.com","pantheonsite.io","*.paywhirl.com","*.xmit.co","xmit.dev","madethis.site","srv.us","gh.srv.us","gl.srv.us","lk3.ru","mypep.link","perspecta.cloud","on-web.fr","*.upsun.app","upsunapp.com","ent.platform.sh","eu.platform.sh","us.platform.sh","*.platformsh.site","*.tst.site","platter-app.com","platter-app.dev","platterp.us","pley.games","onporter.run","co.bn","postman-echo.com","pstmn.io","mock.pstmn.io","httpbin.org","prequalifyme.today","xen.prgmr.com","priv.at","protonet.io","chirurgiens-dentistes-en-france.fr","byen.site","pubtls.org","pythonanywhere.com","eu.pythonanywhere.com","qa2.com","qcx.io","*.sys.qcx.io","myqnapcloud.cn","alpha-myqnapcloud.com","dev-myqnapcloud.com","mycloudnas.com","mynascloud.com","myqnapcloud.com","qoto.io","qualifioapp.com","ladesk.com","qbuser.com","*.quipelements.com","vapor.cloud","vaporcloud.io","rackmaze.com","rackmaze.net","cloudsite.builders","myradweb.net","servername.us","web.in","in.net","myrdbx.io","site.rb-hosting.io","*.on-rancher.cloud","*.on-k3s.io","*.on-rio.io","ravpage.co.il","readthedocs-hosted.com","readthedocs.io","rhcloud.com","instances.spawn.cc","onrender.com","app.render.com","replit.app","id.replit.app","firewalledreplit.co","id.firewalledreplit.co","repl.co","id.repl.co","replit.dev","archer.replit.dev","bones.replit.dev","canary.replit.dev","global.replit.dev","hacker.replit.dev","id.replit.dev","janeway.replit.dev","kim.replit.dev","kira.replit.dev","kirk.replit.dev","odo.replit.dev","paris.replit.dev","picard.replit.dev","pike.replit.dev","prerelease.replit.dev","reed.replit.dev","riker.replit.dev","sisko.replit.dev","spock.replit.dev","staging.replit.dev","sulu.replit.dev","tarpit.replit.dev","teams.replit.dev","tucker.replit.dev","wesley.replit.dev","worf.replit.dev","repl.run","resindevice.io","devices.resinstaging.io","hzc.io","adimo.co.uk","itcouldbewor.se","aus.basketball","nz.basketball","git-pages.rit.edu","rocky.page","rub.de","ruhr-uni-bochum.de","io.noc.ruhr-uni-bochum.de","биз.рус","ком.рус","крым.рус","мир.рус","мск.рус","орг.рус","самара.рус","сочи.рус","спб.рус","я.рус","ras.ru","nyat.app","180r.com","dojin.com","sakuratan.com","sakuraweb.com","x0.com","2-d.jp","bona.jp","crap.jp","daynight.jp","eek.jp","flop.jp","halfmoon.jp","jeez.jp","matrix.jp","mimoza.jp","ivory.ne.jp","mail-box.ne.jp","mints.ne.jp","mokuren.ne.jp","opal.ne.jp","sakura.ne.jp","sumomo.ne.jp","topaz.ne.jp","netgamers.jp","nyanta.jp","o0o0.jp","rdy.jp","rgr.jp","rulez.jp","s3.isk01.sakurastorage.jp","s3.isk02.sakurastorage.jp","saloon.jp","sblo.jp","skr.jp","tank.jp","uh-oh.jp","undo.jp","rs.webaccel.jp","user.webaccel.jp","websozai.jp","xii.jp","squares.net","jpn.org","kirara.st","x0.to","from.tv","sakura.tv","*.builder.code.com","*.dev-builder.code.com","*.stg-builder.code.com","*.001.test.code-builder-stg.platform.salesforce.com","*.d.crm.dev","*.w.crm.dev","*.wa.crm.dev","*.wb.crm.dev","*.wc.crm.dev","*.wd.crm.dev","*.we.crm.dev","*.wf.crm.dev","sandcats.io","logoip.com","logoip.de","fr-par-1.baremetal.scw.cloud","fr-par-2.baremetal.scw.cloud","nl-ams-1.baremetal.scw.cloud","cockpit.fr-par.scw.cloud","fnc.fr-par.scw.cloud","functions.fnc.fr-par.scw.cloud","k8s.fr-par.scw.cloud","nodes.k8s.fr-par.scw.cloud","s3.fr-par.scw.cloud","s3-website.fr-par.scw.cloud","whm.fr-par.scw.cloud","priv.instances.scw.cloud","pub.instances.scw.cloud","k8s.scw.cloud","cockpit.nl-ams.scw.cloud","k8s.nl-ams.scw.cloud","nodes.k8s.nl-ams.scw.cloud","s3.nl-ams.scw.cloud","s3-website.nl-ams.scw.cloud","whm.nl-ams.scw.cloud","cockpit.pl-waw.scw.cloud","k8s.pl-waw.scw.cloud","nodes.k8s.pl-waw.scw.cloud","s3.pl-waw.scw.cloud","s3-website.pl-waw.scw.cloud","scalebook.scw.cloud","smartlabeling.scw.cloud","dedibox.fr","schokokeks.net","gov.scot","service.gov.scot","scrysec.com","client.scrypted.io","firewall-gateway.com","firewall-gateway.de","my-gateway.de","my-router.de","spdns.de","spdns.eu","firewall-gateway.net","my-firewall.org","myfirewall.org","spdns.org","seidat.net","sellfy.store","minisite.ms","senseering.net","servebolt.cloud","biz.ua","co.ua","pp.ua","as.sh.cn","sheezy.games","shiftedit.io","myshopblocks.com","myshopify.com","shopitsite.com","shopware.shop","shopware.store","mo-siemens.io","1kapp.com","appchizi.com","applinzi.com","sinaapp.com","vipsinaapp.com","siteleaf.net","small-web.org","aeroport.fr","avocat.fr","chambagri.fr","chirurgiens-dentistes.fr","experts-comptables.fr","medecin.fr","notaires.fr","pharmacien.fr","port.fr","veterinaire.fr","vp4.me","*.snowflake.app","*.privatelink.snowflake.app","streamlit.app","streamlitapp.com","try-snowplow.com","mafelo.net","playstation-cloud.com","srht.site","apps.lair.io","*.stolos.io","spacekit.io","ind.mom","customer.speedpartner.de","myspreadshop.at","myspreadshop.com.au","myspreadshop.be","myspreadshop.ca","myspreadshop.ch","myspreadshop.com","myspreadshop.de","myspreadshop.dk","myspreadshop.es","myspreadshop.fi","myspreadshop.fr","myspreadshop.ie","myspreadshop.it","myspreadshop.net","myspreadshop.nl","myspreadshop.no","myspreadshop.pl","myspreadshop.se","myspreadshop.co.uk","w-corp-staticblitz.com","w-credentialless-staticblitz.com","w-staticblitz.com","stackhero-network.com","runs.onstackit.cloud","stackit.gg","stackit.rocks","stackit.run","stackit.zone","musician.io","novecore.site","api.stdlib.com","feedback.ac","forms.ac","assessments.cx","calculators.cx","funnels.cx","paynow.cx","quizzes.cx","researched.cx","tests.cx","surveys.so","storebase.store","storipress.app","storj.farm","strapiapp.com","media.strapiapp.com","vps-host.net","atl.jelastic.vps-host.net","njs.jelastic.vps-host.net","ric.jelastic.vps-host.net","streak-link.com","streaklinks.com","streakusercontent.com","soc.srcf.net","user.srcf.net","utwente.io","temp-dns.com","supabase.co","supabase.in","supabase.net","syncloud.it","dscloud.biz","direct.quickconnect.cn","dsmynas.com","familyds.com","diskstation.me","dscloud.me","i234.me","myds.me","synology.me","dscloud.mobi","dsmynas.net","familyds.net","dsmynas.org","familyds.org","direct.quickconnect.to","vpnplus.to","mytabit.com","mytabit.co.il","tabitorder.co.il","taifun-dns.de","ts.net","*.c.ts.net","gda.pl","gdansk.pl","gdynia.pl","med.pl","sopot.pl","taveusercontent.com","p.tawk.email","p.tawkto.email","site.tb-hosting.com","edugit.io","s3.teckids.org","telebit.app","telebit.io","*.telebit.xyz","*.firenet.ch","*.svc.firenet.ch","reservd.com","thingdustdata.com","cust.dev.thingdust.io","reservd.dev.thingdust.io","cust.disrec.thingdust.io","reservd.disrec.thingdust.io","cust.prod.thingdust.io","cust.testing.thingdust.io","reservd.testing.thingdust.io","tickets.io","arvo.network","azimuth.network","tlon.network","torproject.net","pages.torproject.net","townnews-staging.com","12hp.at","2ix.at","4lima.at","lima-city.at","12hp.ch","2ix.ch","4lima.ch","lima-city.ch","trafficplex.cloud","de.cool","12hp.de","2ix.de","4lima.de","lima-city.de","1337.pictures","clan.rip","lima-city.rocks","webspace.rocks","lima.zone","*.transurl.be","*.transurl.eu","site.transip.me","*.transurl.nl","tuxfamily.org","dd-dns.de","dray-dns.de","draydns.de","dyn-vpn.de","dynvpn.de","mein-vigor.de","my-vigor.de","my-wan.de","syno-ds.de","synology-diskstation.de","synology-ds.de","diskstation.eu","diskstation.org","typedream.app","pro.typeform.com","*.uberspace.de","uber.space","hk.com","inc.hk","ltd.hk","hk.org","it.com","unison-services.cloud","virtual-user.de","virtualuser.de","name.pm","sch.tf","biz.wf","sch.wf","org.yt","rs.ba","bielsko.pl","upli.io","urown.cloud","dnsupdate.info","us.org","v.ua","express.val.run","web.val.run","vercel.app","v0.build","vercel.dev","vusercontent.net","now.sh","2038.io","router.management","v-info.info","voorloper.cloud","*.vultrobjects.com","wafflecell.com","webflow.io","webflowtest.io","*.webhare.dev","bookonline.app","hotelwithflight.com","reserve-online.com","reserve-online.net","cprapid.com","pleskns.com","wp2.host","pdns.page","plesk.page","wpsquared.site","*.wadl.top","remotewd.com","box.ca","pages.wiardweb.com","toolforge.org","wmcloud.org","wmflabs.org","wdh.app","panel.gg","daemon.panel.gg","wixsite.com","wixstudio.com","editorx.io","wixstudio.io","wix.run","messwithdns.com","woltlab-demo.com","myforum.community","community-pro.de","diskussionsbereich.de","community-pro.net","meinforum.net","affinitylottery.org.uk","raffleentry.org.uk","weeklylottery.org.uk","wpenginepowered.com","js.wpenginepowered.com","half.host","xnbay.com","u2.xnbay.com","u2-local.xnbay.com","cistron.nl","demon.nl","xs4all.space","yandexcloud.net","storage.yandexcloud.net","website.yandexcloud.net","official.academy","yolasite.com","yombo.me","ynh.fr","nohost.me","noho.st","za.net","za.org","zap.cloud","zeabur.app","bss.design","basicserver.io","virtualserver.io","enterprisecloud.nu"],Z=Y.reduce((e,s)=>{const c=s.replace(/^(\*\.|\!)/,""),o=A.toASCII(c),t=s.charAt(0);if(e.has(o))throw new Error(`Multiple rules found for ${s} (${o})`);return e.set(o,{rule:s,suffix:c,punySuffix:o,wildcard:t==="*",exception:t==="!"}),e},new Map),aa=e=>{const c=A.toASCII(e).split(".");for(let o=0;o<c.length;o++){const t=c.slice(o).join("."),d=Z.get(t);if(d)return d}return null},H={DOMAIN_TOO_SHORT:"Domain name too short.",DOMAIN_TOO_LONG:"Domain name too long. It should be no more than 255 chars.",LABEL_STARTS_WITH_DASH:"Domain name label can not start with a dash.",LABEL_ENDS_WITH_DASH:"Domain name label can not end with a dash.",LABEL_TOO_LONG:"Domain name label should be at most 63 chars long.",LABEL_TOO_SHORT:"Domain name label should be at least 1 character long.",LABEL_INVALID_CHARS:"Domain name label can only contain alphanumeric characters or dashes."},oa=e=>{const s=A.toASCII(e);if(s.length<1)return "DOMAIN_TOO_SHORT";if(s.length>255)return "DOMAIN_TOO_LONG";const c=s.split(".");let o;for(let t=0;t<c.length;++t){if(o=c[t],!o.length)return "LABEL_TOO_SHORT";if(o.length>63)return "LABEL_TOO_LONG";if(o.charAt(0)==="-")return "LABEL_STARTS_WITH_DASH";if(o.charAt(o.length-1)==="-")return "LABEL_ENDS_WITH_DASH";if(!/^[a-z0-9\-_]+$/.test(o))return "LABEL_INVALID_CHARS"}},_=e=>{if(typeof e!="string")throw new TypeError("Domain name must be a string.");let s=e.slice(0).toLowerCase();s.charAt(s.length-1)==="."&&(s=s.slice(0,s.length-1));const c=oa(s);if(c)return {input:e,error:{message:H[c],code:c}};const o={input:e,tld:null,sld:null,domain:null,subdomain:null,listed:false},t=s.split(".");if(t[t.length-1]==="local")return o;const d=()=>(/xn--/.test(s)&&(o.domain&&(o.domain=A.toASCII(o.domain)),o.subdomain&&(o.subdomain=A.toASCII(o.subdomain))),o),z=aa(s);if(!z)return t.length<2?o:(o.tld=t.pop(),o.sld=t.pop(),o.domain=[o.sld,o.tld].join("."),t.length&&(o.subdomain=t.pop()),d());o.listed=true;const y=z.suffix.split("."),g=t.slice(0,t.length-y.length);return z.exception&&g.push(y.shift()),o.tld=y.join("."),!g.length||(z.wildcard&&(y.unshift(g.pop()),o.tld=y.join(".")),!g.length)||(o.sld=g.pop(),o.domain=[o.sld,o.tld].join("."),g.length&&(o.subdomain=g.join("."))),d()},N=e=>e&&_(e).domain||null,R=e=>{const s=_(e);return !!(s.domain&&s.listed)},sa={parse:_,get:N,isValid:R};exports.default=sa;exports.errorCodes=H;exports.get=N;exports.isValid=R;exports.parse=_; 
-    	} (psl));
-    	return psl;
-    }
-
-    /*!
-     * Copyright (c) 2018, Salesforce.com, Inc.
-     * All rights reserved.
-     *
-     * Redistribution and use in source and binary forms, with or without
-     * modification, are permitted provided that the following conditions are met:
-     *
-     * 1. Redistributions of source code must retain the above copyright notice,
-     * this list of conditions and the following disclaimer.
-     *
-     * 2. Redistributions in binary form must reproduce the above copyright notice,
-     * this list of conditions and the following disclaimer in the documentation
-     * and/or other materials provided with the distribution.
-     *
-     * 3. Neither the name of Salesforce.com nor the names of its contributors may
-     * be used to endorse or promote products derived from this software without
-     * specific prior written permission.
-     *
-     * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-     * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-     * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-     * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-     * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-     * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-     * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-     * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-     * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-     * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-     * POSSIBILITY OF SUCH DAMAGE.
-     */
-
-    var hasRequiredPubsuffixPsl;
-
-    function requirePubsuffixPsl () {
-    	if (hasRequiredPubsuffixPsl) return pubsuffixPsl;
-    	hasRequiredPubsuffixPsl = 1;
-    	const psl = requirePsl();
-
-    	// RFC 6761
-    	const SPECIAL_USE_DOMAINS = [
-    	  "local",
-    	  "example",
-    	  "invalid",
-    	  "localhost",
-    	  "test"
-    	];
-
-    	const SPECIAL_TREATMENT_DOMAINS = ["localhost", "invalid"];
-
-    	function getPublicSuffix(domain, options = {}) {
-    	  const domainParts = domain.split(".");
-    	  const topLevelDomain = domainParts[domainParts.length - 1];
-    	  const allowSpecialUseDomain = !!options.allowSpecialUseDomain;
-    	  const ignoreError = !!options.ignoreError;
-
-    	  if (allowSpecialUseDomain && SPECIAL_USE_DOMAINS.includes(topLevelDomain)) {
-    	    if (domainParts.length > 1) {
-    	      const secondLevelDomain = domainParts[domainParts.length - 2];
-    	      // In aforementioned example, the eTLD/pubSuf will be apple.localhost
-    	      return `${secondLevelDomain}.${topLevelDomain}`;
-    	    } else if (SPECIAL_TREATMENT_DOMAINS.includes(topLevelDomain)) {
-    	      // For a single word special use domain, e.g. 'localhost' or 'invalid', per RFC 6761,
-    	      // "Application software MAY recognize {localhost/invalid} names as special, or
-    	      // MAY pass them to name resolution APIs as they would for other domain names."
-    	      return `${topLevelDomain}`;
-    	    }
-    	  }
-
-    	  if (!ignoreError && SPECIAL_USE_DOMAINS.includes(topLevelDomain)) {
-    	    throw new Error(
-    	      `Cookie has domain set to the public suffix "${topLevelDomain}" which is a special use domain. To allow this, configure your CookieJar with {allowSpecialUseDomain:true, rejectPublicSuffixes: false}.`
-    	    );
-    	  }
-
-    	  return psl.get(domain);
-    	}
-
-    	pubsuffixPsl.getPublicSuffix = getPublicSuffix;
-    	return pubsuffixPsl;
-    }
-
-    var store = {};
-
-    /*!
-     * Copyright (c) 2015, Salesforce.com, Inc.
-     * All rights reserved.
-     *
-     * Redistribution and use in source and binary forms, with or without
-     * modification, are permitted provided that the following conditions are met:
-     *
-     * 1. Redistributions of source code must retain the above copyright notice,
-     * this list of conditions and the following disclaimer.
-     *
-     * 2. Redistributions in binary form must reproduce the above copyright notice,
-     * this list of conditions and the following disclaimer in the documentation
-     * and/or other materials provided with the distribution.
-     *
-     * 3. Neither the name of Salesforce.com nor the names of its contributors may
-     * be used to endorse or promote products derived from this software without
-     * specific prior written permission.
-     *
-     * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-     * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-     * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-     * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-     * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-     * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-     * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-     * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-     * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-     * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-     * POSSIBILITY OF SUCH DAMAGE.
-     */
-
-    var hasRequiredStore;
-
-    function requireStore () {
-    	if (hasRequiredStore) return store;
-    	hasRequiredStore = 1;
-    	/*jshint unused:false */
-
-    	class Store {
-    	  constructor() {
-    	    this.synchronous = false;
-    	  }
-
-    	  findCookie(domain, path, key, cb) {
-    	    throw new Error("findCookie is not implemented");
-    	  }
-
-    	  findCookies(domain, path, allowSpecialUseDomain, cb) {
-    	    throw new Error("findCookies is not implemented");
-    	  }
-
-    	  putCookie(cookie, cb) {
-    	    throw new Error("putCookie is not implemented");
-    	  }
-
-    	  updateCookie(oldCookie, newCookie, cb) {
-    	    // recommended default implementation:
-    	    // return this.putCookie(newCookie, cb);
-    	    throw new Error("updateCookie is not implemented");
-    	  }
-
-    	  removeCookie(domain, path, key, cb) {
-    	    throw new Error("removeCookie is not implemented");
-    	  }
-
-    	  removeCookies(domain, path, cb) {
-    	    throw new Error("removeCookies is not implemented");
-    	  }
-
-    	  removeAllCookies(cb) {
-    	    throw new Error("removeAllCookies is not implemented");
-    	  }
-
-    	  getAllCookies(cb) {
-    	    throw new Error(
-    	      "getAllCookies is not implemented (therefore jar cannot be serialized)"
-    	    );
-    	  }
-    	}
-
-    	store.Store = Store;
-    	return store;
-    }
-
-    var memstore = {};
-
-    var universalify = {};
-
-    var hasRequiredUniversalify;
-
-    function requireUniversalify () {
-    	if (hasRequiredUniversalify) return universalify;
-    	hasRequiredUniversalify = 1;
-
-    	universalify.fromCallback = function (fn) {
-    	  return Object.defineProperty(function () {
-    	    if (typeof arguments[arguments.length - 1] === 'function') fn.apply(this, arguments);
-    	    else {
-    	      return new Promise((resolve, reject) => {
-    	        arguments[arguments.length] = (err, res) => {
-    	          if (err) return reject(err)
-    	          resolve(res);
-    	        };
-    	        arguments.length++;
-    	        fn.apply(this, arguments);
-    	      })
-    	    }
-    	  }, 'name', { value: fn.name })
-    	};
-
-    	universalify.fromPromise = function (fn) {
-    	  return Object.defineProperty(function () {
-    	    const cb = arguments[arguments.length - 1];
-    	    if (typeof cb !== 'function') return fn.apply(this, arguments)
-    	    else {
-    	      delete arguments[arguments.length - 1];
-    	      arguments.length--;
-    	      fn.apply(this, arguments).then(r => cb(null, r), cb);
-    	    }
-    	  }, 'name', { value: fn.name })
-    	};
-    	return universalify;
-    }
-
-    var permuteDomain = {};
-
-    /*!
-     * Copyright (c) 2015, Salesforce.com, Inc.
-     * All rights reserved.
-     *
-     * Redistribution and use in source and binary forms, with or without
-     * modification, are permitted provided that the following conditions are met:
-     *
-     * 1. Redistributions of source code must retain the above copyright notice,
-     * this list of conditions and the following disclaimer.
-     *
-     * 2. Redistributions in binary form must reproduce the above copyright notice,
-     * this list of conditions and the following disclaimer in the documentation
-     * and/or other materials provided with the distribution.
-     *
-     * 3. Neither the name of Salesforce.com nor the names of its contributors may
-     * be used to endorse or promote products derived from this software without
-     * specific prior written permission.
-     *
-     * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-     * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-     * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-     * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-     * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-     * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-     * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-     * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-     * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-     * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-     * POSSIBILITY OF SUCH DAMAGE.
-     */
-
-    var hasRequiredPermuteDomain;
-
-    function requirePermuteDomain () {
-    	if (hasRequiredPermuteDomain) return permuteDomain;
-    	hasRequiredPermuteDomain = 1;
-    	const pubsuffix = requirePubsuffixPsl();
-
-    	// Gives the permutation of all possible domainMatch()es of a given domain. The
-    	// array is in shortest-to-longest order.  Handy for indexing.
-
-    	function permuteDomain$1(domain, allowSpecialUseDomain) {
-    	  const pubSuf = pubsuffix.getPublicSuffix(domain, {
-    	    allowSpecialUseDomain: allowSpecialUseDomain
-    	  });
-
-    	  if (!pubSuf) {
-    	    return null;
-    	  }
-    	  if (pubSuf == domain) {
-    	    return [domain];
-    	  }
-
-    	  // Nuke trailing dot
-    	  if (domain.slice(-1) == ".") {
-    	    domain = domain.slice(0, -1);
-    	  }
-
-    	  const prefix = domain.slice(0, -(pubSuf.length + 1)); // ".example.com"
-    	  const parts = prefix.split(".").reverse();
-    	  let cur = pubSuf;
-    	  const permutations = [cur];
-    	  while (parts.length) {
-    	    cur = `${parts.shift()}.${cur}`;
-    	    permutations.push(cur);
-    	  }
-    	  return permutations;
-    	}
-
-    	permuteDomain.permuteDomain = permuteDomain$1;
-    	return permuteDomain;
-    }
-
-    var pathMatch = {};
-
-    /*!
-     * Copyright (c) 2015, Salesforce.com, Inc.
-     * All rights reserved.
-     *
-     * Redistribution and use in source and binary forms, with or without
-     * modification, are permitted provided that the following conditions are met:
-     *
-     * 1. Redistributions of source code must retain the above copyright notice,
-     * this list of conditions and the following disclaimer.
-     *
-     * 2. Redistributions in binary form must reproduce the above copyright notice,
-     * this list of conditions and the following disclaimer in the documentation
-     * and/or other materials provided with the distribution.
-     *
-     * 3. Neither the name of Salesforce.com nor the names of its contributors may
-     * be used to endorse or promote products derived from this software without
-     * specific prior written permission.
-     *
-     * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-     * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-     * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-     * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-     * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-     * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-     * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-     * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-     * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-     * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-     * POSSIBILITY OF SUCH DAMAGE.
-     */
-
-    var hasRequiredPathMatch;
-
-    function requirePathMatch () {
-    	if (hasRequiredPathMatch) return pathMatch;
-    	hasRequiredPathMatch = 1;
-    	/*
-    	 * "A request-path path-matches a given cookie-path if at least one of the
-    	 * following conditions holds:"
-    	 */
-    	function pathMatch$1(reqPath, cookiePath) {
-    	  // "o  The cookie-path and the request-path are identical."
-    	  if (cookiePath === reqPath) {
-    	    return true;
-    	  }
-
-    	  const idx = reqPath.indexOf(cookiePath);
-    	  if (idx === 0) {
-    	    // "o  The cookie-path is a prefix of the request-path, and the last
-    	    // character of the cookie-path is %x2F ("/")."
-    	    if (cookiePath.substr(-1) === "/") {
-    	      return true;
-    	    }
-
-    	    // " o  The cookie-path is a prefix of the request-path, and the first
-    	    // character of the request-path that is not included in the cookie- path
-    	    // is a %x2F ("/") character."
-    	    if (reqPath.substr(cookiePath.length, 1) === "/") {
-    	      return true;
-    	    }
-    	  }
-
-    	  return false;
-    	}
-
-    	pathMatch.pathMatch = pathMatch$1;
-    	return pathMatch;
-    }
-
-    var utilHelper = {};
-
-    var hasRequiredUtilHelper;
-
-    function requireUtilHelper () {
-    	if (hasRequiredUtilHelper) return utilHelper;
-    	hasRequiredUtilHelper = 1;
-    	function requireUtil() {
-    	  try {
-    	    // eslint-disable-next-line no-restricted-modules
-    	    return require("util");
-    	  } catch (e) {
-    	    return null;
-    	  }
-    	}
-
-    	// for v10.12.0+
-    	function lookupCustomInspectSymbol() {
-    	  return Symbol.for("nodejs.util.inspect.custom");
-    	}
-
-    	// for older node environments
-    	function tryReadingCustomSymbolFromUtilInspect(options) {
-    	  const _requireUtil = options.requireUtil || requireUtil;
-    	  const util = _requireUtil();
-    	  return util ? util.inspect.custom : null;
-    	}
-
-    	utilHelper.getUtilInspect = function getUtilInspect(fallback, options = {}) {
-    	  const _requireUtil = options.requireUtil || requireUtil;
-    	  const util = _requireUtil();
-    	  return function inspect(value, showHidden, depth) {
-    	    return util ? util.inspect(value, showHidden, depth) : fallback(value);
-    	  };
-    	};
-
-    	utilHelper.getCustomInspectSymbol = function getCustomInspectSymbol(options = {}) {
-    	  const _lookupCustomInspectSymbol =
-    	    options.lookupCustomInspectSymbol || lookupCustomInspectSymbol;
-
-    	  // get custom inspect symbol for node environments
-    	  return (
-    	    _lookupCustomInspectSymbol() ||
-    	    tryReadingCustomSymbolFromUtilInspect(options)
-    	  );
-    	};
-    	return utilHelper;
-    }
-
-    /*!
-     * Copyright (c) 2015, Salesforce.com, Inc.
-     * All rights reserved.
-     *
-     * Redistribution and use in source and binary forms, with or without
-     * modification, are permitted provided that the following conditions are met:
-     *
-     * 1. Redistributions of source code must retain the above copyright notice,
-     * this list of conditions and the following disclaimer.
-     *
-     * 2. Redistributions in binary form must reproduce the above copyright notice,
-     * this list of conditions and the following disclaimer in the documentation
-     * and/or other materials provided with the distribution.
-     *
-     * 3. Neither the name of Salesforce.com nor the names of its contributors may
-     * be used to endorse or promote products derived from this software without
-     * specific prior written permission.
-     *
-     * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-     * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-     * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-     * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-     * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-     * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-     * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-     * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-     * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-     * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-     * POSSIBILITY OF SUCH DAMAGE.
-     */
-
-    var hasRequiredMemstore;
-
-    function requireMemstore () {
-    	if (hasRequiredMemstore) return memstore;
-    	hasRequiredMemstore = 1;
-    	const { fromCallback } = requireUniversalify();
-    	const Store = requireStore().Store;
-    	const permuteDomain = requirePermuteDomain().permuteDomain;
-    	const pathMatch = requirePathMatch().pathMatch;
-    	const { getCustomInspectSymbol, getUtilInspect } = requireUtilHelper();
-
-    	class MemoryCookieStore extends Store {
-    	  constructor() {
-    	    super();
-    	    this.synchronous = true;
-    	    this.idx = Object.create(null);
-    	    const customInspectSymbol = getCustomInspectSymbol();
-    	    if (customInspectSymbol) {
-    	      this[customInspectSymbol] = this.inspect;
-    	    }
-    	  }
-
-    	  inspect() {
-    	    const util = { inspect: getUtilInspect(inspectFallback) };
-    	    return `{ idx: ${util.inspect(this.idx, false, 2)} }`;
-    	  }
-
-    	  findCookie(domain, path, key, cb) {
-    	    if (!this.idx[domain]) {
-    	      return cb(null, undefined);
-    	    }
-    	    if (!this.idx[domain][path]) {
-    	      return cb(null, undefined);
-    	    }
-    	    return cb(null, this.idx[domain][path][key] || null);
-    	  }
-    	  findCookies(domain, path, allowSpecialUseDomain, cb) {
-    	    const results = [];
-    	    if (typeof allowSpecialUseDomain === "function") {
-    	      cb = allowSpecialUseDomain;
-    	      allowSpecialUseDomain = true;
-    	    }
-    	    if (!domain) {
-    	      return cb(null, []);
-    	    }
-
-    	    let pathMatcher;
-    	    if (!path) {
-    	      // null means "all paths"
-    	      pathMatcher = function matchAll(domainIndex) {
-    	        for (const curPath in domainIndex) {
-    	          const pathIndex = domainIndex[curPath];
-    	          for (const key in pathIndex) {
-    	            results.push(pathIndex[key]);
-    	          }
-    	        }
-    	      };
-    	    } else {
-    	      pathMatcher = function matchRFC(domainIndex) {
-    	        //NOTE: we should use path-match algorithm from S5.1.4 here
-    	        //(see : https://github.com/ChromiumWebApps/chromium/blob/b3d3b4da8bb94c1b2e061600df106d590fda3620/net/cookies/canonical_cookie.cc#L299)
-    	        Object.keys(domainIndex).forEach(cookiePath => {
-    	          if (pathMatch(path, cookiePath)) {
-    	            const pathIndex = domainIndex[cookiePath];
-    	            for (const key in pathIndex) {
-    	              results.push(pathIndex[key]);
-    	            }
-    	          }
-    	        });
-    	      };
-    	    }
-
-    	    const domains = permuteDomain(domain, allowSpecialUseDomain) || [domain];
-    	    const idx = this.idx;
-    	    domains.forEach(curDomain => {
-    	      const domainIndex = idx[curDomain];
-    	      if (!domainIndex) {
-    	        return;
-    	      }
-    	      pathMatcher(domainIndex);
-    	    });
-
-    	    cb(null, results);
-    	  }
-
-    	  putCookie(cookie, cb) {
-    	    if (!this.idx[cookie.domain]) {
-    	      this.idx[cookie.domain] = Object.create(null);
-    	    }
-    	    if (!this.idx[cookie.domain][cookie.path]) {
-    	      this.idx[cookie.domain][cookie.path] = Object.create(null);
-    	    }
-    	    this.idx[cookie.domain][cookie.path][cookie.key] = cookie;
-    	    cb(null);
-    	  }
-    	  updateCookie(oldCookie, newCookie, cb) {
-    	    // updateCookie() may avoid updating cookies that are identical.  For example,
-    	    // lastAccessed may not be important to some stores and an equality
-    	    // comparison could exclude that field.
-    	    this.putCookie(newCookie, cb);
-    	  }
-    	  removeCookie(domain, path, key, cb) {
-    	    if (
-    	      this.idx[domain] &&
-    	      this.idx[domain][path] &&
-    	      this.idx[domain][path][key]
-    	    ) {
-    	      delete this.idx[domain][path][key];
-    	    }
-    	    cb(null);
-    	  }
-    	  removeCookies(domain, path, cb) {
-    	    if (this.idx[domain]) {
-    	      if (path) {
-    	        delete this.idx[domain][path];
-    	      } else {
-    	        delete this.idx[domain];
-    	      }
-    	    }
-    	    return cb(null);
-    	  }
-    	  removeAllCookies(cb) {
-    	    this.idx = Object.create(null);
-    	    return cb(null);
-    	  }
-    	  getAllCookies(cb) {
-    	    const cookies = [];
-    	    const idx = this.idx;
-
-    	    const domains = Object.keys(idx);
-    	    domains.forEach(domain => {
-    	      const paths = Object.keys(idx[domain]);
-    	      paths.forEach(path => {
-    	        const keys = Object.keys(idx[domain][path]);
-    	        keys.forEach(key => {
-    	          if (key !== null) {
-    	            cookies.push(idx[domain][path][key]);
-    	          }
-    	        });
-    	      });
-    	    });
-
-    	    // Sort by creationIndex so deserializing retains the creation order.
-    	    // When implementing your own store, this SHOULD retain the order too
-    	    cookies.sort((a, b) => {
-    	      return (a.creationIndex || 0) - (b.creationIndex || 0);
-    	    });
-
-    	    cb(null, cookies);
-    	  }
-    	}
-
-    	[
-    	  "findCookie",
-    	  "findCookies",
-    	  "putCookie",
-    	  "updateCookie",
-    	  "removeCookie",
-    	  "removeCookies",
-    	  "removeAllCookies",
-    	  "getAllCookies"
-    	].forEach(name => {
-    	  MemoryCookieStore.prototype[name] = fromCallback(
-    	    MemoryCookieStore.prototype[name]
-    	  );
-    	});
-
-    	memstore.MemoryCookieStore = MemoryCookieStore;
-
-    	function inspectFallback(val) {
-    	  const domains = Object.keys(val);
-    	  if (domains.length === 0) {
-    	    return "[Object: null prototype] {}";
-    	  }
-    	  let result = "[Object: null prototype] {\n";
-    	  Object.keys(val).forEach((domain, i) => {
-    	    result += formatDomain(domain, val[domain]);
-    	    if (i < domains.length - 1) {
-    	      result += ",";
-    	    }
-    	    result += "\n";
-    	  });
-    	  result += "}";
-    	  return result;
-    	}
-
-    	function formatDomain(domainName, domainValue) {
-    	  const indent = "  ";
-    	  let result = `${indent}'${domainName}': [Object: null prototype] {\n`;
-    	  Object.keys(domainValue).forEach((path, i, paths) => {
-    	    result += formatPath(path, domainValue[path]);
-    	    if (i < paths.length - 1) {
-    	      result += ",";
-    	    }
-    	    result += "\n";
-    	  });
-    	  result += `${indent}}`;
-    	  return result;
-    	}
-
-    	function formatPath(pathName, pathValue) {
-    	  const indent = "    ";
-    	  let result = `${indent}'${pathName}': [Object: null prototype] {\n`;
-    	  Object.keys(pathValue).forEach((cookieName, i, cookieNames) => {
-    	    const cookie = pathValue[cookieName];
-    	    result += `      ${cookieName}: ${cookie.inspect()}`;
-    	    if (i < cookieNames.length - 1) {
-    	      result += ",";
-    	    }
-    	    result += "\n";
-    	  });
-    	  result += `${indent}}`;
-    	  return result;
-    	}
-
-    	memstore.inspectFallback = inspectFallback;
-    	return memstore;
-    }
-
-    var validators = {};
-
-    /* ************************************************************************************
-    Extracted from check-types.js
-    https://gitlab.com/philbooth/check-types.js
-
-    MIT License
-
-    Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019 Phil Booth
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
-
-    ************************************************************************************ */
-
-    var hasRequiredValidators;
-
-    function requireValidators () {
-    	if (hasRequiredValidators) return validators;
-    	hasRequiredValidators = 1;
-
-    	/* Validation functions copied from check-types package - https://www.npmjs.com/package/check-types */
-
-    	const toString = Object.prototype.toString;
-
-    	function isFunction(data) {
-    	  return typeof data === "function";
-    	}
-
-    	function isNonEmptyString(data) {
-    	  return isString(data) && data !== "";
-    	}
-
-    	function isDate(data) {
-    	  return isInstanceStrict(data, Date) && isInteger(data.getTime());
-    	}
-
-    	function isEmptyString(data) {
-    	  return data === "" || (data instanceof String && data.toString() === "");
-    	}
-
-    	function isString(data) {
-    	  return typeof data === "string" || data instanceof String;
-    	}
-
-    	function isObject(data) {
-    	  return toString.call(data) === "[object Object]";
-    	}
-    	function isInstanceStrict(data, prototype) {
-    	  try {
-    	    return data instanceof prototype;
-    	  } catch (error) {
-    	    return false;
-    	  }
-    	}
-
-    	function isUrlStringOrObject(data) {
-    	  return (
-    	    isNonEmptyString(data) ||
-    	    (isObject(data) &&
-    	      "hostname" in data &&
-    	      "pathname" in data &&
-    	      "protocol" in data) ||
-    	    isInstanceStrict(data, URL)
-    	  );
-    	}
-
-    	function isInteger(data) {
-    	  return typeof data === "number" && data % 1 === 0;
-    	}
-    	/* End validation functions */
-
-    	function validate(bool, cb, options) {
-    	  if (!isFunction(cb)) {
-    	    options = cb;
-    	    cb = null;
-    	  }
-    	  if (!isObject(options)) options = { Error: "Failed Check" };
-    	  if (!bool) {
-    	    if (cb) {
-    	      cb(new ParameterError(options));
-    	    } else {
-    	      throw new ParameterError(options);
-    	    }
-    	  }
-    	}
-
-    	class ParameterError extends Error {
-    	  constructor(...params) {
-    	    super(...params);
-    	  }
-    	}
-
-    	validators.ParameterError = ParameterError;
-    	validators.isFunction = isFunction;
-    	validators.isNonEmptyString = isNonEmptyString;
-    	validators.isDate = isDate;
-    	validators.isEmptyString = isEmptyString;
-    	validators.isString = isString;
-    	validators.isObject = isObject;
-    	validators.isUrlStringOrObject = isUrlStringOrObject;
-    	validators.validate = validate;
-    	return validators;
-    }
-
-    var version;
-    var hasRequiredVersion;
-
-    function requireVersion () {
-    	if (hasRequiredVersion) return version;
-    	hasRequiredVersion = 1;
-    	// generated by genversion
-    	version = '4.1.4';
-    	return version;
-    }
-
-    /*!
-     * Copyright (c) 2015-2020, Salesforce.com, Inc.
-     * All rights reserved.
-     *
-     * Redistribution and use in source and binary forms, with or without
-     * modification, are permitted provided that the following conditions are met:
-     *
-     * 1. Redistributions of source code must retain the above copyright notice,
-     * this list of conditions and the following disclaimer.
-     *
-     * 2. Redistributions in binary form must reproduce the above copyright notice,
-     * this list of conditions and the following disclaimer in the documentation
-     * and/or other materials provided with the distribution.
-     *
-     * 3. Neither the name of Salesforce.com nor the names of its contributors may
-     * be used to endorse or promote products derived from this software without
-     * specific prior written permission.
-     *
-     * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-     * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-     * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-     * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-     * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-     * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-     * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-     * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-     * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-     * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-     * POSSIBILITY OF SUCH DAMAGE.
-     */
-
-    var hasRequiredCookie;
-
-    function requireCookie () {
-    	if (hasRequiredCookie) return cookie;
-    	hasRequiredCookie = 1;
-    	const punycode = require$$0;
-    	const urlParse = requireUrlParse();
-    	const pubsuffix = requirePubsuffixPsl();
-    	const Store = requireStore().Store;
-    	const MemoryCookieStore = requireMemstore().MemoryCookieStore;
-    	const pathMatch = requirePathMatch().pathMatch;
-    	const validators = requireValidators();
-    	const VERSION = requireVersion();
-    	const { fromCallback } = requireUniversalify();
-    	const { getCustomInspectSymbol } = requireUtilHelper();
-
-    	// From RFC6265 S4.1.1
-    	// note that it excludes \x3B ";"
-    	const COOKIE_OCTETS = /^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]+$/;
-
-    	const CONTROL_CHARS = /[\x00-\x1F]/;
-
-    	// From Chromium // '\r', '\n' and '\0' should be treated as a terminator in
-    	// the "relaxed" mode, see:
-    	// https://github.com/ChromiumWebApps/chromium/blob/b3d3b4da8bb94c1b2e061600df106d590fda3620/net/cookies/parsed_cookie.cc#L60
-    	const TERMINATORS = ["\n", "\r", "\0"];
-
-    	// RFC6265 S4.1.1 defines path value as 'any CHAR except CTLs or ";"'
-    	// Note ';' is \x3B
-    	const PATH_VALUE = /[\x20-\x3A\x3C-\x7E]+/;
-
-    	// date-time parsing constants (RFC6265 S5.1.1)
-
-    	const DATE_DELIM = /[\x09\x20-\x2F\x3B-\x40\x5B-\x60\x7B-\x7E]/;
-
-    	const MONTH_TO_NUM = {
-    	  jan: 0,
-    	  feb: 1,
-    	  mar: 2,
-    	  apr: 3,
-    	  may: 4,
-    	  jun: 5,
-    	  jul: 6,
-    	  aug: 7,
-    	  sep: 8,
-    	  oct: 9,
-    	  nov: 10,
-    	  dec: 11
-    	};
-
-    	const MAX_TIME = 2147483647000; // 31-bit max
-    	const MIN_TIME = 0; // 31-bit min
-    	const SAME_SITE_CONTEXT_VAL_ERR =
-    	  'Invalid sameSiteContext option for getCookies(); expected one of "strict", "lax", or "none"';
-
-    	function checkSameSiteContext(value) {
-    	  validators.validate(validators.isNonEmptyString(value), value);
-    	  const context = String(value).toLowerCase();
-    	  if (context === "none" || context === "lax" || context === "strict") {
-    	    return context;
-    	  } else {
-    	    return null;
-    	  }
-    	}
-
-    	const PrefixSecurityEnum = Object.freeze({
-    	  SILENT: "silent",
-    	  STRICT: "strict",
-    	  DISABLED: "unsafe-disabled"
-    	});
-
-    	// Dumped from ip-regex@4.0.0, with the following changes:
-    	// * all capturing groups converted to non-capturing -- "(?:)"
-    	// * support for IPv6 Scoped Literal ("%eth1") removed
-    	// * lowercase hexadecimal only
-    	const IP_REGEX_LOWERCASE = /(?:^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}$)|(?:^(?:(?:[a-f\d]{1,4}:){7}(?:[a-f\d]{1,4}|:)|(?:[a-f\d]{1,4}:){6}(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|:[a-f\d]{1,4}|:)|(?:[a-f\d]{1,4}:){5}(?::(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|(?::[a-f\d]{1,4}){1,2}|:)|(?:[a-f\d]{1,4}:){4}(?:(?::[a-f\d]{1,4}){0,1}:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|(?::[a-f\d]{1,4}){1,3}|:)|(?:[a-f\d]{1,4}:){3}(?:(?::[a-f\d]{1,4}){0,2}:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|(?::[a-f\d]{1,4}){1,4}|:)|(?:[a-f\d]{1,4}:){2}(?:(?::[a-f\d]{1,4}){0,3}:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|(?::[a-f\d]{1,4}){1,5}|:)|(?:[a-f\d]{1,4}:){1}(?:(?::[a-f\d]{1,4}){0,4}:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|(?::[a-f\d]{1,4}){1,6}|:)|(?::(?:(?::[a-f\d]{1,4}){0,5}:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}|(?::[a-f\d]{1,4}){1,7}|:)))$)/;
-    	const IP_V6_REGEX = `
-\\[?(?:
-(?:[a-fA-F\\d]{1,4}:){7}(?:[a-fA-F\\d]{1,4}|:)|
-(?:[a-fA-F\\d]{1,4}:){6}(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|:[a-fA-F\\d]{1,4}|:)|
-(?:[a-fA-F\\d]{1,4}:){5}(?::(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|(?::[a-fA-F\\d]{1,4}){1,2}|:)|
-(?:[a-fA-F\\d]{1,4}:){4}(?:(?::[a-fA-F\\d]{1,4}){0,1}:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|(?::[a-fA-F\\d]{1,4}){1,3}|:)|
-(?:[a-fA-F\\d]{1,4}:){3}(?:(?::[a-fA-F\\d]{1,4}){0,2}:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|(?::[a-fA-F\\d]{1,4}){1,4}|:)|
-(?:[a-fA-F\\d]{1,4}:){2}(?:(?::[a-fA-F\\d]{1,4}){0,3}:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|(?::[a-fA-F\\d]{1,4}){1,5}|:)|
-(?:[a-fA-F\\d]{1,4}:){1}(?:(?::[a-fA-F\\d]{1,4}){0,4}:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|(?::[a-fA-F\\d]{1,4}){1,6}|:)|
-(?::(?:(?::[a-fA-F\\d]{1,4}){0,5}:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}|(?::[a-fA-F\\d]{1,4}){1,7}|:))
-)(?:%[0-9a-zA-Z]{1,})?\\]?
-`
-    	  .replace(/\s*\/\/.*$/gm, "")
-    	  .replace(/\n/g, "")
-    	  .trim();
-    	const IP_V6_REGEX_OBJECT = new RegExp(`^${IP_V6_REGEX}$`);
-
-    	/*
-    	 * Parses a Natural number (i.e., non-negative integer) with either the
-    	 *    <min>*<max>DIGIT ( non-digit *OCTET )
-    	 * or
-    	 *    <min>*<max>DIGIT
-    	 * grammar (RFC6265 S5.1.1).
-    	 *
-    	 * The "trailingOK" boolean controls if the grammar accepts a
-    	 * "( non-digit *OCTET )" trailer.
-    	 */
-    	function parseDigits(token, minDigits, maxDigits, trailingOK) {
-    	  let count = 0;
-    	  while (count < token.length) {
-    	    const c = token.charCodeAt(count);
-    	    // "non-digit = %x00-2F / %x3A-FF"
-    	    if (c <= 0x2f || c >= 0x3a) {
-    	      break;
-    	    }
-    	    count++;
-    	  }
-
-    	  // constrain to a minimum and maximum number of digits.
-    	  if (count < minDigits || count > maxDigits) {
-    	    return null;
-    	  }
-
-    	  if (!trailingOK && count != token.length) {
-    	    return null;
-    	  }
-
-    	  return parseInt(token.substr(0, count), 10);
-    	}
-
-    	function parseTime(token) {
-    	  const parts = token.split(":");
-    	  const result = [0, 0, 0];
-
-    	  /* RF6256 S5.1.1:
-    	   *      time            = hms-time ( non-digit *OCTET )
-    	   *      hms-time        = time-field ":" time-field ":" time-field
-    	   *      time-field      = 1*2DIGIT
-    	   */
-
-    	  if (parts.length !== 3) {
-    	    return null;
-    	  }
-
-    	  for (let i = 0; i < 3; i++) {
-    	    // "time-field" must be strictly "1*2DIGIT", HOWEVER, "hms-time" can be
-    	    // followed by "( non-digit *OCTET )" so therefore the last time-field can
-    	    // have a trailer
-    	    const trailingOK = i == 2;
-    	    const num = parseDigits(parts[i], 1, 2, trailingOK);
-    	    if (num === null) {
-    	      return null;
-    	    }
-    	    result[i] = num;
-    	  }
-
-    	  return result;
-    	}
-
-    	function parseMonth(token) {
-    	  token = String(token)
-    	    .substr(0, 3)
-    	    .toLowerCase();
-    	  const num = MONTH_TO_NUM[token];
-    	  return num >= 0 ? num : null;
-    	}
-
-    	/*
-    	 * RFC6265 S5.1.1 date parser (see RFC for full grammar)
-    	 */
-    	function parseDate(str) {
-    	  if (!str) {
-    	    return;
-    	  }
-
-    	  /* RFC6265 S5.1.1:
-    	   * 2. Process each date-token sequentially in the order the date-tokens
-    	   * appear in the cookie-date
-    	   */
-    	  const tokens = str.split(DATE_DELIM);
-    	  if (!tokens) {
-    	    return;
-    	  }
-
-    	  let hour = null;
-    	  let minute = null;
-    	  let second = null;
-    	  let dayOfMonth = null;
-    	  let month = null;
-    	  let year = null;
-
-    	  for (let i = 0; i < tokens.length; i++) {
-    	    const token = tokens[i].trim();
-    	    if (!token.length) {
-    	      continue;
-    	    }
-
-    	    let result;
-
-    	    /* 2.1. If the found-time flag is not set and the token matches the time
-    	     * production, set the found-time flag and set the hour- value,
-    	     * minute-value, and second-value to the numbers denoted by the digits in
-    	     * the date-token, respectively.  Skip the remaining sub-steps and continue
-    	     * to the next date-token.
-    	     */
-    	    if (second === null) {
-    	      result = parseTime(token);
-    	      if (result) {
-    	        hour = result[0];
-    	        minute = result[1];
-    	        second = result[2];
-    	        continue;
-    	      }
-    	    }
-
-    	    /* 2.2. If the found-day-of-month flag is not set and the date-token matches
-    	     * the day-of-month production, set the found-day-of- month flag and set
-    	     * the day-of-month-value to the number denoted by the date-token.  Skip
-    	     * the remaining sub-steps and continue to the next date-token.
-    	     */
-    	    if (dayOfMonth === null) {
-    	      // "day-of-month = 1*2DIGIT ( non-digit *OCTET )"
-    	      result = parseDigits(token, 1, 2, true);
-    	      if (result !== null) {
-    	        dayOfMonth = result;
-    	        continue;
-    	      }
-    	    }
-
-    	    /* 2.3. If the found-month flag is not set and the date-token matches the
-    	     * month production, set the found-month flag and set the month-value to
-    	     * the month denoted by the date-token.  Skip the remaining sub-steps and
-    	     * continue to the next date-token.
-    	     */
-    	    if (month === null) {
-    	      result = parseMonth(token);
-    	      if (result !== null) {
-    	        month = result;
-    	        continue;
-    	      }
-    	    }
-
-    	    /* 2.4. If the found-year flag is not set and the date-token matches the
-    	     * year production, set the found-year flag and set the year-value to the
-    	     * number denoted by the date-token.  Skip the remaining sub-steps and
-    	     * continue to the next date-token.
-    	     */
-    	    if (year === null) {
-    	      // "year = 2*4DIGIT ( non-digit *OCTET )"
-    	      result = parseDigits(token, 2, 4, true);
-    	      if (result !== null) {
-    	        year = result;
-    	        /* From S5.1.1:
-    	         * 3.  If the year-value is greater than or equal to 70 and less
-    	         * than or equal to 99, increment the year-value by 1900.
-    	         * 4.  If the year-value is greater than or equal to 0 and less
-    	         * than or equal to 69, increment the year-value by 2000.
-    	         */
-    	        if (year >= 70 && year <= 99) {
-    	          year += 1900;
-    	        } else if (year >= 0 && year <= 69) {
-    	          year += 2000;
-    	        }
-    	      }
-    	    }
-    	  }
-
-    	  /* RFC 6265 S5.1.1
-    	   * "5. Abort these steps and fail to parse the cookie-date if:
-    	   *     *  at least one of the found-day-of-month, found-month, found-
-    	   *        year, or found-time flags is not set,
-    	   *     *  the day-of-month-value is less than 1 or greater than 31,
-    	   *     *  the year-value is less than 1601,
-    	   *     *  the hour-value is greater than 23,
-    	   *     *  the minute-value is greater than 59, or
-    	   *     *  the second-value is greater than 59.
-    	   *     (Note that leap seconds cannot be represented in this syntax.)"
-    	   *
-    	   * So, in order as above:
-    	   */
-    	  if (
-    	    dayOfMonth === null ||
-    	    month === null ||
-    	    year === null ||
-    	    second === null ||
-    	    dayOfMonth < 1 ||
-    	    dayOfMonth > 31 ||
-    	    year < 1601 ||
-    	    hour > 23 ||
-    	    minute > 59 ||
-    	    second > 59
-    	  ) {
-    	    return;
-    	  }
-
-    	  return new Date(Date.UTC(year, month, dayOfMonth, hour, minute, second));
-    	}
-
-    	function formatDate(date) {
-    	  validators.validate(validators.isDate(date), date);
-    	  return date.toUTCString();
-    	}
-
-    	// S5.1.2 Canonicalized Host Names
-    	function canonicalDomain(str) {
-    	  if (str == null) {
-    	    return null;
-    	  }
-    	  str = str.trim().replace(/^\./, ""); // S4.1.2.3 & S5.2.3: ignore leading .
-
-    	  if (IP_V6_REGEX_OBJECT.test(str)) {
-    	    str = str.replace("[", "").replace("]", "");
-    	  }
-
-    	  // convert to IDN if any non-ASCII characters
-    	  if (punycode && /[^\u0001-\u007f]/.test(str)) {
-    	    str = punycode.toASCII(str);
-    	  }
-
-    	  return str.toLowerCase();
-    	}
-
-    	// S5.1.3 Domain Matching
-    	function domainMatch(str, domStr, canonicalize) {
-    	  if (str == null || domStr == null) {
-    	    return null;
-    	  }
-    	  if (canonicalize !== false) {
-    	    str = canonicalDomain(str);
-    	    domStr = canonicalDomain(domStr);
-    	  }
-
-    	  /*
-    	   * S5.1.3:
-    	   * "A string domain-matches a given domain string if at least one of the
-    	   * following conditions hold:"
-    	   *
-    	   * " o The domain string and the string are identical. (Note that both the
-    	   * domain string and the string will have been canonicalized to lower case at
-    	   * this point)"
-    	   */
-    	  if (str == domStr) {
-    	    return true;
-    	  }
-
-    	  /* " o All of the following [three] conditions hold:" */
-
-    	  /* "* The domain string is a suffix of the string" */
-    	  const idx = str.lastIndexOf(domStr);
-    	  if (idx <= 0) {
-    	    return false; // it's a non-match (-1) or prefix (0)
-    	  }
-
-    	  // next, check it's a proper suffix
-    	  // e.g., "a.b.c".indexOf("b.c") === 2
-    	  // 5 === 3+2
-    	  if (str.length !== domStr.length + idx) {
-    	    return false; // it's not a suffix
-    	  }
-
-    	  /* "  * The last character of the string that is not included in the
-    	   * domain string is a %x2E (".") character." */
-    	  if (str.substr(idx - 1, 1) !== ".") {
-    	    return false; // doesn't align on "."
-    	  }
-
-    	  /* "  * The string is a host name (i.e., not an IP address)." */
-    	  if (IP_REGEX_LOWERCASE.test(str)) {
-    	    return false; // it's an IP address
-    	  }
-
-    	  return true;
-    	}
-
-    	// RFC6265 S5.1.4 Paths and Path-Match
-
-    	/*
-    	 * "The user agent MUST use an algorithm equivalent to the following algorithm
-    	 * to compute the default-path of a cookie:"
-    	 *
-    	 * Assumption: the path (and not query part or absolute uri) is passed in.
-    	 */
-    	function defaultPath(path) {
-    	  // "2. If the uri-path is empty or if the first character of the uri-path is not
-    	  // a %x2F ("/") character, output %x2F ("/") and skip the remaining steps.
-    	  if (!path || path.substr(0, 1) !== "/") {
-    	    return "/";
-    	  }
-
-    	  // "3. If the uri-path contains no more than one %x2F ("/") character, output
-    	  // %x2F ("/") and skip the remaining step."
-    	  if (path === "/") {
-    	    return path;
-    	  }
-
-    	  const rightSlash = path.lastIndexOf("/");
-    	  if (rightSlash === 0) {
-    	    return "/";
-    	  }
-
-    	  // "4. Output the characters of the uri-path from the first character up to,
-    	  // but not including, the right-most %x2F ("/")."
-    	  return path.slice(0, rightSlash);
-    	}
-
-    	function trimTerminator(str) {
-    	  if (validators.isEmptyString(str)) return str;
-    	  for (let t = 0; t < TERMINATORS.length; t++) {
-    	    const terminatorIdx = str.indexOf(TERMINATORS[t]);
-    	    if (terminatorIdx !== -1) {
-    	      str = str.substr(0, terminatorIdx);
-    	    }
-    	  }
-
-    	  return str;
-    	}
-
-    	function parseCookiePair(cookiePair, looseMode) {
-    	  cookiePair = trimTerminator(cookiePair);
-    	  validators.validate(validators.isString(cookiePair), cookiePair);
-
-    	  let firstEq = cookiePair.indexOf("=");
-    	  if (looseMode) {
-    	    if (firstEq === 0) {
-    	      // '=' is immediately at start
-    	      cookiePair = cookiePair.substr(1);
-    	      firstEq = cookiePair.indexOf("="); // might still need to split on '='
-    	    }
-    	  } else {
-    	    // non-loose mode
-    	    if (firstEq <= 0) {
-    	      // no '=' or is at start
-    	      return; // needs to have non-empty "cookie-name"
-    	    }
-    	  }
-
-    	  let cookieName, cookieValue;
-    	  if (firstEq <= 0) {
-    	    cookieName = "";
-    	    cookieValue = cookiePair.trim();
-    	  } else {
-    	    cookieName = cookiePair.substr(0, firstEq).trim();
-    	    cookieValue = cookiePair.substr(firstEq + 1).trim();
-    	  }
-
-    	  if (CONTROL_CHARS.test(cookieName) || CONTROL_CHARS.test(cookieValue)) {
-    	    return;
-    	  }
-
-    	  const c = new Cookie();
-    	  c.key = cookieName;
-    	  c.value = cookieValue;
-    	  return c;
-    	}
-
-    	function parse(str, options) {
-    	  if (!options || typeof options !== "object") {
-    	    options = {};
-    	  }
-
-    	  if (validators.isEmptyString(str) || !validators.isString(str)) {
-    	    return null;
-    	  }
-
-    	  str = str.trim();
-
-    	  // We use a regex to parse the "name-value-pair" part of S5.2
-    	  const firstSemi = str.indexOf(";"); // S5.2 step 1
-    	  const cookiePair = firstSemi === -1 ? str : str.substr(0, firstSemi);
-    	  const c = parseCookiePair(cookiePair, !!options.loose);
-    	  if (!c) {
-    	    return;
-    	  }
-
-    	  if (firstSemi === -1) {
-    	    return c;
-    	  }
-
-    	  // S5.2.3 "unparsed-attributes consist of the remainder of the set-cookie-string
-    	  // (including the %x3B (";") in question)." plus later on in the same section
-    	  // "discard the first ";" and trim".
-    	  const unparsed = str.slice(firstSemi + 1).trim();
-
-    	  // "If the unparsed-attributes string is empty, skip the rest of these
-    	  // steps."
-    	  if (unparsed.length === 0) {
-    	    return c;
-    	  }
-
-    	  /*
-    	   * S5.2 says that when looping over the items "[p]rocess the attribute-name
-    	   * and attribute-value according to the requirements in the following
-    	   * subsections" for every item.  Plus, for many of the individual attributes
-    	   * in S5.3 it says to use the "attribute-value of the last attribute in the
-    	   * cookie-attribute-list".  Therefore, in this implementation, we overwrite
-    	   * the previous value.
-    	   */
-    	  const cookie_avs = unparsed.split(";");
-    	  while (cookie_avs.length) {
-    	    const av = cookie_avs.shift().trim();
-    	    if (av.length === 0) {
-    	      // happens if ";;" appears
-    	      continue;
-    	    }
-    	    const av_sep = av.indexOf("=");
-    	    let av_key, av_value;
-
-    	    if (av_sep === -1) {
-    	      av_key = av;
-    	      av_value = null;
-    	    } else {
-    	      av_key = av.substr(0, av_sep);
-    	      av_value = av.substr(av_sep + 1);
-    	    }
-
-    	    av_key = av_key.trim().toLowerCase();
-
-    	    if (av_value) {
-    	      av_value = av_value.trim();
-    	    }
-
-    	    switch (av_key) {
-    	      case "expires": // S5.2.1
-    	        if (av_value) {
-    	          const exp = parseDate(av_value);
-    	          // "If the attribute-value failed to parse as a cookie date, ignore the
-    	          // cookie-av."
-    	          if (exp) {
-    	            // over and underflow not realistically a concern: V8's getTime() seems to
-    	            // store something larger than a 32-bit time_t (even with 32-bit node)
-    	            c.expires = exp;
-    	          }
-    	        }
-    	        break;
-
-    	      case "max-age": // S5.2.2
-    	        if (av_value) {
-    	          // "If the first character of the attribute-value is not a DIGIT or a "-"
-    	          // character ...[or]... If the remainder of attribute-value contains a
-    	          // non-DIGIT character, ignore the cookie-av."
-    	          if (/^-?[0-9]+$/.test(av_value)) {
-    	            const delta = parseInt(av_value, 10);
-    	            // "If delta-seconds is less than or equal to zero (0), let expiry-time
-    	            // be the earliest representable date and time."
-    	            c.setMaxAge(delta);
-    	          }
-    	        }
-    	        break;
-
-    	      case "domain": // S5.2.3
-    	        // "If the attribute-value is empty, the behavior is undefined.  However,
-    	        // the user agent SHOULD ignore the cookie-av entirely."
-    	        if (av_value) {
-    	          // S5.2.3 "Let cookie-domain be the attribute-value without the leading %x2E
-    	          // (".") character."
-    	          const domain = av_value.trim().replace(/^\./, "");
-    	          if (domain) {
-    	            // "Convert the cookie-domain to lower case."
-    	            c.domain = domain.toLowerCase();
-    	          }
-    	        }
-    	        break;
-
-    	      case "path": // S5.2.4
-    	        /*
-    	         * "If the attribute-value is empty or if the first character of the
-    	         * attribute-value is not %x2F ("/"):
-    	         *   Let cookie-path be the default-path.
-    	         * Otherwise:
-    	         *   Let cookie-path be the attribute-value."
-    	         *
-    	         * We'll represent the default-path as null since it depends on the
-    	         * context of the parsing.
-    	         */
-    	        c.path = av_value && av_value[0] === "/" ? av_value : null;
-    	        break;
-
-    	      case "secure": // S5.2.5
-    	        /*
-    	         * "If the attribute-name case-insensitively matches the string "Secure",
-    	         * the user agent MUST append an attribute to the cookie-attribute-list
-    	         * with an attribute-name of Secure and an empty attribute-value."
-    	         */
-    	        c.secure = true;
-    	        break;
-
-    	      case "httponly": // S5.2.6 -- effectively the same as 'secure'
-    	        c.httpOnly = true;
-    	        break;
-
-    	      case "samesite": // RFC6265bis-02 S5.3.7
-    	        const enforcement = av_value ? av_value.toLowerCase() : "";
-    	        switch (enforcement) {
-    	          case "strict":
-    	            c.sameSite = "strict";
-    	            break;
-    	          case "lax":
-    	            c.sameSite = "lax";
-    	            break;
-    	          case "none":
-    	            c.sameSite = "none";
-    	            break;
-    	          default:
-    	            c.sameSite = undefined;
-    	            break;
-    	        }
-    	        break;
-
-    	      default:
-    	        c.extensions = c.extensions || [];
-    	        c.extensions.push(av);
-    	        break;
-    	    }
-    	  }
-
-    	  return c;
-    	}
-
-    	/**
-    	 *  If the cookie-name begins with a case-sensitive match for the
-    	 *  string "__Secure-", abort these steps and ignore the cookie
-    	 *  entirely unless the cookie's secure-only-flag is true.
-    	 * @param cookie
-    	 * @returns boolean
-    	 */
-    	function isSecurePrefixConditionMet(cookie) {
-    	  validators.validate(validators.isObject(cookie), cookie);
-    	  return !cookie.key.startsWith("__Secure-") || cookie.secure;
-    	}
-
-    	/**
-    	 *  If the cookie-name begins with a case-sensitive match for the
-    	 *  string "__Host-", abort these steps and ignore the cookie
-    	 *  entirely unless the cookie meets all the following criteria:
-    	 *    1.  The cookie's secure-only-flag is true.
-    	 *    2.  The cookie's host-only-flag is true.
-    	 *    3.  The cookie-attribute-list contains an attribute with an
-    	 *        attribute-name of "Path", and the cookie's path is "/".
-    	 * @param cookie
-    	 * @returns boolean
-    	 */
-    	function isHostPrefixConditionMet(cookie) {
-    	  validators.validate(validators.isObject(cookie));
-    	  return (
-    	    !cookie.key.startsWith("__Host-") ||
-    	    (cookie.secure &&
-    	      cookie.hostOnly &&
-    	      cookie.path != null &&
-    	      cookie.path === "/")
-    	  );
-    	}
-
-    	// avoid the V8 deoptimization monster!
-    	function jsonParse(str) {
-    	  let obj;
-    	  try {
-    	    obj = JSON.parse(str);
-    	  } catch (e) {
-    	    return e;
-    	  }
-    	  return obj;
-    	}
-
-    	function fromJSON(str) {
-    	  if (!str || validators.isEmptyString(str)) {
-    	    return null;
-    	  }
-
-    	  let obj;
-    	  if (typeof str === "string") {
-    	    obj = jsonParse(str);
-    	    if (obj instanceof Error) {
-    	      return null;
-    	    }
-    	  } else {
-    	    // assume it's an Object
-    	    obj = str;
-    	  }
-
-    	  const c = new Cookie();
-    	  for (let i = 0; i < Cookie.serializableProperties.length; i++) {
-    	    const prop = Cookie.serializableProperties[i];
-    	    if (obj[prop] === undefined || obj[prop] === cookieDefaults[prop]) {
-    	      continue; // leave as prototype default
-    	    }
-
-    	    if (prop === "expires" || prop === "creation" || prop === "lastAccessed") {
-    	      if (obj[prop] === null) {
-    	        c[prop] = null;
-    	      } else {
-    	        c[prop] = obj[prop] == "Infinity" ? "Infinity" : new Date(obj[prop]);
-    	      }
-    	    } else {
-    	      c[prop] = obj[prop];
-    	    }
-    	  }
-
-    	  return c;
-    	}
-
-    	/* Section 5.4 part 2:
-    	 * "*  Cookies with longer paths are listed before cookies with
-    	 *     shorter paths.
-    	 *
-    	 *  *  Among cookies that have equal-length path fields, cookies with
-    	 *     earlier creation-times are listed before cookies with later
-    	 *     creation-times."
-    	 */
-
-    	function cookieCompare(a, b) {
-    	  validators.validate(validators.isObject(a), a);
-    	  validators.validate(validators.isObject(b), b);
-    	  let cmp = 0;
-
-    	  // descending for length: b CMP a
-    	  const aPathLen = a.path ? a.path.length : 0;
-    	  const bPathLen = b.path ? b.path.length : 0;
-    	  cmp = bPathLen - aPathLen;
-    	  if (cmp !== 0) {
-    	    return cmp;
-    	  }
-
-    	  // ascending for time: a CMP b
-    	  const aTime = a.creation ? a.creation.getTime() : MAX_TIME;
-    	  const bTime = b.creation ? b.creation.getTime() : MAX_TIME;
-    	  cmp = aTime - bTime;
-    	  if (cmp !== 0) {
-    	    return cmp;
-    	  }
-
-    	  // break ties for the same millisecond (precision of JavaScript's clock)
-    	  cmp = a.creationIndex - b.creationIndex;
-
-    	  return cmp;
-    	}
-
-    	// Gives the permutation of all possible pathMatch()es of a given path. The
-    	// array is in longest-to-shortest order.  Handy for indexing.
-    	function permutePath(path) {
-    	  validators.validate(validators.isString(path));
-    	  if (path === "/") {
-    	    return ["/"];
-    	  }
-    	  const permutations = [path];
-    	  while (path.length > 1) {
-    	    const lindex = path.lastIndexOf("/");
-    	    if (lindex === 0) {
-    	      break;
-    	    }
-    	    path = path.substr(0, lindex);
-    	    permutations.push(path);
-    	  }
-    	  permutations.push("/");
-    	  return permutations;
-    	}
-
-    	function getCookieContext(url) {
-    	  if (url instanceof Object) {
-    	    return url;
-    	  }
-    	  // NOTE: decodeURI will throw on malformed URIs (see GH-32).
-    	  // Therefore, we will just skip decoding for such URIs.
-    	  try {
-    	    url = decodeURI(url);
-    	  } catch (err) {
-    	    // Silently swallow error
-    	  }
-
-    	  return urlParse(url);
-    	}
-
-    	const cookieDefaults = {
-    	  // the order in which the RFC has them:
-    	  key: "",
-    	  value: "",
-    	  expires: "Infinity",
-    	  maxAge: null,
-    	  domain: null,
-    	  path: null,
-    	  secure: false,
-    	  httpOnly: false,
-    	  extensions: null,
-    	  // set by the CookieJar:
-    	  hostOnly: null,
-    	  pathIsDefault: null,
-    	  creation: null,
-    	  lastAccessed: null,
-    	  sameSite: undefined
-    	};
-
-    	class Cookie {
-    	  constructor(options = {}) {
-    	    const customInspectSymbol = getCustomInspectSymbol();
-    	    if (customInspectSymbol) {
-    	      this[customInspectSymbol] = this.inspect;
-    	    }
-
-    	    Object.assign(this, cookieDefaults, options);
-    	    this.creation = this.creation || new Date();
-
-    	    // used to break creation ties in cookieCompare():
-    	    Object.defineProperty(this, "creationIndex", {
-    	      configurable: false,
-    	      enumerable: false, // important for assert.deepEqual checks
-    	      writable: true,
-    	      value: ++Cookie.cookiesCreated
-    	    });
-    	  }
-
-    	  inspect() {
-    	    const now = Date.now();
-    	    const hostOnly = this.hostOnly != null ? this.hostOnly : "?";
-    	    const createAge = this.creation
-    	      ? `${now - this.creation.getTime()}ms`
-    	      : "?";
-    	    const accessAge = this.lastAccessed
-    	      ? `${now - this.lastAccessed.getTime()}ms`
-    	      : "?";
-    	    return `Cookie="${this.toString()}; hostOnly=${hostOnly}; aAge=${accessAge}; cAge=${createAge}"`;
-    	  }
-
-    	  toJSON() {
-    	    const obj = {};
-
-    	    for (const prop of Cookie.serializableProperties) {
-    	      if (this[prop] === cookieDefaults[prop]) {
-    	        continue; // leave as prototype default
-    	      }
-
-    	      if (
-    	        prop === "expires" ||
-    	        prop === "creation" ||
-    	        prop === "lastAccessed"
-    	      ) {
-    	        if (this[prop] === null) {
-    	          obj[prop] = null;
-    	        } else {
-    	          obj[prop] =
-    	            this[prop] == "Infinity" // intentionally not ===
-    	              ? "Infinity"
-    	              : this[prop].toISOString();
-    	        }
-    	      } else if (prop === "maxAge") {
-    	        if (this[prop] !== null) {
-    	          // again, intentionally not ===
-    	          obj[prop] =
-    	            this[prop] == Infinity || this[prop] == -Infinity
-    	              ? this[prop].toString()
-    	              : this[prop];
-    	        }
-    	      } else {
-    	        if (this[prop] !== cookieDefaults[prop]) {
-    	          obj[prop] = this[prop];
-    	        }
-    	      }
-    	    }
-
-    	    return obj;
-    	  }
-
-    	  clone() {
-    	    return fromJSON(this.toJSON());
-    	  }
-
-    	  validate() {
-    	    if (!COOKIE_OCTETS.test(this.value)) {
-    	      return false;
-    	    }
-    	    if (
-    	      this.expires != Infinity &&
-    	      !(this.expires instanceof Date) &&
-    	      !parseDate(this.expires)
-    	    ) {
-    	      return false;
-    	    }
-    	    if (this.maxAge != null && this.maxAge <= 0) {
-    	      return false; // "Max-Age=" non-zero-digit *DIGIT
-    	    }
-    	    if (this.path != null && !PATH_VALUE.test(this.path)) {
-    	      return false;
-    	    }
-
-    	    const cdomain = this.cdomain();
-    	    if (cdomain) {
-    	      if (cdomain.match(/\.$/)) {
-    	        return false; // S4.1.2.3 suggests that this is bad. domainMatch() tests confirm this
-    	      }
-    	      const suffix = pubsuffix.getPublicSuffix(cdomain);
-    	      if (suffix == null) {
-    	        // it's a public suffix
-    	        return false;
-    	      }
-    	    }
-    	    return true;
-    	  }
-
-    	  setExpires(exp) {
-    	    if (exp instanceof Date) {
-    	      this.expires = exp;
-    	    } else {
-    	      this.expires = parseDate(exp) || "Infinity";
-    	    }
-    	  }
-
-    	  setMaxAge(age) {
-    	    if (age === Infinity || age === -Infinity) {
-    	      this.maxAge = age.toString(); // so JSON.stringify() works
-    	    } else {
-    	      this.maxAge = age;
-    	    }
-    	  }
-
-    	  cookieString() {
-    	    let val = this.value;
-    	    if (val == null) {
-    	      val = "";
-    	    }
-    	    if (this.key === "") {
-    	      return val;
-    	    }
-    	    return `${this.key}=${val}`;
-    	  }
-
-    	  // gives Set-Cookie header format
-    	  toString() {
-    	    let str = this.cookieString();
-
-    	    if (this.expires != Infinity) {
-    	      if (this.expires instanceof Date) {
-    	        str += `; Expires=${formatDate(this.expires)}`;
-    	      } else {
-    	        str += `; Expires=${this.expires}`;
-    	      }
-    	    }
-
-    	    if (this.maxAge != null && this.maxAge != Infinity) {
-    	      str += `; Max-Age=${this.maxAge}`;
-    	    }
-
-    	    if (this.domain && !this.hostOnly) {
-    	      str += `; Domain=${this.domain}`;
-    	    }
-    	    if (this.path) {
-    	      str += `; Path=${this.path}`;
-    	    }
-
-    	    if (this.secure) {
-    	      str += "; Secure";
-    	    }
-    	    if (this.httpOnly) {
-    	      str += "; HttpOnly";
-    	    }
-    	    if (this.sameSite && this.sameSite !== "none") {
-    	      const ssCanon = Cookie.sameSiteCanonical[this.sameSite.toLowerCase()];
-    	      str += `; SameSite=${ssCanon ? ssCanon : this.sameSite}`;
-    	    }
-    	    if (this.extensions) {
-    	      this.extensions.forEach(ext => {
-    	        str += `; ${ext}`;
-    	      });
-    	    }
-
-    	    return str;
-    	  }
-
-    	  // TTL() partially replaces the "expiry-time" parts of S5.3 step 3 (setCookie()
-    	  // elsewhere)
-    	  // S5.3 says to give the "latest representable date" for which we use Infinity
-    	  // For "expired" we use 0
-    	  TTL(now) {
-    	    /* RFC6265 S4.1.2.2 If a cookie has both the Max-Age and the Expires
-    	     * attribute, the Max-Age attribute has precedence and controls the
-    	     * expiration date of the cookie.
-    	     * (Concurs with S5.3 step 3)
-    	     */
-    	    if (this.maxAge != null) {
-    	      return this.maxAge <= 0 ? 0 : this.maxAge * 1000;
-    	    }
-
-    	    let expires = this.expires;
-    	    if (expires != Infinity) {
-    	      if (!(expires instanceof Date)) {
-    	        expires = parseDate(expires) || Infinity;
-    	      }
-
-    	      if (expires == Infinity) {
-    	        return Infinity;
-    	      }
-
-    	      return expires.getTime() - (now || Date.now());
-    	    }
-
-    	    return Infinity;
-    	  }
-
-    	  // expiryTime() replaces the "expiry-time" parts of S5.3 step 3 (setCookie()
-    	  // elsewhere)
-    	  expiryTime(now) {
-    	    if (this.maxAge != null) {
-    	      const relativeTo = now || this.creation || new Date();
-    	      const age = this.maxAge <= 0 ? -Infinity : this.maxAge * 1000;
-    	      return relativeTo.getTime() + age;
-    	    }
-
-    	    if (this.expires == Infinity) {
-    	      return Infinity;
-    	    }
-    	    return this.expires.getTime();
-    	  }
-
-    	  // expiryDate() replaces the "expiry-time" parts of S5.3 step 3 (setCookie()
-    	  // elsewhere), except it returns a Date
-    	  expiryDate(now) {
-    	    const millisec = this.expiryTime(now);
-    	    if (millisec == Infinity) {
-    	      return new Date(MAX_TIME);
-    	    } else if (millisec == -Infinity) {
-    	      return new Date(MIN_TIME);
-    	    } else {
-    	      return new Date(millisec);
-    	    }
-    	  }
-
-    	  // This replaces the "persistent-flag" parts of S5.3 step 3
-    	  isPersistent() {
-    	    return this.maxAge != null || this.expires != Infinity;
-    	  }
-
-    	  // Mostly S5.1.2 and S5.2.3:
-    	  canonicalizedDomain() {
-    	    if (this.domain == null) {
-    	      return null;
-    	    }
-    	    return canonicalDomain(this.domain);
-    	  }
-
-    	  cdomain() {
-    	    return this.canonicalizedDomain();
-    	  }
-    	}
-
-    	Cookie.cookiesCreated = 0;
-    	Cookie.parse = parse;
-    	Cookie.fromJSON = fromJSON;
-    	Cookie.serializableProperties = Object.keys(cookieDefaults);
-    	Cookie.sameSiteLevel = {
-    	  strict: 3,
-    	  lax: 2,
-    	  none: 1
-    	};
-
-    	Cookie.sameSiteCanonical = {
-    	  strict: "Strict",
-    	  lax: "Lax"
-    	};
-
-    	function getNormalizedPrefixSecurity(prefixSecurity) {
-    	  if (prefixSecurity != null) {
-    	    const normalizedPrefixSecurity = prefixSecurity.toLowerCase();
-    	    /* The three supported options */
-    	    switch (normalizedPrefixSecurity) {
-    	      case PrefixSecurityEnum.STRICT:
-    	      case PrefixSecurityEnum.SILENT:
-    	      case PrefixSecurityEnum.DISABLED:
-    	        return normalizedPrefixSecurity;
-    	    }
-    	  }
-    	  /* Default is SILENT */
-    	  return PrefixSecurityEnum.SILENT;
-    	}
-
-    	class CookieJar {
-    	  constructor(store, options = { rejectPublicSuffixes: true }) {
-    	    if (typeof options === "boolean") {
-    	      options = { rejectPublicSuffixes: options };
-    	    }
-    	    validators.validate(validators.isObject(options), options);
-    	    this.rejectPublicSuffixes = options.rejectPublicSuffixes;
-    	    this.enableLooseMode = !!options.looseMode;
-    	    this.allowSpecialUseDomain =
-    	      typeof options.allowSpecialUseDomain === "boolean"
-    	        ? options.allowSpecialUseDomain
-    	        : true;
-    	    this.store = store || new MemoryCookieStore();
-    	    this.prefixSecurity = getNormalizedPrefixSecurity(options.prefixSecurity);
-    	    this._cloneSync = syncWrap("clone");
-    	    this._importCookiesSync = syncWrap("_importCookies");
-    	    this.getCookiesSync = syncWrap("getCookies");
-    	    this.getCookieStringSync = syncWrap("getCookieString");
-    	    this.getSetCookieStringsSync = syncWrap("getSetCookieStrings");
-    	    this.removeAllCookiesSync = syncWrap("removeAllCookies");
-    	    this.setCookieSync = syncWrap("setCookie");
-    	    this.serializeSync = syncWrap("serialize");
-    	  }
-
-    	  setCookie(cookie, url, options, cb) {
-    	    validators.validate(validators.isUrlStringOrObject(url), cb, options);
-
-    	    let err;
-
-    	    if (validators.isFunction(url)) {
-    	      cb = url;
-    	      return cb(new Error("No URL was specified"));
-    	    }
-
-    	    const context = getCookieContext(url);
-    	    if (validators.isFunction(options)) {
-    	      cb = options;
-    	      options = {};
-    	    }
-
-    	    validators.validate(validators.isFunction(cb), cb);
-
-    	    if (
-    	      !validators.isNonEmptyString(cookie) &&
-    	      !validators.isObject(cookie) &&
-    	      cookie instanceof String &&
-    	      cookie.length == 0
-    	    ) {
-    	      return cb(null);
-    	    }
-
-    	    const host = canonicalDomain(context.hostname);
-    	    const loose = options.loose || this.enableLooseMode;
-
-    	    let sameSiteContext = null;
-    	    if (options.sameSiteContext) {
-    	      sameSiteContext = checkSameSiteContext(options.sameSiteContext);
-    	      if (!sameSiteContext) {
-    	        return cb(new Error(SAME_SITE_CONTEXT_VAL_ERR));
-    	      }
-    	    }
-
-    	    // S5.3 step 1
-    	    if (typeof cookie === "string" || cookie instanceof String) {
-    	      cookie = Cookie.parse(cookie, { loose: loose });
-    	      if (!cookie) {
-    	        err = new Error("Cookie failed to parse");
-    	        return cb(options.ignoreError ? null : err);
-    	      }
-    	    } else if (!(cookie instanceof Cookie)) {
-    	      // If you're seeing this error, and are passing in a Cookie object,
-    	      // it *might* be a Cookie object from another loaded version of tough-cookie.
-    	      err = new Error(
-    	        "First argument to setCookie must be a Cookie object or string"
-    	      );
-    	      return cb(options.ignoreError ? null : err);
-    	    }
-
-    	    // S5.3 step 2
-    	    const now = options.now || new Date(); // will assign later to save effort in the face of errors
-
-    	    // S5.3 step 3: NOOP; persistent-flag and expiry-time is handled by getCookie()
-
-    	    // S5.3 step 4: NOOP; domain is null by default
-
-    	    // S5.3 step 5: public suffixes
-    	    if (this.rejectPublicSuffixes && cookie.domain) {
-    	      const suffix = pubsuffix.getPublicSuffix(cookie.cdomain(), {
-    	        allowSpecialUseDomain: this.allowSpecialUseDomain,
-    	        ignoreError: options.ignoreError
-    	      });
-    	      if (suffix == null && !IP_V6_REGEX_OBJECT.test(cookie.domain)) {
-    	        // e.g. "com"
-    	        err = new Error("Cookie has domain set to a public suffix");
-    	        return cb(options.ignoreError ? null : err);
-    	      }
-    	    }
-
-    	    // S5.3 step 6:
-    	    if (cookie.domain) {
-    	      if (!domainMatch(host, cookie.cdomain(), false)) {
-    	        err = new Error(
-    	          `Cookie not in this host's domain. Cookie:${cookie.cdomain()} Request:${host}`
-    	        );
-    	        return cb(options.ignoreError ? null : err);
-    	      }
-
-    	      if (cookie.hostOnly == null) {
-    	        // don't reset if already set
-    	        cookie.hostOnly = false;
-    	      }
-    	    } else {
-    	      cookie.hostOnly = true;
-    	      cookie.domain = host;
-    	    }
-
-    	    //S5.2.4 If the attribute-value is empty or if the first character of the
-    	    //attribute-value is not %x2F ("/"):
-    	    //Let cookie-path be the default-path.
-    	    if (!cookie.path || cookie.path[0] !== "/") {
-    	      cookie.path = defaultPath(context.pathname);
-    	      cookie.pathIsDefault = true;
-    	    }
-
-    	    // S5.3 step 8: NOOP; secure attribute
-    	    // S5.3 step 9: NOOP; httpOnly attribute
-
-    	    // S5.3 step 10
-    	    if (options.http === false && cookie.httpOnly) {
-    	      err = new Error("Cookie is HttpOnly and this isn't an HTTP API");
-    	      return cb(options.ignoreError ? null : err);
-    	    }
-
-    	    // 6252bis-02 S5.4 Step 13 & 14:
-    	    if (
-    	      cookie.sameSite !== "none" &&
-    	      cookie.sameSite !== undefined &&
-    	      sameSiteContext
-    	    ) {
-    	      // "If the cookie's "same-site-flag" is not "None", and the cookie
-    	      //  is being set from a context whose "site for cookies" is not an
-    	      //  exact match for request-uri's host's registered domain, then
-    	      //  abort these steps and ignore the newly created cookie entirely."
-    	      if (sameSiteContext === "none") {
-    	        err = new Error(
-    	          "Cookie is SameSite but this is a cross-origin request"
-    	        );
-    	        return cb(options.ignoreError ? null : err);
-    	      }
-    	    }
-
-    	    /* 6265bis-02 S5.4 Steps 15 & 16 */
-    	    const ignoreErrorForPrefixSecurity =
-    	      this.prefixSecurity === PrefixSecurityEnum.SILENT;
-    	    const prefixSecurityDisabled =
-    	      this.prefixSecurity === PrefixSecurityEnum.DISABLED;
-    	    /* If prefix checking is not disabled ...*/
-    	    if (!prefixSecurityDisabled) {
-    	      let errorFound = false;
-    	      let errorMsg;
-    	      /* Check secure prefix condition */
-    	      if (!isSecurePrefixConditionMet(cookie)) {
-    	        errorFound = true;
-    	        errorMsg = "Cookie has __Secure prefix but Secure attribute is not set";
-    	      } else if (!isHostPrefixConditionMet(cookie)) {
-    	        /* Check host prefix condition */
-    	        errorFound = true;
-    	        errorMsg =
-    	          "Cookie has __Host prefix but either Secure or HostOnly attribute is not set or Path is not '/'";
-    	      }
-    	      if (errorFound) {
-    	        return cb(
-    	          options.ignoreError || ignoreErrorForPrefixSecurity
-    	            ? null
-    	            : new Error(errorMsg)
-    	        );
-    	      }
-    	    }
-
-    	    const store = this.store;
-
-    	    if (!store.updateCookie) {
-    	      store.updateCookie = function(oldCookie, newCookie, cb) {
-    	        this.putCookie(newCookie, cb);
-    	      };
-    	    }
-
-    	    function withCookie(err, oldCookie) {
-    	      if (err) {
-    	        return cb(err);
-    	      }
-
-    	      const next = function(err) {
-    	        if (err) {
-    	          return cb(err);
-    	        } else {
-    	          cb(null, cookie);
-    	        }
-    	      };
-
-    	      if (oldCookie) {
-    	        // S5.3 step 11 - "If the cookie store contains a cookie with the same name,
-    	        // domain, and path as the newly created cookie:"
-    	        if (options.http === false && oldCookie.httpOnly) {
-    	          // step 11.2
-    	          err = new Error("old Cookie is HttpOnly and this isn't an HTTP API");
-    	          return cb(options.ignoreError ? null : err);
-    	        }
-    	        cookie.creation = oldCookie.creation; // step 11.3
-    	        cookie.creationIndex = oldCookie.creationIndex; // preserve tie-breaker
-    	        cookie.lastAccessed = now;
-    	        // Step 11.4 (delete cookie) is implied by just setting the new one:
-    	        store.updateCookie(oldCookie, cookie, next); // step 12
-    	      } else {
-    	        cookie.creation = cookie.lastAccessed = now;
-    	        store.putCookie(cookie, next); // step 12
-    	      }
-    	    }
-
-    	    store.findCookie(cookie.domain, cookie.path, cookie.key, withCookie);
-    	  }
-
-    	  // RFC6365 S5.4
-    	  getCookies(url, options, cb) {
-    	    validators.validate(validators.isUrlStringOrObject(url), cb, url);
-
-    	    const context = getCookieContext(url);
-    	    if (validators.isFunction(options)) {
-    	      cb = options;
-    	      options = {};
-    	    }
-    	    validators.validate(validators.isObject(options), cb, options);
-    	    validators.validate(validators.isFunction(cb), cb);
-
-    	    const host = canonicalDomain(context.hostname);
-    	    const path = context.pathname || "/";
-
-    	    let secure = options.secure;
-    	    if (
-    	      secure == null &&
-    	      context.protocol &&
-    	      (context.protocol == "https:" || context.protocol == "wss:")
-    	    ) {
-    	      secure = true;
-    	    }
-
-    	    let sameSiteLevel = 0;
-    	    if (options.sameSiteContext) {
-    	      const sameSiteContext = checkSameSiteContext(options.sameSiteContext);
-    	      sameSiteLevel = Cookie.sameSiteLevel[sameSiteContext];
-    	      if (!sameSiteLevel) {
-    	        return cb(new Error(SAME_SITE_CONTEXT_VAL_ERR));
-    	      }
-    	    }
-
-    	    let http = options.http;
-    	    if (http == null) {
-    	      http = true;
-    	    }
-
-    	    const now = options.now || Date.now();
-    	    const expireCheck = options.expire !== false;
-    	    const allPaths = !!options.allPaths;
-    	    const store = this.store;
-
-    	    function matchingCookie(c) {
-    	      // "Either:
-    	      //   The cookie's host-only-flag is true and the canonicalized
-    	      //   request-host is identical to the cookie's domain.
-    	      // Or:
-    	      //   The cookie's host-only-flag is false and the canonicalized
-    	      //   request-host domain-matches the cookie's domain."
-    	      if (c.hostOnly) {
-    	        if (c.domain != host) {
-    	          return false;
-    	        }
-    	      } else {
-    	        if (!domainMatch(host, c.domain, false)) {
-    	          return false;
-    	        }
-    	      }
-
-    	      // "The request-uri's path path-matches the cookie's path."
-    	      if (!allPaths && !pathMatch(path, c.path)) {
-    	        return false;
-    	      }
-
-    	      // "If the cookie's secure-only-flag is true, then the request-uri's
-    	      // scheme must denote a "secure" protocol"
-    	      if (c.secure && !secure) {
-    	        return false;
-    	      }
-
-    	      // "If the cookie's http-only-flag is true, then exclude the cookie if the
-    	      // cookie-string is being generated for a "non-HTTP" API"
-    	      if (c.httpOnly && !http) {
-    	        return false;
-    	      }
-
-    	      // RFC6265bis-02 S5.3.7
-    	      if (sameSiteLevel) {
-    	        const cookieLevel = Cookie.sameSiteLevel[c.sameSite || "none"];
-    	        if (cookieLevel > sameSiteLevel) {
-    	          // only allow cookies at or below the request level
-    	          return false;
-    	        }
-    	      }
-
-    	      // deferred from S5.3
-    	      // non-RFC: allow retention of expired cookies by choice
-    	      if (expireCheck && c.expiryTime() <= now) {
-    	        store.removeCookie(c.domain, c.path, c.key, () => {}); // result ignored
-    	        return false;
-    	      }
-
-    	      return true;
-    	    }
-
-    	    store.findCookies(
-    	      host,
-    	      allPaths ? null : path,
-    	      this.allowSpecialUseDomain,
-    	      (err, cookies) => {
-    	        if (err) {
-    	          return cb(err);
-    	        }
-
-    	        cookies = cookies.filter(matchingCookie);
-
-    	        // sorting of S5.4 part 2
-    	        if (options.sort !== false) {
-    	          cookies = cookies.sort(cookieCompare);
-    	        }
-
-    	        // S5.4 part 3
-    	        const now = new Date();
-    	        for (const cookie of cookies) {
-    	          cookie.lastAccessed = now;
-    	        }
-    	        // TODO persist lastAccessed
-
-    	        cb(null, cookies);
-    	      }
-    	    );
-    	  }
-
-    	  getCookieString(...args) {
-    	    const cb = args.pop();
-    	    validators.validate(validators.isFunction(cb), cb);
-    	    const next = function(err, cookies) {
-    	      if (err) {
-    	        cb(err);
-    	      } else {
-    	        cb(
-    	          null,
-    	          cookies
-    	            .sort(cookieCompare)
-    	            .map(c => c.cookieString())
-    	            .join("; ")
-    	        );
-    	      }
-    	    };
-    	    args.push(next);
-    	    this.getCookies.apply(this, args);
-    	  }
-
-    	  getSetCookieStrings(...args) {
-    	    const cb = args.pop();
-    	    validators.validate(validators.isFunction(cb), cb);
-    	    const next = function(err, cookies) {
-    	      if (err) {
-    	        cb(err);
-    	      } else {
-    	        cb(
-    	          null,
-    	          cookies.map(c => {
-    	            return c.toString();
-    	          })
-    	        );
-    	      }
-    	    };
-    	    args.push(next);
-    	    this.getCookies.apply(this, args);
-    	  }
-
-    	  serialize(cb) {
-    	    validators.validate(validators.isFunction(cb), cb);
-    	    let type = this.store.constructor.name;
-    	    if (validators.isObject(type)) {
-    	      type = null;
-    	    }
-
-    	    // update README.md "Serialization Format" if you change this, please!
-    	    const serialized = {
-    	      // The version of tough-cookie that serialized this jar. Generally a good
-    	      // practice since future versions can make data import decisions based on
-    	      // known past behavior. When/if this matters, use `semver`.
-    	      version: `tough-cookie@${VERSION}`,
-
-    	      // add the store type, to make humans happy:
-    	      storeType: type,
-
-    	      // CookieJar configuration:
-    	      rejectPublicSuffixes: !!this.rejectPublicSuffixes,
-    	      enableLooseMode: !!this.enableLooseMode,
-    	      allowSpecialUseDomain: !!this.allowSpecialUseDomain,
-    	      prefixSecurity: getNormalizedPrefixSecurity(this.prefixSecurity),
-
-    	      // this gets filled from getAllCookies:
-    	      cookies: []
-    	    };
-
-    	    if (
-    	      !(
-    	        this.store.getAllCookies &&
-    	        typeof this.store.getAllCookies === "function"
-    	      )
-    	    ) {
-    	      return cb(
-    	        new Error(
-    	          "store does not support getAllCookies and cannot be serialized"
-    	        )
-    	      );
-    	    }
-
-    	    this.store.getAllCookies((err, cookies) => {
-    	      if (err) {
-    	        return cb(err);
-    	      }
-
-    	      serialized.cookies = cookies.map(cookie => {
-    	        // convert to serialized 'raw' cookies
-    	        cookie = cookie instanceof Cookie ? cookie.toJSON() : cookie;
-
-    	        // Remove the index so new ones get assigned during deserialization
-    	        delete cookie.creationIndex;
-
-    	        return cookie;
-    	      });
-
-    	      return cb(null, serialized);
-    	    });
-    	  }
-
-    	  toJSON() {
-    	    return this.serializeSync();
-    	  }
-
-    	  // use the class method CookieJar.deserialize instead of calling this directly
-    	  _importCookies(serialized, cb) {
-    	    let cookies = serialized.cookies;
-    	    if (!cookies || !Array.isArray(cookies)) {
-    	      return cb(new Error("serialized jar has no cookies array"));
-    	    }
-    	    cookies = cookies.slice(); // do not modify the original
-
-    	    const putNext = err => {
-    	      if (err) {
-    	        return cb(err);
-    	      }
-
-    	      if (!cookies.length) {
-    	        return cb(err, this);
-    	      }
-
-    	      let cookie;
-    	      try {
-    	        cookie = fromJSON(cookies.shift());
-    	      } catch (e) {
-    	        return cb(e);
-    	      }
-
-    	      if (cookie === null) {
-    	        return putNext(null); // skip this cookie
-    	      }
-
-    	      this.store.putCookie(cookie, putNext);
-    	    };
-
-    	    putNext();
-    	  }
-
-    	  clone(newStore, cb) {
-    	    if (arguments.length === 1) {
-    	      cb = newStore;
-    	      newStore = null;
-    	    }
-
-    	    this.serialize((err, serialized) => {
-    	      if (err) {
-    	        return cb(err);
-    	      }
-    	      CookieJar.deserialize(serialized, newStore, cb);
-    	    });
-    	  }
-
-    	  cloneSync(newStore) {
-    	    if (arguments.length === 0) {
-    	      return this._cloneSync();
-    	    }
-    	    if (!newStore.synchronous) {
-    	      throw new Error(
-    	        "CookieJar clone destination store is not synchronous; use async API instead."
-    	      );
-    	    }
-    	    return this._cloneSync(newStore);
-    	  }
-
-    	  removeAllCookies(cb) {
-    	    validators.validate(validators.isFunction(cb), cb);
-    	    const store = this.store;
-
-    	    // Check that the store implements its own removeAllCookies(). The default
-    	    // implementation in Store will immediately call the callback with a "not
-    	    // implemented" Error.
-    	    if (
-    	      typeof store.removeAllCookies === "function" &&
-    	      store.removeAllCookies !== Store.prototype.removeAllCookies
-    	    ) {
-    	      return store.removeAllCookies(cb);
-    	    }
-
-    	    store.getAllCookies((err, cookies) => {
-    	      if (err) {
-    	        return cb(err);
-    	      }
-
-    	      if (cookies.length === 0) {
-    	        return cb(null);
-    	      }
-
-    	      let completedCount = 0;
-    	      const removeErrors = [];
-
-    	      function removeCookieCb(removeErr) {
-    	        if (removeErr) {
-    	          removeErrors.push(removeErr);
-    	        }
-
-    	        completedCount++;
-
-    	        if (completedCount === cookies.length) {
-    	          return cb(removeErrors.length ? removeErrors[0] : null);
-    	        }
-    	      }
-
-    	      cookies.forEach(cookie => {
-    	        store.removeCookie(
-    	          cookie.domain,
-    	          cookie.path,
-    	          cookie.key,
-    	          removeCookieCb
-    	        );
-    	      });
-    	    });
-    	  }
-
-    	  static deserialize(strOrObj, store, cb) {
-    	    if (arguments.length !== 3) {
-    	      // store is optional
-    	      cb = store;
-    	      store = null;
-    	    }
-    	    validators.validate(validators.isFunction(cb), cb);
-
-    	    let serialized;
-    	    if (typeof strOrObj === "string") {
-    	      serialized = jsonParse(strOrObj);
-    	      if (serialized instanceof Error) {
-    	        return cb(serialized);
-    	      }
-    	    } else {
-    	      serialized = strOrObj;
-    	    }
-
-    	    const jar = new CookieJar(store, {
-    	      rejectPublicSuffixes: serialized.rejectPublicSuffixes,
-    	      looseMode: serialized.enableLooseMode,
-    	      allowSpecialUseDomain: serialized.allowSpecialUseDomain,
-    	      prefixSecurity: serialized.prefixSecurity
-    	    });
-    	    jar._importCookies(serialized, err => {
-    	      if (err) {
-    	        return cb(err);
-    	      }
-    	      cb(null, jar);
-    	    });
-    	  }
-
-    	  static deserializeSync(strOrObj, store) {
-    	    const serialized =
-    	      typeof strOrObj === "string" ? JSON.parse(strOrObj) : strOrObj;
-    	    const jar = new CookieJar(store, {
-    	      rejectPublicSuffixes: serialized.rejectPublicSuffixes,
-    	      looseMode: serialized.enableLooseMode
-    	    });
-
-    	    // catch this mistake early:
-    	    if (!jar.store.synchronous) {
-    	      throw new Error(
-    	        "CookieJar store is not synchronous; use async API instead."
-    	      );
-    	    }
-
-    	    jar._importCookiesSync(serialized);
-    	    return jar;
-    	  }
-    	}
-    	CookieJar.fromJSON = CookieJar.deserializeSync;
-
-    	[
-    	  "_importCookies",
-    	  "clone",
-    	  "getCookies",
-    	  "getCookieString",
-    	  "getSetCookieStrings",
-    	  "removeAllCookies",
-    	  "serialize",
-    	  "setCookie"
-    	].forEach(name => {
-    	  CookieJar.prototype[name] = fromCallback(CookieJar.prototype[name]);
-    	});
-    	CookieJar.deserialize = fromCallback(CookieJar.deserialize);
-
-    	// Use a closure to provide a true imperative API for synchronous stores.
-    	function syncWrap(method) {
-    	  return function(...args) {
-    	    if (!this.store.synchronous) {
-    	      throw new Error(
-    	        "CookieJar store is not synchronous; use async API instead."
-    	      );
-    	    }
-
-    	    let syncErr, syncResult;
-    	    this[method](...args, (err, result) => {
-    	      syncErr = err;
-    	      syncResult = result;
-    	    });
-
-    	    if (syncErr) {
-    	      throw syncErr;
-    	    }
-    	    return syncResult;
-    	  };
-    	}
-
-    	cookie.version = VERSION;
-    	cookie.CookieJar = CookieJar;
-    	cookie.Cookie = Cookie;
-    	cookie.Store = Store;
-    	cookie.MemoryCookieStore = MemoryCookieStore;
-    	cookie.parseDate = parseDate;
-    	cookie.formatDate = formatDate;
-    	cookie.parse = parse;
-    	cookie.fromJSON = fromJSON;
-    	cookie.domainMatch = domainMatch;
-    	cookie.defaultPath = defaultPath;
-    	cookie.pathMatch = pathMatch;
-    	cookie.getPublicSuffix = pubsuffix.getPublicSuffix;
-    	cookie.cookieCompare = cookieCompare;
-    	cookie.permuteDomain = requirePermuteDomain().permuteDomain;
-    	cookie.permutePath = permutePath;
-    	cookie.canonicalDomain = canonicalDomain;
-    	cookie.PrefixSecurityEnum = PrefixSecurityEnum;
-    	cookie.ParameterError = validators.ParameterError;
-    	return cookie;
-    }
-
-    var cookieExports = requireCookie();
-
-    class ExtendedCookieJar extends cookieExports.CookieJar {
-        async setFromSetCookieHeaders(setCookieHeader, url) {
-            let cookies;
-            // console.log("setFromSetCookieHeaders", setCookieHeader);
-            if (typeof setCookieHeader === "undefined") ;
-            else if (setCookieHeader instanceof Array) {
-                cookies = setCookieHeader.map((header) => cookieExports.Cookie.parse(header));
-            }
-            else if (typeof setCookieHeader === "string") {
-                cookies = [cookieExports.Cookie.parse(setCookieHeader)];
-            }
-            if (cookies)
-                for (const cookie of cookies)
-                    if (cookie instanceof cookieExports.Cookie) {
-                        // console.log("setCookieSync", cookie, url);
-                        await this.setCookie(cookie, url);
-                    }
-        }
-    }
-
-    const LoggerSchema = Type.Object({
-        info: Type.Function([], Type.Void()),
-        warn: Type.Function([], Type.Void()),
-        error: Type.Function([], Type.Void()),
-        debug: Type.Function([], Type.Void()),
-    });
-    const ValidationOptionsSchema = Type.Object({
-        logErrors: Type.Optional(Type.Boolean()),
-        logOptionsErrors: Type.Optional(Type.Boolean()),
-        _internalThrowOnAdditionalProperties: Type.Optional(Type.Boolean({
-            default: process.env.NODE_ENV === "test",
-            description: "Use this property to throw when properties beyond what is explicitly specified in the schema are provided. It is an internal option and subject to change, use at your own risk",
-        })),
-    });
-    const YahooFinanceOptionsSchema = Type.Object({
-        YF_QUERY_HOST: Type.Optional(Type.String()),
-        cookieJar: Type.Optional(Type.Any()),
-        queue: Type.Optional(QueueOptionsSchema),
-        validation: Type.Optional(ValidationOptionsSchema),
-        logger: Type.Optional(LoggerSchema),
-    }, { title: "YahooFinanceOptions" });
-    const options$1 = {
-        YF_QUERY_HOST: process.env.YF_QUERY_HOST || "query2.finance.yahoo.com",
-        cookieJar: new ExtendedCookieJar(),
-        queue: {
-            concurrency: 4, // Min: 1, Max: Infinity
-            timeout: 60,
-        },
-        validation: {
-            logErrors: true,
-            logOptionsErrors: true,
-        },
-        logger: {
-            info: (...args) => console.log(...args),
-            warn: (...args) => console.warn(...args),
-            error: (...args) => console.error(...args),
-            debug: (...args) => console.log(...args),
-        },
-    };
-
-    const logger = options$1.logger || console;
-    const notices = {
-        yahooSurvey: {
-            id: "yahooSurvey",
-            text: "Please consider completing the survey at https://bit.ly/yahoo-finance-api-feedback " +
-                "if you haven't already; for more info see " +
-                "https://github.com/gadicc/node-yahoo-finance2/issues/764#issuecomment-2056623851.",
-            onceOnly: true,
-        },
-        ripHistorical: {
-            id: "ripHistorical",
-            text: "[Deprecated] historical() relies on an API that Yahoo have removed.  We'll " +
-                "map this request to chart() for convenience, but, please consider using " +
-                "chart() directly instead; for more info see " +
-                "https://github.com/gadicc/node-yahoo-finance2/issues/795.",
-            level: "warn",
-            onceOnly: true,
-        },
-    };
-    function showNotice(id) {
-        const n = notices[id];
-        if (!n)
-            throw new Error(`Unknown notice id: ${id}`);
-        if (n.suppress)
-            return;
-        if (n.onceOnly)
-            n.suppress = true;
-        const text = n.text +
-            (n.onceOnly ? "  This will only be shown once, but you" : "You") +
-            " can suppress this message in future with `yahooFinance.suppressNotices(['" +
-            id +
-            "'])`.";
-        const level = n.level || "info";
-        logger[level](text);
-    }
-    function suppressNotices(noticeIds) {
-        noticeIds.forEach((id) => {
-            const n = notices[id];
-            if (!n)
-                logger.error(`Unknown notice id: ${id}`);
-            n.suppress = true;
-        });
-    }
-
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: we have to ignore this for csm output.
-    const CONFIG_FAKE_URL = "http://config.yf2/";
-    let crumb = null;
-    const parseHtmlEntities = (str) => str.replace(/&#x([0-9A-Fa-f]{1,3});/gi, (_, numStr) => String.fromCharCode(parseInt(numStr, 16)));
-    async function _getCrumb(cookieJar, fetch, fetchOptionsBase, logger, url = "https://finance.yahoo.com/quote/AAPL", develOverride = "getCrumb-quote-AAPL.json", noCache = false) {
-        if (!crumb) {
-            const cookies = await cookieJar.getCookies(CONFIG_FAKE_URL);
-            for (const cookie of cookies) {
-                if (cookie.key === "crumb") {
-                    crumb = cookie.value;
-                    logger.debug("Retrieved crumb from cookie store: " + crumb);
-                    break;
-                }
-            }
-        }
-        if (crumb && !noCache) {
-            // If we still have a valid (non-expired) cookie, return the existing crumb.
-            const existingCookies = await cookieJar.getCookies(url, { expire: true });
-            if (existingCookies.length)
-                return crumb;
-        }
-        async function processSetCookieHeader(header, url) {
-            if (header) {
-                await cookieJar.setFromSetCookieHeaders(header, url);
-                return true;
-            }
-            return false;
-        }
-        logger.debug("Fetching crumb and cookies from " + url + "...");
-        const fetchOptions = {
-            ...fetchOptionsBase,
-            headers: {
-                ...fetchOptionsBase.headers,
-                // NB, we won't get a set-cookie header back without this:
-                accept: "text/html,application/xhtml+xml,application/xml",
-                // This request will get our first cookies, so nothing to send.
-                // cookie: await cookieJar.getCookieString(url),
-            },
-            redirect: "manual",
-            devel: fetchOptionsBase.devel && develOverride,
-        };
-        const response = await fetch(url, fetchOptions);
-        await processSetCookieHeader(response.headers.getSetCookie(), url);
-        // logger.debug(response.headers.raw());
-        // logger.debug(cookieJar);
-        const location = response.headers.get("location");
-        if (location) {
-            if (location.match(/guce.yahoo/)) {
-                const consentFetchOptions = {
-                    ...fetchOptions,
-                    headers: {
-                        ...fetchOptions.headers,
-                        // GUCS=XXXXXXXX; Max-Age=1800; Domain=.yahoo.com; Path=/; Secure
-                        cookie: await cookieJar.getCookieString(location),
-                    },
-                    devel: "getCrumb-quote-AAPL-consent.html",
-                };
-                // Returns 302 to collectConsent?sessionId=XXX
-                logger.debug("fetch", location /*, consentFetchOptions */);
-                const consentResponse = await fetch(location, consentFetchOptions);
-                const consentLocation = consentResponse.headers.get("location");
-                if (consentLocation) {
-                    if (!consentLocation.match(/collectConsent/))
-                        throw new Error("Unexpected redirect to " + consentLocation);
-                    const collectConsentFetchOptions = {
-                        ...consentFetchOptions,
-                        headers: {
-                            ...fetchOptions.headers,
-                            cookie: await cookieJar.getCookieString(consentLocation),
-                        },
-                        devel: "getCrumb-quote-AAPL-collectConsent.html",
-                    };
-                    logger.debug("fetch", consentLocation /*, collectConsentFetchOptions */);
-                    const collectConsentResponse = await fetch(consentLocation, collectConsentFetchOptions);
-                    const collectConsentBody = await collectConsentResponse.text();
-                    const collectConsentResponseParams = [
-                        ...collectConsentBody.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]+)">/g),
-                    ]
-                        .map(([, name, value]) => `${name}=${encodeURIComponent(parseHtmlEntities(value))}&`)
-                        .join("") + "agree=agree&agree=agree";
-                    const collectConsentSubmitFetchOptions = {
-                        ...consentFetchOptions,
-                        headers: {
-                            ...fetchOptions.headers,
-                            cookie: await cookieJar.getCookieString(consentLocation),
-                            "content-type": "application/x-www-form-urlencoded",
-                        },
-                        method: "POST",
-                        // body: "csrfToken=XjJfOYU&sessionId=3_cc-session_bd9a3b0c-c1b4-4aa8-8c18-7a82ec68a5d5&originalDoneUrl=https%3A%2F%2Ffinance.yahoo.com%2Fquote%2FAAPL%3Fguccounter%3D1&namespace=yahoo&agree=agree&agree=agree",
-                        body: collectConsentResponseParams,
-                        devel: "getCrumb-quote-AAPL-collectConsentSubmit",
-                    };
-                    logger.debug("fetch", consentLocation /*, collectConsentSubmitFetchOptions */);
-                    const collectConsentSubmitResponse = await fetch(consentLocation, collectConsentSubmitFetchOptions);
-                    // Set-Cookie: CFC=AQABCAFkWkdkjEMdLwQ9&s=AQAAAClxdtC-&g=ZFj24w; Expires=Wed, 8 May 2024 01:18:54 GMT; Domain=consent.yahoo.com; Path=/; Secure
-                    if (!(await processSetCookieHeader(collectConsentSubmitResponse.headers.getSetCookie(), consentLocation)))
-                        throw new Error("No set-cookie header on collectConsentSubmitResponse, please report.");
-                    // https://guce.yahoo.com/copyConsent?sessionId=3_cc-session_04da10ea-1025-4676-8175-60d2508bfc6c&lang=en-GB
-                    const collectConsentSubmitResponseLocation = collectConsentSubmitResponse.headers.get("location");
-                    if (!collectConsentSubmitResponseLocation)
-                        throw new Error("collectConsentSubmitResponse unexpectedly did not return a Location header, please report.");
-                    const copyConsentFetchOptions = {
-                        ...consentFetchOptions,
-                        headers: {
-                            ...fetchOptions.headers,
-                            cookie: await cookieJar.getCookieString(collectConsentSubmitResponseLocation),
-                        },
-                        devel: "getCrumb-quote-AAPL-copyConsent",
-                    };
-                    logger.debug("fetch", collectConsentSubmitResponseLocation /*, copyConsentFetchOptions */);
-                    const copyConsentResponse = await fetch(collectConsentSubmitResponseLocation, copyConsentFetchOptions);
-                    if (!(await processSetCookieHeader(copyConsentResponse.headers.getSetCookie(), collectConsentSubmitResponseLocation)))
-                        throw new Error("No set-cookie header on copyConsentResponse, please report.");
-                    const copyConsentResponseLocation = copyConsentResponse.headers.get("location");
-                    if (!copyConsentResponseLocation)
-                        throw new Error("collectConsentSubmitResponse unexpectedly did not return a Location header, please report.");
-                    const finalResponseFetchOptions = {
-                        ...fetchOptions,
-                        headers: {
-                            ...fetchOptions.headers,
-                            cookie: await cookieJar.getCookieString(collectConsentSubmitResponseLocation),
-                        },
-                        devel: "getCrumb-quote-AAPL-consent-final-redirect.html",
-                    };
-                    return await _getCrumb(cookieJar, fetch, finalResponseFetchOptions, logger, copyConsentResponseLocation, "getCrumb-quote-AAPL-consent-final-redirect.html", noCache);
-                }
-            }
-            else {
-                console.error("We expected a redirect to guce.yahoo.com, but got " + location);
-                console.error("We'll try to continue anyway - you can safely ignore this if the request succeeds");
-                // throw new Error(
-                // "Unsupported redirect to " + location + ", please report.");
-                // )
-            }
-        }
-        const cookie = (await cookieJar.getCookies(url, { expire: true }))[0];
-        if (cookie) {
-            logger.debug("Success. Cookie expires on " + cookie.expires);
-        }
-        else {
-            /*
-            logger.error(
-              "No cookie was retreieved.  Probably the next request " +
-                "will fail.  Please report."
-            );
-            */
-            throw new Error("No set-cookie header present in Yahoo's response.  Something must have changed, please report.");
-        }
-        /*
-        // This is the old way of getting the crumb, which is no longer working.
-        // Instead we make use of the code block that follows this comment, which
-        // uses the `/v1/test/getcrumb` endpoint.  However, the commented code
-        // below may still be useful in the future, so it is left here for now.
-      
-        const source = await response.text();
-      
-        // Could also match on window.YAHOO.context = { /* multi-line JSON */ /* }
-        const match = source.match(/\nwindow.YAHOO.context = ({[\s\S]+\n});\n/);
-        if (!match) {
-          throw new Error(
-            "Could not find window.YAHOO.context.  This is usually caused by " +
-              "temporary issues on Yahoo's servers that tend to resolve " +
-              "themselves; however, if the error persists for more than 12 " +
-              "hours, Yahoo's API may have changed, and you can help by reporting " +
-              "the issue.  Thanks :)"
-          );
-        }
-      
-        let context;
-        try {
-          context = JSON.parse(match[1]);
-        } catch (error) {
-          logger.debug(match[1]);
-          logger.error(error);
-          throw new Error(
-            "Could not parse window.YAHOO.context.  Yahoo's API may have changed; please report."
-          );
-        }
-      
-        crumb = context.crumb;
-        */
-        const GET_CRUMB_URL = "https://query1.finance.yahoo.com/v1/test/getcrumb";
-        const getCrumbOptions = {
-            ...fetchOptions,
-            headers: {
-                ...fetchOptions.headers,
-                // Big thanks to @nocodehummel who figured out a User-Agent that both
-                // works but still allows us to identify ourselves honestly.
-                "User-Agent": `Mozilla/5.0 (compatible; ${pkg.name}/${pkg.version})`,
-                cookie: await cookieJar.getCookieString(GET_CRUMB_URL),
-                origin: "https://finance.yahoo.com",
-                referer: url,
-                accept: "*/*",
-                "accept-encoding": "gzip, deflate, br",
-                "accept-language": "en-US,en;q=0.9",
-                "content-type": "text/plain",
-            },
-            devel: "getCrumb-getcrumb",
-        };
-        logger.debug("fetch", GET_CRUMB_URL /*, getCrumbOptions */);
-        const getCrumbResponse = await fetch(GET_CRUMB_URL, getCrumbOptions);
-        if (getCrumbResponse.status !== 200) {
-            throw new Error("Failed to get crumb, status " +
-                getCrumbResponse.status +
-                ", statusText: " +
-                getCrumbResponse.statusText);
-        }
-        const crumbFromGetCrumb = await getCrumbResponse.text();
-        crumb = crumbFromGetCrumb;
-        if (!crumb)
-            throw new Error("Could not find crumb.  Yahoo's API may have changed; please report.");
-        logger.debug("New crumb: " + crumb);
-        await cookieJar.setCookie(new cookieExports.Cookie({
-            key: "crumb",
-            value: crumb,
-        }), CONFIG_FAKE_URL);
-        promise = null;
-        return crumb;
-    }
-    let promise = null;
-    function getCrumb(cookieJar, fetch, fetchOptionsBase, logger, url = "https://finance.yahoo.com/quote/AAPL", __getCrumb = _getCrumb) {
-        showNotice("yahooSurvey");
-        if (!promise)
-            promise = __getCrumb(cookieJar, fetch, fetchOptionsBase, logger, url);
-        return promise;
-    }
-
-    const userAgent = `${pkg.name}/${pkg.version} (+${pkg.repository})`;
-    const _queue = new Queue();
-    function assertQueueOptions(queue, opts) {
-        if (typeof opts.concurrency === "number" &&
-            queue.concurrency !== opts.concurrency)
-            queue.concurrency = opts.concurrency;
-        if (typeof opts.timeout === "number" && queue.timeout !== opts.timeout)
-            queue.timeout = opts.timeout;
-    }
-    function substituteVariables(urlBase) {
-        return urlBase.replace(/\$\{([^}]+)\}/g, (match, varName) => {
-            if (varName === "YF_QUERY_HOST") {
-                // const hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
-                // return hosts[Math.floor(Math.random() * hosts.length)];
-                return this._opts.YF_QUERY_HOST || "query2.finance.yahoo.com";
-            }
-            else {
-                // i.e. return unsubstituted original variable expression ${VAR}
-                return match;
-            }
-        });
-    }
-    async function yahooFinanceFetch(urlBase, params = {}, moduleOpts = {}, func = "json", needsCrumb = false) {
-        var _a;
-        if (!(this && this._env))
-            throw new errors$1.NoEnvironmentError("yahooFinanceFetch called without this._env set");
-        // TODO: adds func type to json schema which is not supported
-        //const queue = moduleOpts.queue?._queue || _queue;
-        const queue = _queue;
-        assertQueueOptions(queue, { ...this._opts.queue, ...moduleOpts.queue });
-        const { URLSearchParams, fetch, fetchDevel } = this._env;
-        /* istanbul ignore next */
-        // no need to force coverage on real network request.
-        const fetchFunc = moduleOpts.devel ? await fetchDevel() : fetch;
-        const fetchOptionsBase = {
-            ...moduleOpts.fetchOptions,
-            devel: moduleOpts.devel,
-            headers: {
-                "User-Agent": userAgent,
-                ...(_a = moduleOpts.fetchOptions) === null || _a === void 0 ? void 0 : _a.headers,
-            },
-        };
-        if (needsCrumb) {
-            if (!this._opts.cookieJar)
-                throw new Error("No cookieJar set");
-            if (!this._opts.logger)
-                throw new Error("Logger was unset.");
-            const crumb = await getCrumb(this._opts.cookieJar, fetchFunc, fetchOptionsBase, this._opts.logger);
-            if (crumb)
-                params.crumb = crumb;
-        }
-        // @ts-expect-error: TODO copy interface? @types lib?
-        const urlSearchParams = new URLSearchParams(params);
-        const url = substituteVariables.call(this, urlBase) + "?" + urlSearchParams.toString();
-        // console.log(url);
-        // console.log(cookieJar.serializeSync());
-        if (!this._opts.cookieJar)
-            throw new Error("No cookieJar set");
-        const fetchOptions = {
-            ...fetchOptionsBase,
-            headers: {
-                ...fetchOptionsBase.headers,
-                cookie: await this._opts.cookieJar.getCookieString(url, {
-                    allPaths: true,
-                }),
-            },
-        };
-        // console.log("fetch", url, fetchOptions);
-        // used in moduleExec.ts
-        if (func === "csv")
-            func = "text";
-        const response = (await queue.add(() => fetchFunc(url, fetchOptions)));
-        const setCookieHeaders = response.headers.getSetCookie();
-        if (setCookieHeaders) {
-            if (!this._opts.cookieJar)
-                throw new Error("No cookieJar set");
-            this._opts.cookieJar.setFromSetCookieHeaders(setCookieHeaders, url);
-        }
-        const result = await response[func]();
-        /*
-          {
-            finance: {  // or quoteSummary, or any other single key
-              result: null,
-              error: {
-                code: 'Bad Request',
-                description: 'Missing required query parameter=q'
-              }
-            }
-          }
-         */
-        if (func === "json") {
-            const keys = Object.keys(result);
-            if (keys.length === 1) {
-                const errorObj = result[keys[0]].error;
-                if (errorObj) {
-                    const errorName = errorObj.code.replace(/ /g, "") + "Error";
-                    const ErrorClass = errors$1[errorName] || Error;
-                    throw new ErrorClass(errorObj.description);
-                }
-            }
-        }
-        // We do this last as it generally contains less information (e.g. no desc).
-        if (!response.ok) {
-            console.error(url);
-            const error = new errors$1.HTTPError(response.statusText);
-            error.code = response.status;
-            throw error;
-        }
-        return result;
-    }
-
-    // --------------------------------------------------------------------------
-    // Iterators
-    // --------------------------------------------------------------------------
-    /** Returns true if this value is an async iterator */
-    function IsAsyncIterator(value) {
-        return IsObject(value) && Symbol.asyncIterator in value;
-    }
-    /** Returns true if this value is an iterator */
-    function IsIterator(value) {
-        return IsObject(value) && Symbol.iterator in value;
-    }
-    // --------------------------------------------------------------------------
-    // Object Instances
-    // --------------------------------------------------------------------------
-    /** Returns true if this value is not an instance of a class */
-    function IsStandardObject(value) {
-        return IsObject(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
-    }
-    // --------------------------------------------------------------------------
-    // JavaScript
-    // --------------------------------------------------------------------------
-    /** Returns true if this value is a Promise */
-    function IsPromise(value) {
-        return value instanceof Promise;
-    }
-    /** Returns true if this value is a Date */
-    function IsDate(value) {
-        return value instanceof Date && Number.isFinite(value.getTime());
-    }
-    /** Returns true if the value is a Uint8Array */
-    function IsUint8Array(value) {
-        return value instanceof globalThis.Uint8Array;
-    }
-    /** Returns true of this value is an object type */
-    function IsObject(value) {
-        return value !== null && typeof value === 'object';
-    }
-    /** Returns true if this value is an array, but not a typed array */
-    function IsArray(value) {
-        return Array.isArray(value) && !ArrayBuffer.isView(value);
-    }
-    /** Returns true if this value is an undefined */
-    function IsUndefined(value) {
-        return value === undefined;
-    }
-    /** Returns true if this value is an null */
-    function IsNull(value) {
-        return value === null;
-    }
-    /** Returns true if this value is an boolean */
-    function IsBoolean(value) {
-        return typeof value === 'boolean';
-    }
-    /** Returns true if this value is an number */
-    function IsNumber(value) {
-        return typeof value === 'number';
-    }
-    /** Returns true if this value is an integer */
-    function IsInteger(value) {
-        return Number.isInteger(value);
-    }
-    /** Returns true if this value is bigint */
-    function IsBigInt(value) {
-        return typeof value === 'bigint';
-    }
-    /** Returns true if this value is string */
-    function IsString(value) {
-        return typeof value === 'string';
-    }
-    /** Returns true if this value is a function */
-    function IsFunction(value) {
-        return typeof value === 'function';
-    }
-    /** Returns true if this value is a symbol */
-    function IsSymbol(value) {
-        return typeof value === 'symbol';
-    }
-    /** Returns true if this value is a value type such as number, string, boolean */
-    function IsValueType(value) {
-        // prettier-ignore
-        return (IsBigInt(value) ||
-            IsBoolean(value) ||
-            IsNull(value) ||
-            IsNumber(value) ||
-            IsString(value) ||
-            IsSymbol(value) ||
-            IsUndefined(value));
-    }
-
-    var TypeSystemPolicy;
-    (function (TypeSystemPolicy) {
-        // ------------------------------------------------------------------
-        // TypeSystemPolicy
-        // ------------------------------------------------------------------
-        /** Shared assertion routines used by the value and errors modules */
-        /** Sets whether TypeBox should assert optional properties using the TypeScript `exactOptionalPropertyTypes` assertion policy. The default is `false` */
-        TypeSystemPolicy.ExactOptionalPropertyTypes = false;
-        /** Sets whether arrays should be treated as a kind of objects. The default is `false` */
-        TypeSystemPolicy.AllowArrayObject = false;
-        /** Sets whether `NaN` or `Infinity` should be treated as valid numeric values. The default is `false` */
-        TypeSystemPolicy.AllowNaN = false;
-        /** Sets whether `null` should validate for void types. The default is `false` */
-        TypeSystemPolicy.AllowNullVoid = false;
-        /** Asserts this value using the ExactOptionalPropertyTypes policy */
-        function IsExactOptionalProperty(value, key) {
-            return TypeSystemPolicy.ExactOptionalPropertyTypes ? key in value : value[key] !== undefined;
-        }
-        TypeSystemPolicy.IsExactOptionalProperty = IsExactOptionalProperty;
-        /** Asserts this value using the AllowArrayObjects policy */
-        function IsObjectLike(value) {
-            const isObject = IsObject(value);
-            return TypeSystemPolicy.AllowArrayObject ? isObject : isObject && !IsArray(value);
-        }
-        TypeSystemPolicy.IsObjectLike = IsObjectLike;
-        /** Asserts this value as a record using the AllowArrayObjects policy */
-        function IsRecordLike(value) {
-            return IsObjectLike(value) && !(value instanceof Date) && !(value instanceof Uint8Array);
-        }
-        TypeSystemPolicy.IsRecordLike = IsRecordLike;
-        /** Asserts this value using the AllowNaN policy */
-        function IsNumberLike(value) {
-            return TypeSystemPolicy.AllowNaN ? IsNumber(value) : Number.isFinite(value);
-        }
-        TypeSystemPolicy.IsNumberLike = IsNumberLike;
-        /** Asserts this value using the AllowVoidNull policy */
-        function IsVoidLike(value) {
-            const isUndefined = IsUndefined(value);
-            return TypeSystemPolicy.AllowNullVoid ? isUndefined || value === null : isUndefined;
-        }
-        TypeSystemPolicy.IsVoidLike = IsVoidLike;
-    })(TypeSystemPolicy || (TypeSystemPolicy = {}));
-
-    // ------------------------------------------------------------------
-    // Errors
-    // ------------------------------------------------------------------
-    class TypeSystemDuplicateTypeKind extends TypeBoxError {
-        constructor(kind) {
-            super(`Duplicate type kind '${kind}' detected`);
-        }
-    }
-    class TypeSystemDuplicateFormat extends TypeBoxError {
-        constructor(kind) {
-            super(`Duplicate string format '${kind}' detected`);
-        }
-    }
-    /** Creates user defined types and formats and provides overrides for value checking behaviours */
-    var TypeSystem;
-    (function (TypeSystem) {
-        /** Creates a new type */
-        function Type(kind, check) {
-            if (Has(kind))
-                throw new TypeSystemDuplicateTypeKind(kind);
-            Set$1(kind, check);
-            return (options = {}) => Unsafe({ ...options, [Kind]: kind });
-        }
-        TypeSystem.Type = Type;
-        /** Creates a new string format */
-        function Format(format, check) {
-            if (Has$1(format))
-                throw new TypeSystemDuplicateFormat(format);
-            Set$2(format, check);
-            return format;
-        }
-        TypeSystem.Format = Format;
-    })(TypeSystem || (TypeSystem = {}));
-
-    /** Creates an error message using en-US as the default locale */
-    function DefaultErrorFunction(error) {
-        switch (error.errorType) {
-            case ValueErrorType.ArrayContains:
-                return 'Expected array to contain at least one matching value';
-            case ValueErrorType.ArrayMaxContains:
-                return `Expected array to contain no more than ${error.schema.maxContains} matching values`;
-            case ValueErrorType.ArrayMinContains:
-                return `Expected array to contain at least ${error.schema.minContains} matching values`;
-            case ValueErrorType.ArrayMaxItems:
-                return `Expected array length to be less or equal to ${error.schema.maxItems}`;
-            case ValueErrorType.ArrayMinItems:
-                return `Expected array length to be greater or equal to ${error.schema.minItems}`;
-            case ValueErrorType.ArrayUniqueItems:
-                return 'Expected array elements to be unique';
-            case ValueErrorType.Array:
-                return 'Expected array';
-            case ValueErrorType.AsyncIterator:
-                return 'Expected AsyncIterator';
-            case ValueErrorType.BigIntExclusiveMaximum:
-                return `Expected bigint to be less than ${error.schema.exclusiveMaximum}`;
-            case ValueErrorType.BigIntExclusiveMinimum:
-                return `Expected bigint to be greater than ${error.schema.exclusiveMinimum}`;
-            case ValueErrorType.BigIntMaximum:
-                return `Expected bigint to be less or equal to ${error.schema.maximum}`;
-            case ValueErrorType.BigIntMinimum:
-                return `Expected bigint to be greater or equal to ${error.schema.minimum}`;
-            case ValueErrorType.BigIntMultipleOf:
-                return `Expected bigint to be a multiple of ${error.schema.multipleOf}`;
-            case ValueErrorType.BigInt:
-                return 'Expected bigint';
-            case ValueErrorType.Boolean:
-                return 'Expected boolean';
-            case ValueErrorType.DateExclusiveMinimumTimestamp:
-                return `Expected Date timestamp to be greater than ${error.schema.exclusiveMinimumTimestamp}`;
-            case ValueErrorType.DateExclusiveMaximumTimestamp:
-                return `Expected Date timestamp to be less than ${error.schema.exclusiveMaximumTimestamp}`;
-            case ValueErrorType.DateMinimumTimestamp:
-                return `Expected Date timestamp to be greater or equal to ${error.schema.minimumTimestamp}`;
-            case ValueErrorType.DateMaximumTimestamp:
-                return `Expected Date timestamp to be less or equal to ${error.schema.maximumTimestamp}`;
-            case ValueErrorType.DateMultipleOfTimestamp:
-                return `Expected Date timestamp to be a multiple of ${error.schema.multipleOfTimestamp}`;
-            case ValueErrorType.Date:
-                return 'Expected Date';
-            case ValueErrorType.Function:
-                return 'Expected function';
-            case ValueErrorType.IntegerExclusiveMaximum:
-                return `Expected integer to be less than ${error.schema.exclusiveMaximum}`;
-            case ValueErrorType.IntegerExclusiveMinimum:
-                return `Expected integer to be greater than ${error.schema.exclusiveMinimum}`;
-            case ValueErrorType.IntegerMaximum:
-                return `Expected integer to be less or equal to ${error.schema.maximum}`;
-            case ValueErrorType.IntegerMinimum:
-                return `Expected integer to be greater or equal to ${error.schema.minimum}`;
-            case ValueErrorType.IntegerMultipleOf:
-                return `Expected integer to be a multiple of ${error.schema.multipleOf}`;
-            case ValueErrorType.Integer:
-                return 'Expected integer';
-            case ValueErrorType.IntersectUnevaluatedProperties:
-                return 'Unexpected property';
-            case ValueErrorType.Intersect:
-                return 'Expected all values to match';
-            case ValueErrorType.Iterator:
-                return 'Expected Iterator';
-            case ValueErrorType.Literal:
-                return `Expected ${typeof error.schema.const === 'string' ? `'${error.schema.const}'` : error.schema.const}`;
-            case ValueErrorType.Never:
-                return 'Never';
-            case ValueErrorType.Not:
-                return 'Value should not match';
-            case ValueErrorType.Null:
-                return 'Expected null';
-            case ValueErrorType.NumberExclusiveMaximum:
-                return `Expected number to be less than ${error.schema.exclusiveMaximum}`;
-            case ValueErrorType.NumberExclusiveMinimum:
-                return `Expected number to be greater than ${error.schema.exclusiveMinimum}`;
-            case ValueErrorType.NumberMaximum:
-                return `Expected number to be less or equal to ${error.schema.maximum}`;
-            case ValueErrorType.NumberMinimum:
-                return `Expected number to be greater or equal to ${error.schema.minimum}`;
-            case ValueErrorType.NumberMultipleOf:
-                return `Expected number to be a multiple of ${error.schema.multipleOf}`;
-            case ValueErrorType.Number:
-                return 'Expected number';
-            case ValueErrorType.Object:
-                return 'Expected object';
-            case ValueErrorType.ObjectAdditionalProperties:
-                return 'Unexpected property';
-            case ValueErrorType.ObjectMaxProperties:
-                return `Expected object to have no more than ${error.schema.maxProperties} properties`;
-            case ValueErrorType.ObjectMinProperties:
-                return `Expected object to have at least ${error.schema.minProperties} properties`;
-            case ValueErrorType.ObjectRequiredProperty:
-                return 'Expected required property';
-            case ValueErrorType.Promise:
-                return 'Expected Promise';
-            case ValueErrorType.RegExp:
-                return 'Expected string to match regular expression';
-            case ValueErrorType.StringFormatUnknown:
-                return `Unknown format '${error.schema.format}'`;
-            case ValueErrorType.StringFormat:
-                return `Expected string to match '${error.schema.format}' format`;
-            case ValueErrorType.StringMaxLength:
-                return `Expected string length less or equal to ${error.schema.maxLength}`;
-            case ValueErrorType.StringMinLength:
-                return `Expected string length greater or equal to ${error.schema.minLength}`;
-            case ValueErrorType.StringPattern:
-                return `Expected string to match '${error.schema.pattern}'`;
-            case ValueErrorType.String:
-                return 'Expected string';
-            case ValueErrorType.Symbol:
-                return 'Expected symbol';
-            case ValueErrorType.TupleLength:
-                return `Expected tuple to have ${error.schema.maxItems || 0} elements`;
-            case ValueErrorType.Tuple:
-                return 'Expected tuple';
-            case ValueErrorType.Uint8ArrayMaxByteLength:
-                return `Expected byte length less or equal to ${error.schema.maxByteLength}`;
-            case ValueErrorType.Uint8ArrayMinByteLength:
-                return `Expected byte length greater or equal to ${error.schema.minByteLength}`;
-            case ValueErrorType.Uint8Array:
-                return 'Expected Uint8Array';
-            case ValueErrorType.Undefined:
-                return 'Expected undefined';
-            case ValueErrorType.Union:
-                return 'Expected union value';
-            case ValueErrorType.Void:
-                return 'Expected void';
-            case ValueErrorType.Kind:
-                return `Expected kind '${error.schema[Kind]}'`;
-            default:
-                return 'Unknown error type';
-        }
-    }
-    /** Manages error message providers */
-    let errorFunction = DefaultErrorFunction;
-    /** Gets the error function used to generate error messages */
-    function GetErrorFunction() {
-        return errorFunction;
-    }
-
-    class TypeDereferenceError extends TypeBoxError {
-        constructor(schema) {
-            super(`Unable to dereference schema with $id '${schema.$id}'`);
-            this.schema = schema;
-        }
-    }
-    function Resolve(schema, references) {
-        const target = references.find((target) => target.$id === schema.$ref);
-        if (target === undefined)
-            throw new TypeDereferenceError(schema);
-        return Deref(target, references);
-    }
-    /** Dereferences a schema from the references array or throws if not found */
-    function Deref(schema, references) {
-        // prettier-ignore
-        return (schema[Kind] === 'This' || schema[Kind] === 'Ref')
-            ? Resolve(schema, references)
-            : schema;
-    }
-
-    // ------------------------------------------------------------------
-    // Errors
-    // ------------------------------------------------------------------
-    class ValueHashError extends TypeBoxError {
-        constructor(value) {
-            super(`Unable to hash value`);
-            this.value = value;
-        }
-    }
-    // ------------------------------------------------------------------
-    // ByteMarker
-    // ------------------------------------------------------------------
-    var ByteMarker;
-    (function (ByteMarker) {
-        ByteMarker[ByteMarker["Undefined"] = 0] = "Undefined";
-        ByteMarker[ByteMarker["Null"] = 1] = "Null";
-        ByteMarker[ByteMarker["Boolean"] = 2] = "Boolean";
-        ByteMarker[ByteMarker["Number"] = 3] = "Number";
-        ByteMarker[ByteMarker["String"] = 4] = "String";
-        ByteMarker[ByteMarker["Object"] = 5] = "Object";
-        ByteMarker[ByteMarker["Array"] = 6] = "Array";
-        ByteMarker[ByteMarker["Date"] = 7] = "Date";
-        ByteMarker[ByteMarker["Uint8Array"] = 8] = "Uint8Array";
-        ByteMarker[ByteMarker["Symbol"] = 9] = "Symbol";
-        ByteMarker[ByteMarker["BigInt"] = 10] = "BigInt";
-    })(ByteMarker || (ByteMarker = {}));
-    // ------------------------------------------------------------------
-    // State
-    // ------------------------------------------------------------------
-    let Accumulator = BigInt('14695981039346656037');
-    const [Prime, Size] = [BigInt('1099511628211'), BigInt('2') ** BigInt('64')];
-    const Bytes = Array.from({ length: 256 }).map((_, i) => BigInt(i));
-    const F64 = new Float64Array(1);
-    const F64In = new DataView(F64.buffer);
-    const F64Out = new Uint8Array(F64.buffer);
-    // ------------------------------------------------------------------
-    // NumberToBytes
-    // ------------------------------------------------------------------
-    function* NumberToBytes(value) {
-        const byteCount = value === 0 ? 1 : Math.ceil(Math.floor(Math.log2(value) + 1) / 8);
-        for (let i = 0; i < byteCount; i++) {
-            yield (value >> (8 * (byteCount - 1 - i))) & 0xff;
-        }
-    }
-    // ------------------------------------------------------------------
-    // Hashing Functions
-    // ------------------------------------------------------------------
-    function ArrayType(value) {
-        FNV1A64(ByteMarker.Array);
-        for (const item of value) {
-            Visit$5(item);
-        }
-    }
-    function BooleanType(value) {
-        FNV1A64(ByteMarker.Boolean);
-        FNV1A64(value ? 1 : 0);
-    }
-    function BigIntType(value) {
-        FNV1A64(ByteMarker.BigInt);
-        F64In.setBigInt64(0, value);
-        for (const byte of F64Out) {
-            FNV1A64(byte);
-        }
-    }
-    function DateType(value) {
-        FNV1A64(ByteMarker.Date);
-        Visit$5(value.getTime());
-    }
-    function NullType(value) {
-        FNV1A64(ByteMarker.Null);
-    }
-    function NumberType(value) {
-        FNV1A64(ByteMarker.Number);
-        F64In.setFloat64(0, value);
-        for (const byte of F64Out) {
-            FNV1A64(byte);
-        }
-    }
-    function ObjectType(value) {
-        FNV1A64(ByteMarker.Object);
-        for (const key of globalThis.Object.getOwnPropertyNames(value).sort()) {
-            Visit$5(key);
-            Visit$5(value[key]);
-        }
-    }
-    function StringType(value) {
-        FNV1A64(ByteMarker.String);
-        for (let i = 0; i < value.length; i++) {
-            for (const byte of NumberToBytes(value.charCodeAt(i))) {
-                FNV1A64(byte);
-            }
-        }
-    }
-    function SymbolType(value) {
-        FNV1A64(ByteMarker.Symbol);
-        Visit$5(value.description);
-    }
-    function Uint8ArrayType(value) {
-        FNV1A64(ByteMarker.Uint8Array);
-        for (let i = 0; i < value.length; i++) {
-            FNV1A64(value[i]);
-        }
-    }
-    function UndefinedType(value) {
-        return FNV1A64(ByteMarker.Undefined);
-    }
-    function Visit$5(value) {
-        if (IsArray(value))
-            return ArrayType(value);
-        if (IsBoolean(value))
-            return BooleanType(value);
-        if (IsBigInt(value))
-            return BigIntType(value);
-        if (IsDate(value))
-            return DateType(value);
-        if (IsNull(value))
-            return NullType();
-        if (IsNumber(value))
-            return NumberType(value);
-        if (IsStandardObject(value))
-            return ObjectType(value);
-        if (IsString(value))
-            return StringType(value);
-        if (IsSymbol(value))
-            return SymbolType(value);
-        if (IsUint8Array(value))
-            return Uint8ArrayType(value);
-        if (IsUndefined(value))
-            return UndefinedType();
-        throw new ValueHashError(value);
-    }
-    function FNV1A64(byte) {
-        Accumulator = Accumulator ^ Bytes[byte];
-        Accumulator = (Accumulator * Prime) % Size;
-    }
-    // ------------------------------------------------------------------
-    // Hash
-    // ------------------------------------------------------------------
-    /** Creates a FNV1A-64 non cryptographic hash of the given value */
-    function Hash(value) {
-        Accumulator = BigInt('14695981039346656037');
-        Visit$5(value);
-        return Accumulator;
-    }
-
-    // ------------------------------------------------------------------
-    // ValueErrorType
-    // ------------------------------------------------------------------
-    var ValueErrorType;
-    (function (ValueErrorType) {
-        ValueErrorType[ValueErrorType["ArrayContains"] = 0] = "ArrayContains";
-        ValueErrorType[ValueErrorType["ArrayMaxContains"] = 1] = "ArrayMaxContains";
-        ValueErrorType[ValueErrorType["ArrayMaxItems"] = 2] = "ArrayMaxItems";
-        ValueErrorType[ValueErrorType["ArrayMinContains"] = 3] = "ArrayMinContains";
-        ValueErrorType[ValueErrorType["ArrayMinItems"] = 4] = "ArrayMinItems";
-        ValueErrorType[ValueErrorType["ArrayUniqueItems"] = 5] = "ArrayUniqueItems";
-        ValueErrorType[ValueErrorType["Array"] = 6] = "Array";
-        ValueErrorType[ValueErrorType["AsyncIterator"] = 7] = "AsyncIterator";
-        ValueErrorType[ValueErrorType["BigIntExclusiveMaximum"] = 8] = "BigIntExclusiveMaximum";
-        ValueErrorType[ValueErrorType["BigIntExclusiveMinimum"] = 9] = "BigIntExclusiveMinimum";
-        ValueErrorType[ValueErrorType["BigIntMaximum"] = 10] = "BigIntMaximum";
-        ValueErrorType[ValueErrorType["BigIntMinimum"] = 11] = "BigIntMinimum";
-        ValueErrorType[ValueErrorType["BigIntMultipleOf"] = 12] = "BigIntMultipleOf";
-        ValueErrorType[ValueErrorType["BigInt"] = 13] = "BigInt";
-        ValueErrorType[ValueErrorType["Boolean"] = 14] = "Boolean";
-        ValueErrorType[ValueErrorType["DateExclusiveMaximumTimestamp"] = 15] = "DateExclusiveMaximumTimestamp";
-        ValueErrorType[ValueErrorType["DateExclusiveMinimumTimestamp"] = 16] = "DateExclusiveMinimumTimestamp";
-        ValueErrorType[ValueErrorType["DateMaximumTimestamp"] = 17] = "DateMaximumTimestamp";
-        ValueErrorType[ValueErrorType["DateMinimumTimestamp"] = 18] = "DateMinimumTimestamp";
-        ValueErrorType[ValueErrorType["DateMultipleOfTimestamp"] = 19] = "DateMultipleOfTimestamp";
-        ValueErrorType[ValueErrorType["Date"] = 20] = "Date";
-        ValueErrorType[ValueErrorType["Function"] = 21] = "Function";
-        ValueErrorType[ValueErrorType["IntegerExclusiveMaximum"] = 22] = "IntegerExclusiveMaximum";
-        ValueErrorType[ValueErrorType["IntegerExclusiveMinimum"] = 23] = "IntegerExclusiveMinimum";
-        ValueErrorType[ValueErrorType["IntegerMaximum"] = 24] = "IntegerMaximum";
-        ValueErrorType[ValueErrorType["IntegerMinimum"] = 25] = "IntegerMinimum";
-        ValueErrorType[ValueErrorType["IntegerMultipleOf"] = 26] = "IntegerMultipleOf";
-        ValueErrorType[ValueErrorType["Integer"] = 27] = "Integer";
-        ValueErrorType[ValueErrorType["IntersectUnevaluatedProperties"] = 28] = "IntersectUnevaluatedProperties";
-        ValueErrorType[ValueErrorType["Intersect"] = 29] = "Intersect";
-        ValueErrorType[ValueErrorType["Iterator"] = 30] = "Iterator";
-        ValueErrorType[ValueErrorType["Kind"] = 31] = "Kind";
-        ValueErrorType[ValueErrorType["Literal"] = 32] = "Literal";
-        ValueErrorType[ValueErrorType["Never"] = 33] = "Never";
-        ValueErrorType[ValueErrorType["Not"] = 34] = "Not";
-        ValueErrorType[ValueErrorType["Null"] = 35] = "Null";
-        ValueErrorType[ValueErrorType["NumberExclusiveMaximum"] = 36] = "NumberExclusiveMaximum";
-        ValueErrorType[ValueErrorType["NumberExclusiveMinimum"] = 37] = "NumberExclusiveMinimum";
-        ValueErrorType[ValueErrorType["NumberMaximum"] = 38] = "NumberMaximum";
-        ValueErrorType[ValueErrorType["NumberMinimum"] = 39] = "NumberMinimum";
-        ValueErrorType[ValueErrorType["NumberMultipleOf"] = 40] = "NumberMultipleOf";
-        ValueErrorType[ValueErrorType["Number"] = 41] = "Number";
-        ValueErrorType[ValueErrorType["ObjectAdditionalProperties"] = 42] = "ObjectAdditionalProperties";
-        ValueErrorType[ValueErrorType["ObjectMaxProperties"] = 43] = "ObjectMaxProperties";
-        ValueErrorType[ValueErrorType["ObjectMinProperties"] = 44] = "ObjectMinProperties";
-        ValueErrorType[ValueErrorType["ObjectRequiredProperty"] = 45] = "ObjectRequiredProperty";
-        ValueErrorType[ValueErrorType["Object"] = 46] = "Object";
-        ValueErrorType[ValueErrorType["Promise"] = 47] = "Promise";
-        ValueErrorType[ValueErrorType["RegExp"] = 48] = "RegExp";
-        ValueErrorType[ValueErrorType["StringFormatUnknown"] = 49] = "StringFormatUnknown";
-        ValueErrorType[ValueErrorType["StringFormat"] = 50] = "StringFormat";
-        ValueErrorType[ValueErrorType["StringMaxLength"] = 51] = "StringMaxLength";
-        ValueErrorType[ValueErrorType["StringMinLength"] = 52] = "StringMinLength";
-        ValueErrorType[ValueErrorType["StringPattern"] = 53] = "StringPattern";
-        ValueErrorType[ValueErrorType["String"] = 54] = "String";
-        ValueErrorType[ValueErrorType["Symbol"] = 55] = "Symbol";
-        ValueErrorType[ValueErrorType["TupleLength"] = 56] = "TupleLength";
-        ValueErrorType[ValueErrorType["Tuple"] = 57] = "Tuple";
-        ValueErrorType[ValueErrorType["Uint8ArrayMaxByteLength"] = 58] = "Uint8ArrayMaxByteLength";
-        ValueErrorType[ValueErrorType["Uint8ArrayMinByteLength"] = 59] = "Uint8ArrayMinByteLength";
-        ValueErrorType[ValueErrorType["Uint8Array"] = 60] = "Uint8Array";
-        ValueErrorType[ValueErrorType["Undefined"] = 61] = "Undefined";
-        ValueErrorType[ValueErrorType["Union"] = 62] = "Union";
-        ValueErrorType[ValueErrorType["Void"] = 63] = "Void";
-    })(ValueErrorType || (ValueErrorType = {}));
-    // ------------------------------------------------------------------
-    // ValueErrors
-    // ------------------------------------------------------------------
-    class ValueErrorsUnknownTypeError extends TypeBoxError {
-        constructor(schema) {
-            super('Unknown type');
-            this.schema = schema;
-        }
-    }
-    // ------------------------------------------------------------------
-    // EscapeKey
-    // ------------------------------------------------------------------
-    function EscapeKey(key) {
-        return key.replace(/~/g, '~0').replace(/\//g, '~1'); // RFC6901 Path
-    }
-    // ------------------------------------------------------------------
-    // Guards
-    // ------------------------------------------------------------------
-    function IsDefined$1(value) {
-        return value !== undefined;
-    }
-    // ------------------------------------------------------------------
-    // ValueErrorIterator
-    // ------------------------------------------------------------------
-    class ValueErrorIterator {
-        constructor(iterator) {
-            this.iterator = iterator;
-        }
-        [Symbol.iterator]() {
-            return this.iterator;
-        }
-        /** Returns the first value error or undefined if no errors */
-        First() {
-            const next = this.iterator.next();
-            return next.done ? undefined : next.value;
-        }
-    }
-    // --------------------------------------------------------------------------
-    // Create
-    // --------------------------------------------------------------------------
-    function Create(errorType, schema, path, value) {
-        return { type: errorType, schema, path, value, message: GetErrorFunction()({ errorType, path, schema, value }) };
-    }
-    // --------------------------------------------------------------------------
-    // Types
-    // --------------------------------------------------------------------------
-    function* FromAny$1(schema, references, path, value) { }
-    function* FromArray$4(schema, references, path, value) {
-        if (!IsArray(value)) {
-            return yield Create(ValueErrorType.Array, schema, path, value);
-        }
-        if (IsDefined$1(schema.minItems) && !(value.length >= schema.minItems)) {
-            yield Create(ValueErrorType.ArrayMinItems, schema, path, value);
-        }
-        if (IsDefined$1(schema.maxItems) && !(value.length <= schema.maxItems)) {
-            yield Create(ValueErrorType.ArrayMaxItems, schema, path, value);
-        }
-        for (let i = 0; i < value.length; i++) {
-            yield* Visit$4(schema.items, references, `${path}/${i}`, value[i]);
-        }
-        // prettier-ignore
-        if (schema.uniqueItems === true && !((function () { const set = new Set(); for (const element of value) {
-            const hashed = Hash(element);
-            if (set.has(hashed)) {
-                return false;
-            }
-            else {
-                set.add(hashed);
-            }
-        } return true; })())) {
-            yield Create(ValueErrorType.ArrayUniqueItems, schema, path, value);
-        }
-        // contains
-        if (!(IsDefined$1(schema.contains) || IsDefined$1(schema.minContains) || IsDefined$1(schema.maxContains))) {
-            return;
-        }
-        const containsSchema = IsDefined$1(schema.contains) ? schema.contains : Never();
-        const containsCount = value.reduce((acc, value, index) => (Visit$4(containsSchema, references, `${path}${index}`, value).next().done === true ? acc + 1 : acc), 0);
-        if (containsCount === 0) {
-            yield Create(ValueErrorType.ArrayContains, schema, path, value);
-        }
-        if (IsNumber(schema.minContains) && containsCount < schema.minContains) {
-            yield Create(ValueErrorType.ArrayMinContains, schema, path, value);
-        }
-        if (IsNumber(schema.maxContains) && containsCount > schema.maxContains) {
-            yield Create(ValueErrorType.ArrayMaxContains, schema, path, value);
-        }
-    }
-    function* FromAsyncIterator$2(schema, references, path, value) {
-        if (!IsAsyncIterator(value))
-            yield Create(ValueErrorType.AsyncIterator, schema, path, value);
-    }
-    function* FromBigInt$1(schema, references, path, value) {
-        if (!IsBigInt(value))
-            return yield Create(ValueErrorType.BigInt, schema, path, value);
-        if (IsDefined$1(schema.exclusiveMaximum) && !(value < schema.exclusiveMaximum)) {
-            yield Create(ValueErrorType.BigIntExclusiveMaximum, schema, path, value);
-        }
-        if (IsDefined$1(schema.exclusiveMinimum) && !(value > schema.exclusiveMinimum)) {
-            yield Create(ValueErrorType.BigIntExclusiveMinimum, schema, path, value);
-        }
-        if (IsDefined$1(schema.maximum) && !(value <= schema.maximum)) {
-            yield Create(ValueErrorType.BigIntMaximum, schema, path, value);
-        }
-        if (IsDefined$1(schema.minimum) && !(value >= schema.minimum)) {
-            yield Create(ValueErrorType.BigIntMinimum, schema, path, value);
-        }
-        if (IsDefined$1(schema.multipleOf) && !(value % schema.multipleOf === BigInt(0))) {
-            yield Create(ValueErrorType.BigIntMultipleOf, schema, path, value);
-        }
-    }
-    function* FromBoolean$1(schema, references, path, value) {
-        if (!IsBoolean(value))
-            yield Create(ValueErrorType.Boolean, schema, path, value);
-    }
-    function* FromConstructor$2(schema, references, path, value) {
-        yield* Visit$4(schema.returns, references, path, value.prototype);
-    }
-    function* FromDate$1(schema, references, path, value) {
-        if (!IsDate(value))
-            return yield Create(ValueErrorType.Date, schema, path, value);
-        if (IsDefined$1(schema.exclusiveMaximumTimestamp) && !(value.getTime() < schema.exclusiveMaximumTimestamp)) {
-            yield Create(ValueErrorType.DateExclusiveMaximumTimestamp, schema, path, value);
-        }
-        if (IsDefined$1(schema.exclusiveMinimumTimestamp) && !(value.getTime() > schema.exclusiveMinimumTimestamp)) {
-            yield Create(ValueErrorType.DateExclusiveMinimumTimestamp, schema, path, value);
-        }
-        if (IsDefined$1(schema.maximumTimestamp) && !(value.getTime() <= schema.maximumTimestamp)) {
-            yield Create(ValueErrorType.DateMaximumTimestamp, schema, path, value);
-        }
-        if (IsDefined$1(schema.minimumTimestamp) && !(value.getTime() >= schema.minimumTimestamp)) {
-            yield Create(ValueErrorType.DateMinimumTimestamp, schema, path, value);
-        }
-        if (IsDefined$1(schema.multipleOfTimestamp) && !(value.getTime() % schema.multipleOfTimestamp === 0)) {
-            yield Create(ValueErrorType.DateMultipleOfTimestamp, schema, path, value);
-        }
-    }
-    function* FromFunction$2(schema, references, path, value) {
-        if (!IsFunction(value))
-            yield Create(ValueErrorType.Function, schema, path, value);
-    }
-    function* FromInteger$1(schema, references, path, value) {
-        if (!IsInteger(value))
-            return yield Create(ValueErrorType.Integer, schema, path, value);
-        if (IsDefined$1(schema.exclusiveMaximum) && !(value < schema.exclusiveMaximum)) {
-            yield Create(ValueErrorType.IntegerExclusiveMaximum, schema, path, value);
-        }
-        if (IsDefined$1(schema.exclusiveMinimum) && !(value > schema.exclusiveMinimum)) {
-            yield Create(ValueErrorType.IntegerExclusiveMinimum, schema, path, value);
-        }
-        if (IsDefined$1(schema.maximum) && !(value <= schema.maximum)) {
-            yield Create(ValueErrorType.IntegerMaximum, schema, path, value);
-        }
-        if (IsDefined$1(schema.minimum) && !(value >= schema.minimum)) {
-            yield Create(ValueErrorType.IntegerMinimum, schema, path, value);
-        }
-        if (IsDefined$1(schema.multipleOf) && !(value % schema.multipleOf === 0)) {
-            yield Create(ValueErrorType.IntegerMultipleOf, schema, path, value);
-        }
-    }
-    function* FromIntersect$4(schema, references, path, value) {
-        for (const inner of schema.allOf) {
-            const next = Visit$4(inner, references, path, value).next();
-            if (!next.done) {
-                yield Create(ValueErrorType.Intersect, schema, path, value);
-                yield next.value;
-            }
-        }
-        if (schema.unevaluatedProperties === false) {
-            const keyCheck = new RegExp(KeyOfPattern(schema));
-            for (const valueKey of Object.getOwnPropertyNames(value)) {
-                if (!keyCheck.test(valueKey)) {
-                    yield Create(ValueErrorType.IntersectUnevaluatedProperties, schema, `${path}/${valueKey}`, value);
-                }
-            }
-        }
-        if (typeof schema.unevaluatedProperties === 'object') {
-            const keyCheck = new RegExp(KeyOfPattern(schema));
-            for (const valueKey of Object.getOwnPropertyNames(value)) {
-                if (!keyCheck.test(valueKey)) {
-                    const next = Visit$4(schema.unevaluatedProperties, references, `${path}/${valueKey}`, value[valueKey]).next();
-                    if (!next.done)
-                        yield next.value; // yield interior
-                }
-            }
-        }
-    }
-    function* FromIterator$2(schema, references, path, value) {
-        if (!IsIterator(value))
-            yield Create(ValueErrorType.Iterator, schema, path, value);
-    }
-    function* FromLiteral$1(schema, references, path, value) {
-        if (!(value === schema.const))
-            yield Create(ValueErrorType.Literal, schema, path, value);
-    }
-    function* FromNever$1(schema, references, path, value) {
-        yield Create(ValueErrorType.Never, schema, path, value);
-    }
-    function* FromNot$4(schema, references, path, value) {
-        if (Visit$4(schema.not, references, path, value).next().done === true)
-            yield Create(ValueErrorType.Not, schema, path, value);
-    }
-    function* FromNull$1(schema, references, path, value) {
-        if (!IsNull(value))
-            yield Create(ValueErrorType.Null, schema, path, value);
-    }
-    function* FromNumber$1(schema, references, path, value) {
-        if (!TypeSystemPolicy.IsNumberLike(value))
-            return yield Create(ValueErrorType.Number, schema, path, value);
-        if (IsDefined$1(schema.exclusiveMaximum) && !(value < schema.exclusiveMaximum)) {
-            yield Create(ValueErrorType.NumberExclusiveMaximum, schema, path, value);
-        }
-        if (IsDefined$1(schema.exclusiveMinimum) && !(value > schema.exclusiveMinimum)) {
-            yield Create(ValueErrorType.NumberExclusiveMinimum, schema, path, value);
-        }
-        if (IsDefined$1(schema.maximum) && !(value <= schema.maximum)) {
-            yield Create(ValueErrorType.NumberMaximum, schema, path, value);
-        }
-        if (IsDefined$1(schema.minimum) && !(value >= schema.minimum)) {
-            yield Create(ValueErrorType.NumberMinimum, schema, path, value);
-        }
-        if (IsDefined$1(schema.multipleOf) && !(value % schema.multipleOf === 0)) {
-            yield Create(ValueErrorType.NumberMultipleOf, schema, path, value);
-        }
-    }
-    function* FromObject$4(schema, references, path, value) {
-        if (!TypeSystemPolicy.IsObjectLike(value))
-            return yield Create(ValueErrorType.Object, schema, path, value);
-        if (IsDefined$1(schema.minProperties) && !(Object.getOwnPropertyNames(value).length >= schema.minProperties)) {
-            yield Create(ValueErrorType.ObjectMinProperties, schema, path, value);
-        }
-        if (IsDefined$1(schema.maxProperties) && !(Object.getOwnPropertyNames(value).length <= schema.maxProperties)) {
-            yield Create(ValueErrorType.ObjectMaxProperties, schema, path, value);
-        }
-        const requiredKeys = Array.isArray(schema.required) ? schema.required : [];
-        const knownKeys = Object.getOwnPropertyNames(schema.properties);
-        const unknownKeys = Object.getOwnPropertyNames(value);
-        for (const requiredKey of requiredKeys) {
-            if (unknownKeys.includes(requiredKey))
-                continue;
-            yield Create(ValueErrorType.ObjectRequiredProperty, schema.properties[requiredKey], `${path}/${EscapeKey(requiredKey)}`, undefined);
-        }
-        if (schema.additionalProperties === false) {
-            for (const valueKey of unknownKeys) {
-                if (!knownKeys.includes(valueKey)) {
-                    yield Create(ValueErrorType.ObjectAdditionalProperties, schema, `${path}/${EscapeKey(valueKey)}`, value[valueKey]);
-                }
-            }
-        }
-        if (typeof schema.additionalProperties === 'object') {
-            for (const valueKey of unknownKeys) {
-                if (knownKeys.includes(valueKey))
-                    continue;
-                yield* Visit$4(schema.additionalProperties, references, `${path}/${EscapeKey(valueKey)}`, value[valueKey]);
-            }
-        }
-        for (const knownKey of knownKeys) {
-            const property = schema.properties[knownKey];
-            if (schema.required && schema.required.includes(knownKey)) {
-                yield* Visit$4(property, references, `${path}/${EscapeKey(knownKey)}`, value[knownKey]);
-                if (ExtendsUndefinedCheck(schema) && !(knownKey in value)) {
-                    yield Create(ValueErrorType.ObjectRequiredProperty, property, `${path}/${EscapeKey(knownKey)}`, undefined);
-                }
-            }
-            else {
-                if (TypeSystemPolicy.IsExactOptionalProperty(value, knownKey)) {
-                    yield* Visit$4(property, references, `${path}/${EscapeKey(knownKey)}`, value[knownKey]);
-                }
-            }
-        }
-    }
-    function* FromPromise$2(schema, references, path, value) {
-        if (!IsPromise(value))
-            yield Create(ValueErrorType.Promise, schema, path, value);
-    }
-    function* FromRecord$4(schema, references, path, value) {
-        if (!TypeSystemPolicy.IsRecordLike(value))
-            return yield Create(ValueErrorType.Object, schema, path, value);
-        if (IsDefined$1(schema.minProperties) && !(Object.getOwnPropertyNames(value).length >= schema.minProperties)) {
-            yield Create(ValueErrorType.ObjectMinProperties, schema, path, value);
-        }
-        if (IsDefined$1(schema.maxProperties) && !(Object.getOwnPropertyNames(value).length <= schema.maxProperties)) {
-            yield Create(ValueErrorType.ObjectMaxProperties, schema, path, value);
-        }
-        const [patternKey, patternSchema] = Object.entries(schema.patternProperties)[0];
-        const regex = new RegExp(patternKey);
-        for (const [propertyKey, propertyValue] of Object.entries(value)) {
-            if (regex.test(propertyKey))
-                yield* Visit$4(patternSchema, references, `${path}/${EscapeKey(propertyKey)}`, propertyValue);
-        }
-        if (typeof schema.additionalProperties === 'object') {
-            for (const [propertyKey, propertyValue] of Object.entries(value)) {
-                if (!regex.test(propertyKey))
-                    yield* Visit$4(schema.additionalProperties, references, `${path}/${EscapeKey(propertyKey)}`, propertyValue);
-            }
-        }
-        if (schema.additionalProperties === false) {
-            for (const [propertyKey, propertyValue] of Object.entries(value)) {
-                if (regex.test(propertyKey))
-                    continue;
-                return yield Create(ValueErrorType.ObjectAdditionalProperties, schema, `${path}/${EscapeKey(propertyKey)}`, propertyValue);
-            }
-        }
-    }
-    function* FromRef$4(schema, references, path, value) {
-        yield* Visit$4(Deref(schema, references), references, path, value);
-    }
-    function* FromRegExp$1(schema, references, path, value) {
-        if (!IsString(value))
-            return yield Create(ValueErrorType.String, schema, path, value);
-        if (IsDefined$1(schema.minLength) && !(value.length >= schema.minLength)) {
-            yield Create(ValueErrorType.StringMinLength, schema, path, value);
-        }
-        if (IsDefined$1(schema.maxLength) && !(value.length <= schema.maxLength)) {
-            yield Create(ValueErrorType.StringMaxLength, schema, path, value);
-        }
-        const regex = new RegExp(schema.source, schema.flags);
-        if (!regex.test(value)) {
-            return yield Create(ValueErrorType.RegExp, schema, path, value);
-        }
-    }
-    function* FromString$1(schema, references, path, value) {
-        if (!IsString(value))
-            return yield Create(ValueErrorType.String, schema, path, value);
-        if (IsDefined$1(schema.minLength) && !(value.length >= schema.minLength)) {
-            yield Create(ValueErrorType.StringMinLength, schema, path, value);
-        }
-        if (IsDefined$1(schema.maxLength) && !(value.length <= schema.maxLength)) {
-            yield Create(ValueErrorType.StringMaxLength, schema, path, value);
-        }
-        if (IsString(schema.pattern)) {
-            const regex = new RegExp(schema.pattern);
-            if (!regex.test(value)) {
-                yield Create(ValueErrorType.StringPattern, schema, path, value);
-            }
-        }
-        if (IsString(schema.format)) {
-            if (!Has$1(schema.format)) {
-                yield Create(ValueErrorType.StringFormatUnknown, schema, path, value);
-            }
-            else {
-                const format = Get$1(schema.format);
-                if (!format(value)) {
-                    yield Create(ValueErrorType.StringFormat, schema, path, value);
-                }
-            }
-        }
-    }
-    function* FromSymbol$1(schema, references, path, value) {
-        if (!IsSymbol(value))
-            yield Create(ValueErrorType.Symbol, schema, path, value);
-    }
-    function* FromTemplateLiteral$1(schema, references, path, value) {
-        if (!IsString(value))
-            return yield Create(ValueErrorType.String, schema, path, value);
-        const regex = new RegExp(schema.pattern);
-        if (!regex.test(value)) {
-            yield Create(ValueErrorType.StringPattern, schema, path, value);
-        }
-    }
-    function* FromThis$4(schema, references, path, value) {
-        yield* Visit$4(Deref(schema, references), references, path, value);
-    }
-    function* FromTuple$4(schema, references, path, value) {
-        if (!IsArray(value))
-            return yield Create(ValueErrorType.Tuple, schema, path, value);
-        if (schema.items === undefined && !(value.length === 0)) {
-            return yield Create(ValueErrorType.TupleLength, schema, path, value);
-        }
-        if (!(value.length === schema.maxItems)) {
-            return yield Create(ValueErrorType.TupleLength, schema, path, value);
-        }
-        if (!schema.items) {
-            return;
-        }
-        for (let i = 0; i < schema.items.length; i++) {
-            yield* Visit$4(schema.items[i], references, `${path}/${i}`, value[i]);
-        }
-    }
-    function* FromUndefined$1(schema, references, path, value) {
-        if (!IsUndefined(value))
-            yield Create(ValueErrorType.Undefined, schema, path, value);
-    }
-    function* FromUnion$4(schema, references, path, value) {
-        let count = 0;
-        for (const subschema of schema.anyOf) {
-            const errors = [...Visit$4(subschema, references, path, value)];
-            if (errors.length === 0)
-                return; // matched
-            count += errors.length;
-        }
-        if (count > 0) {
-            yield Create(ValueErrorType.Union, schema, path, value);
-        }
-    }
-    function* FromUint8Array$1(schema, references, path, value) {
-        if (!IsUint8Array(value))
-            return yield Create(ValueErrorType.Uint8Array, schema, path, value);
-        if (IsDefined$1(schema.maxByteLength) && !(value.length <= schema.maxByteLength)) {
-            yield Create(ValueErrorType.Uint8ArrayMaxByteLength, schema, path, value);
-        }
-        if (IsDefined$1(schema.minByteLength) && !(value.length >= schema.minByteLength)) {
-            yield Create(ValueErrorType.Uint8ArrayMinByteLength, schema, path, value);
-        }
-    }
-    function* FromUnknown$1(schema, references, path, value) { }
-    function* FromVoid$1(schema, references, path, value) {
-        if (!TypeSystemPolicy.IsVoidLike(value))
-            yield Create(ValueErrorType.Void, schema, path, value);
-    }
-    function* FromKind$1(schema, references, path, value) {
-        const check = Get(schema[Kind]);
-        if (!check(schema, value))
-            yield Create(ValueErrorType.Kind, schema, path, value);
-    }
-    function* Visit$4(schema, references, path, value) {
-        const references_ = IsDefined$1(schema.$id) ? [...references, schema] : references;
-        const schema_ = schema;
-        switch (schema_[Kind]) {
-            case 'Any':
-                return yield* FromAny$1();
-            case 'Array':
-                return yield* FromArray$4(schema_, references_, path, value);
-            case 'AsyncIterator':
-                return yield* FromAsyncIterator$2(schema_, references_, path, value);
-            case 'BigInt':
-                return yield* FromBigInt$1(schema_, references_, path, value);
-            case 'Boolean':
-                return yield* FromBoolean$1(schema_, references_, path, value);
-            case 'Constructor':
-                return yield* FromConstructor$2(schema_, references_, path, value);
-            case 'Date':
-                return yield* FromDate$1(schema_, references_, path, value);
-            case 'Function':
-                return yield* FromFunction$2(schema_, references_, path, value);
-            case 'Integer':
-                return yield* FromInteger$1(schema_, references_, path, value);
-            case 'Intersect':
-                return yield* FromIntersect$4(schema_, references_, path, value);
-            case 'Iterator':
-                return yield* FromIterator$2(schema_, references_, path, value);
-            case 'Literal':
-                return yield* FromLiteral$1(schema_, references_, path, value);
-            case 'Never':
-                return yield* FromNever$1(schema_, references_, path, value);
-            case 'Not':
-                return yield* FromNot$4(schema_, references_, path, value);
-            case 'Null':
-                return yield* FromNull$1(schema_, references_, path, value);
-            case 'Number':
-                return yield* FromNumber$1(schema_, references_, path, value);
-            case 'Object':
-                return yield* FromObject$4(schema_, references_, path, value);
-            case 'Promise':
-                return yield* FromPromise$2(schema_, references_, path, value);
-            case 'Record':
-                return yield* FromRecord$4(schema_, references_, path, value);
-            case 'Ref':
-                return yield* FromRef$4(schema_, references_, path, value);
-            case 'RegExp':
-                return yield* FromRegExp$1(schema_, references_, path, value);
-            case 'String':
-                return yield* FromString$1(schema_, references_, path, value);
-            case 'Symbol':
-                return yield* FromSymbol$1(schema_, references_, path, value);
-            case 'TemplateLiteral':
-                return yield* FromTemplateLiteral$1(schema_, references_, path, value);
-            case 'This':
-                return yield* FromThis$4(schema_, references_, path, value);
-            case 'Tuple':
-                return yield* FromTuple$4(schema_, references_, path, value);
-            case 'Undefined':
-                return yield* FromUndefined$1(schema_, references_, path, value);
-            case 'Union':
-                return yield* FromUnion$4(schema_, references_, path, value);
-            case 'Uint8Array':
-                return yield* FromUint8Array$1(schema_, references_, path, value);
-            case 'Unknown':
-                return yield* FromUnknown$1();
-            case 'Void':
-                return yield* FromVoid$1(schema_, references_, path, value);
-            default:
-                if (!Has(schema_[Kind]))
-                    throw new ValueErrorsUnknownTypeError(schema);
-                return yield* FromKind$1(schema_, references_, path, value);
-        }
-    }
-    /** Returns an iterator for each error in this value. */
-    function Errors$1(...args) {
-        const iterator = args.length === 3 ? Visit$4(args[0], args[1], '', args[2]) : Visit$4(args[0], [], '', args[1]);
-        return new ValueErrorIterator(iterator);
-    }
-
-    // ------------------------------------------------------------------
-    // Errors
-    // ------------------------------------------------------------------
-    class ValueCheckUnknownTypeError extends TypeBoxError {
-        constructor(schema) {
-            super(`Unknown type`);
-            this.schema = schema;
-        }
-    }
-    // ------------------------------------------------------------------
-    // TypeGuards
-    // ------------------------------------------------------------------
-    function IsAnyOrUnknown(schema) {
-        return schema[Kind] === 'Any' || schema[Kind] === 'Unknown';
-    }
-    // ------------------------------------------------------------------
-    // Guards
-    // ------------------------------------------------------------------
-    function IsDefined(value) {
-        return value !== undefined;
-    }
-    // ------------------------------------------------------------------
-    // Types
-    // ------------------------------------------------------------------
-    function FromAny(schema, references, value) {
-        return true;
-    }
-    function FromArray$3(schema, references, value) {
-        if (!IsArray(value))
-            return false;
-        if (IsDefined(schema.minItems) && !(value.length >= schema.minItems)) {
-            return false;
-        }
-        if (IsDefined(schema.maxItems) && !(value.length <= schema.maxItems)) {
-            return false;
-        }
-        if (!value.every((value) => Visit$3(schema.items, references, value))) {
-            return false;
-        }
-        // prettier-ignore
-        if (schema.uniqueItems === true && !((function () { const set = new Set(); for (const element of value) {
-            const hashed = Hash(element);
-            if (set.has(hashed)) {
-                return false;
-            }
-            else {
-                set.add(hashed);
-            }
-        } return true; })())) {
-            return false;
-        }
-        // contains
-        if (!(IsDefined(schema.contains) || IsNumber(schema.minContains) || IsNumber(schema.maxContains))) {
-            return true; // exit
-        }
-        const containsSchema = IsDefined(schema.contains) ? schema.contains : Never();
-        const containsCount = value.reduce((acc, value) => (Visit$3(containsSchema, references, value) ? acc + 1 : acc), 0);
-        if (containsCount === 0) {
-            return false;
-        }
-        if (IsNumber(schema.minContains) && containsCount < schema.minContains) {
-            return false;
-        }
-        if (IsNumber(schema.maxContains) && containsCount > schema.maxContains) {
-            return false;
-        }
-        return true;
-    }
-    function FromAsyncIterator$1(schema, references, value) {
-        return IsAsyncIterator(value);
-    }
-    function FromBigInt(schema, references, value) {
-        if (!IsBigInt(value))
-            return false;
-        if (IsDefined(schema.exclusiveMaximum) && !(value < schema.exclusiveMaximum)) {
-            return false;
-        }
-        if (IsDefined(schema.exclusiveMinimum) && !(value > schema.exclusiveMinimum)) {
-            return false;
-        }
-        if (IsDefined(schema.maximum) && !(value <= schema.maximum)) {
-            return false;
-        }
-        if (IsDefined(schema.minimum) && !(value >= schema.minimum)) {
-            return false;
-        }
-        if (IsDefined(schema.multipleOf) && !(value % schema.multipleOf === BigInt(0))) {
-            return false;
-        }
-        return true;
-    }
-    function FromBoolean(schema, references, value) {
-        return IsBoolean(value);
-    }
-    function FromConstructor$1(schema, references, value) {
-        return Visit$3(schema.returns, references, value.prototype);
-    }
-    function FromDate(schema, references, value) {
-        if (!IsDate(value))
-            return false;
-        if (IsDefined(schema.exclusiveMaximumTimestamp) && !(value.getTime() < schema.exclusiveMaximumTimestamp)) {
-            return false;
-        }
-        if (IsDefined(schema.exclusiveMinimumTimestamp) && !(value.getTime() > schema.exclusiveMinimumTimestamp)) {
-            return false;
-        }
-        if (IsDefined(schema.maximumTimestamp) && !(value.getTime() <= schema.maximumTimestamp)) {
-            return false;
-        }
-        if (IsDefined(schema.minimumTimestamp) && !(value.getTime() >= schema.minimumTimestamp)) {
-            return false;
-        }
-        if (IsDefined(schema.multipleOfTimestamp) && !(value.getTime() % schema.multipleOfTimestamp === 0)) {
-            return false;
-        }
-        return true;
-    }
-    function FromFunction$1(schema, references, value) {
-        return IsFunction(value);
-    }
-    function FromInteger(schema, references, value) {
-        if (!IsInteger(value)) {
-            return false;
-        }
-        if (IsDefined(schema.exclusiveMaximum) && !(value < schema.exclusiveMaximum)) {
-            return false;
-        }
-        if (IsDefined(schema.exclusiveMinimum) && !(value > schema.exclusiveMinimum)) {
-            return false;
-        }
-        if (IsDefined(schema.maximum) && !(value <= schema.maximum)) {
-            return false;
-        }
-        if (IsDefined(schema.minimum) && !(value >= schema.minimum)) {
-            return false;
-        }
-        if (IsDefined(schema.multipleOf) && !(value % schema.multipleOf === 0)) {
-            return false;
-        }
-        return true;
-    }
-    function FromIntersect$3(schema, references, value) {
-        const check1 = schema.allOf.every((schema) => Visit$3(schema, references, value));
-        if (schema.unevaluatedProperties === false) {
-            const keyPattern = new RegExp(KeyOfPattern(schema));
-            const check2 = Object.getOwnPropertyNames(value).every((key) => keyPattern.test(key));
-            return check1 && check2;
-        }
-        else if (IsSchema(schema.unevaluatedProperties)) {
-            const keyCheck = new RegExp(KeyOfPattern(schema));
-            const check2 = Object.getOwnPropertyNames(value).every((key) => keyCheck.test(key) || Visit$3(schema.unevaluatedProperties, references, value[key]));
-            return check1 && check2;
-        }
-        else {
-            return check1;
-        }
-    }
-    function FromIterator$1(schema, references, value) {
-        return IsIterator(value);
-    }
-    function FromLiteral(schema, references, value) {
-        return value === schema.const;
-    }
-    function FromNever(schema, references, value) {
-        return false;
-    }
-    function FromNot$3(schema, references, value) {
-        return !Visit$3(schema.not, references, value);
-    }
-    function FromNull(schema, references, value) {
-        return IsNull(value);
-    }
-    function FromNumber(schema, references, value) {
-        if (!TypeSystemPolicy.IsNumberLike(value))
-            return false;
-        if (IsDefined(schema.exclusiveMaximum) && !(value < schema.exclusiveMaximum)) {
-            return false;
-        }
-        if (IsDefined(schema.exclusiveMinimum) && !(value > schema.exclusiveMinimum)) {
-            return false;
-        }
-        if (IsDefined(schema.minimum) && !(value >= schema.minimum)) {
-            return false;
-        }
-        if (IsDefined(schema.maximum) && !(value <= schema.maximum)) {
-            return false;
-        }
-        if (IsDefined(schema.multipleOf) && !(value % schema.multipleOf === 0)) {
-            return false;
-        }
-        return true;
-    }
-    function FromObject$3(schema, references, value) {
-        if (!TypeSystemPolicy.IsObjectLike(value))
-            return false;
-        if (IsDefined(schema.minProperties) && !(Object.getOwnPropertyNames(value).length >= schema.minProperties)) {
-            return false;
-        }
-        if (IsDefined(schema.maxProperties) && !(Object.getOwnPropertyNames(value).length <= schema.maxProperties)) {
-            return false;
-        }
-        const knownKeys = Object.getOwnPropertyNames(schema.properties);
-        for (const knownKey of knownKeys) {
-            const property = schema.properties[knownKey];
-            if (schema.required && schema.required.includes(knownKey)) {
-                if (!Visit$3(property, references, value[knownKey])) {
-                    return false;
-                }
-                if ((ExtendsUndefinedCheck(property) || IsAnyOrUnknown(property)) && !(knownKey in value)) {
-                    return false;
-                }
-            }
-            else {
-                if (TypeSystemPolicy.IsExactOptionalProperty(value, knownKey) && !Visit$3(property, references, value[knownKey])) {
-                    return false;
-                }
-            }
-        }
-        if (schema.additionalProperties === false) {
-            const valueKeys = Object.getOwnPropertyNames(value);
-            // optimization: value is valid if schemaKey length matches the valueKey length
-            if (schema.required && schema.required.length === knownKeys.length && valueKeys.length === knownKeys.length) {
-                return true;
-            }
-            else {
-                return valueKeys.every((valueKey) => knownKeys.includes(valueKey));
-            }
-        }
-        else if (typeof schema.additionalProperties === 'object') {
-            const valueKeys = Object.getOwnPropertyNames(value);
-            return valueKeys.every((key) => knownKeys.includes(key) || Visit$3(schema.additionalProperties, references, value[key]));
-        }
-        else {
-            return true;
-        }
-    }
-    function FromPromise$1(schema, references, value) {
-        return IsPromise(value);
-    }
-    function FromRecord$3(schema, references, value) {
-        if (!TypeSystemPolicy.IsRecordLike(value)) {
-            return false;
-        }
-        if (IsDefined(schema.minProperties) && !(Object.getOwnPropertyNames(value).length >= schema.minProperties)) {
-            return false;
-        }
-        if (IsDefined(schema.maxProperties) && !(Object.getOwnPropertyNames(value).length <= schema.maxProperties)) {
-            return false;
-        }
-        const [patternKey, patternSchema] = Object.entries(schema.patternProperties)[0];
-        const regex = new RegExp(patternKey);
-        // prettier-ignore
-        const check1 = Object.entries(value).every(([key, value]) => {
-            return (regex.test(key)) ? Visit$3(patternSchema, references, value) : true;
-        });
-        // prettier-ignore
-        const check2 = typeof schema.additionalProperties === 'object' ? Object.entries(value).every(([key, value]) => {
-            return (!regex.test(key)) ? Visit$3(schema.additionalProperties, references, value) : true;
-        }) : true;
-        const check3 = schema.additionalProperties === false
-            ? Object.getOwnPropertyNames(value).every((key) => {
-                return regex.test(key);
-            })
-            : true;
-        return check1 && check2 && check3;
-    }
-    function FromRef$3(schema, references, value) {
-        return Visit$3(Deref(schema, references), references, value);
-    }
-    function FromRegExp(schema, references, value) {
-        const regex = new RegExp(schema.source, schema.flags);
-        if (IsDefined(schema.minLength)) {
-            if (!(value.length >= schema.minLength))
-                return false;
-        }
-        if (IsDefined(schema.maxLength)) {
-            if (!(value.length <= schema.maxLength))
-                return false;
-        }
-        return regex.test(value);
-    }
-    function FromString(schema, references, value) {
-        if (!IsString(value)) {
-            return false;
-        }
-        if (IsDefined(schema.minLength)) {
-            if (!(value.length >= schema.minLength))
-                return false;
-        }
-        if (IsDefined(schema.maxLength)) {
-            if (!(value.length <= schema.maxLength))
-                return false;
-        }
-        if (IsDefined(schema.pattern)) {
-            const regex = new RegExp(schema.pattern);
-            if (!regex.test(value))
-                return false;
-        }
-        if (IsDefined(schema.format)) {
-            if (!Has$1(schema.format))
-                return false;
-            const func = Get$1(schema.format);
-            return func(value);
-        }
-        return true;
-    }
-    function FromSymbol(schema, references, value) {
-        return IsSymbol(value);
-    }
-    function FromTemplateLiteral(schema, references, value) {
-        return IsString(value) && new RegExp(schema.pattern).test(value);
-    }
-    function FromThis$3(schema, references, value) {
-        return Visit$3(Deref(schema, references), references, value);
-    }
-    function FromTuple$3(schema, references, value) {
-        if (!IsArray(value)) {
-            return false;
-        }
-        if (schema.items === undefined && !(value.length === 0)) {
-            return false;
-        }
-        if (!(value.length === schema.maxItems)) {
-            return false;
-        }
-        if (!schema.items) {
-            return true;
-        }
-        for (let i = 0; i < schema.items.length; i++) {
-            if (!Visit$3(schema.items[i], references, value[i]))
-                return false;
-        }
-        return true;
-    }
-    function FromUndefined(schema, references, value) {
-        return IsUndefined(value);
-    }
-    function FromUnion$3(schema, references, value) {
-        return schema.anyOf.some((inner) => Visit$3(inner, references, value));
-    }
-    function FromUint8Array(schema, references, value) {
-        if (!IsUint8Array(value)) {
-            return false;
-        }
-        if (IsDefined(schema.maxByteLength) && !(value.length <= schema.maxByteLength)) {
-            return false;
-        }
-        if (IsDefined(schema.minByteLength) && !(value.length >= schema.minByteLength)) {
-            return false;
-        }
-        return true;
-    }
-    function FromUnknown(schema, references, value) {
-        return true;
-    }
-    function FromVoid(schema, references, value) {
-        return TypeSystemPolicy.IsVoidLike(value);
-    }
-    function FromKind(schema, references, value) {
-        if (!Has(schema[Kind]))
-            return false;
-        const func = Get(schema[Kind]);
-        return func(schema, value);
-    }
-    function Visit$3(schema, references, value) {
-        const references_ = IsDefined(schema.$id) ? [...references, schema] : references;
-        const schema_ = schema;
-        switch (schema_[Kind]) {
-            case 'Any':
-                return FromAny();
-            case 'Array':
-                return FromArray$3(schema_, references_, value);
-            case 'AsyncIterator':
-                return FromAsyncIterator$1(schema_, references_, value);
-            case 'BigInt':
-                return FromBigInt(schema_, references_, value);
-            case 'Boolean':
-                return FromBoolean(schema_, references_, value);
-            case 'Constructor':
-                return FromConstructor$1(schema_, references_, value);
-            case 'Date':
-                return FromDate(schema_, references_, value);
-            case 'Function':
-                return FromFunction$1(schema_, references_, value);
-            case 'Integer':
-                return FromInteger(schema_, references_, value);
-            case 'Intersect':
-                return FromIntersect$3(schema_, references_, value);
-            case 'Iterator':
-                return FromIterator$1(schema_, references_, value);
-            case 'Literal':
-                return FromLiteral(schema_, references_, value);
-            case 'Never':
-                return FromNever();
-            case 'Not':
-                return FromNot$3(schema_, references_, value);
-            case 'Null':
-                return FromNull(schema_, references_, value);
-            case 'Number':
-                return FromNumber(schema_, references_, value);
-            case 'Object':
-                return FromObject$3(schema_, references_, value);
-            case 'Promise':
-                return FromPromise$1(schema_, references_, value);
-            case 'Record':
-                return FromRecord$3(schema_, references_, value);
-            case 'Ref':
-                return FromRef$3(schema_, references_, value);
-            case 'RegExp':
-                return FromRegExp(schema_, references_, value);
-            case 'String':
-                return FromString(schema_, references_, value);
-            case 'Symbol':
-                return FromSymbol(schema_, references_, value);
-            case 'TemplateLiteral':
-                return FromTemplateLiteral(schema_, references_, value);
-            case 'This':
-                return FromThis$3(schema_, references_, value);
-            case 'Tuple':
-                return FromTuple$3(schema_, references_, value);
-            case 'Undefined':
-                return FromUndefined(schema_, references_, value);
-            case 'Union':
-                return FromUnion$3(schema_, references_, value);
-            case 'Uint8Array':
-                return FromUint8Array(schema_, references_, value);
-            case 'Unknown':
-                return FromUnknown();
-            case 'Void':
-                return FromVoid(schema_, references_, value);
-            default:
-                if (!Has(schema_[Kind]))
-                    throw new ValueCheckUnknownTypeError(schema_);
-                return FromKind(schema_, references_, value);
-        }
-    }
-    /** Returns true if the value matches the given type. */
-    function Check$1(...args) {
-        return args.length === 3 ? Visit$3(args[0], args[1], args[2]) : Visit$3(args[0], [], args[1]);
-    }
-
-    const Insert = Object$1({
-        type: Literal('insert'),
-        path: String$1(),
-        value: Unknown(),
-    });
-    const Update = Object$1({
-        type: Literal('update'),
-        path: String$1(),
-        value: Unknown(),
-    });
-    const Delete = Object$1({
-        type: Literal('delete'),
-        path: String$1(),
-    });
-    Union$1([Insert, Update, Delete]);
-
-    // ------------------------------------------------------------------
-    // Errors
-    // ------------------------------------------------------------------
-    // thrown externally
-    // prettier-ignore
-    class TransformDecodeCheckError extends TypeBoxError {
-        constructor(schema, value, error) {
-            super(`Unable to decode value as it does not match the expected schema`);
-            this.schema = schema;
-            this.value = value;
-            this.error = error;
-        }
-    }
-    // prettier-ignore
-    class TransformDecodeError extends TypeBoxError {
-        constructor(schema, path, value, error) {
-            super(error instanceof Error ? error.message : 'Unknown error');
-            this.schema = schema;
-            this.path = path;
-            this.value = value;
-            this.error = error;
-        }
-    }
-    // ------------------------------------------------------------------
-    // Decode
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function Default$1(schema, path, value) {
-        try {
-            return IsTransform(schema) ? schema[TransformKind].Decode(value) : value;
-        }
-        catch (error) {
-            throw new TransformDecodeError(schema, path, value, error);
-        }
-    }
-    // prettier-ignore
-    function FromArray$2(schema, references, path, value) {
-        return (IsArray(value))
-            ? Default$1(schema, path, value.map((value, index) => Visit$2(schema.items, references, `${path}/${index}`, value)))
-            : Default$1(schema, path, value);
-    }
-    // prettier-ignore
-    function FromIntersect$2(schema, references, path, value) {
-        if (!IsStandardObject(value) || IsValueType(value))
-            return Default$1(schema, path, value);
-        const knownEntries = KeyOfPropertyEntries(schema);
-        const knownKeys = knownEntries.map(entry => entry[0]);
-        const knownProperties = { ...value };
-        for (const [knownKey, knownSchema] of knownEntries)
-            if (knownKey in knownProperties) {
-                knownProperties[knownKey] = Visit$2(knownSchema, references, `${path}/${knownKey}`, knownProperties[knownKey]);
-            }
-        if (!IsTransform(schema.unevaluatedProperties)) {
-            return Default$1(schema, path, knownProperties);
-        }
-        const unknownKeys = Object.getOwnPropertyNames(knownProperties);
-        const unevaluatedProperties = schema.unevaluatedProperties;
-        const unknownProperties = { ...knownProperties };
-        for (const key of unknownKeys)
-            if (!knownKeys.includes(key)) {
-                unknownProperties[key] = Default$1(unevaluatedProperties, `${path}/${key}`, unknownProperties[key]);
-            }
-        return Default$1(schema, path, unknownProperties);
-    }
-    function FromNot$2(schema, references, path, value) {
-        return Default$1(schema, path, Visit$2(schema.not, references, path, value));
-    }
-    // prettier-ignore
-    function FromObject$2(schema, references, path, value) {
-        if (!IsStandardObject(value))
-            return Default$1(schema, path, value);
-        const knownKeys = KeyOfPropertyKeys(schema);
-        const knownProperties = { ...value };
-        for (const key of knownKeys)
-            if (key in knownProperties) {
-                knownProperties[key] = Visit$2(schema.properties[key], references, `${path}/${key}`, knownProperties[key]);
-            }
-        if (!IsSchema(schema.additionalProperties)) {
-            return Default$1(schema, path, knownProperties);
-        }
-        const unknownKeys = Object.getOwnPropertyNames(knownProperties);
-        const additionalProperties = schema.additionalProperties;
-        const unknownProperties = { ...knownProperties };
-        for (const key of unknownKeys)
-            if (!knownKeys.includes(key)) {
-                unknownProperties[key] = Default$1(additionalProperties, `${path}/${key}`, unknownProperties[key]);
-            }
-        return Default$1(schema, path, unknownProperties);
-    }
-    // prettier-ignore
-    function FromRecord$2(schema, references, path, value) {
-        if (!IsStandardObject(value))
-            return Default$1(schema, path, value);
-        const pattern = Object.getOwnPropertyNames(schema.patternProperties)[0];
-        const knownKeys = new RegExp(pattern);
-        const knownProperties = { ...value };
-        for (const key of Object.getOwnPropertyNames(value))
-            if (knownKeys.test(key)) {
-                knownProperties[key] = Visit$2(schema.patternProperties[pattern], references, `${path}/${key}`, knownProperties[key]);
-            }
-        if (!IsSchema(schema.additionalProperties)) {
-            return Default$1(schema, path, knownProperties);
-        }
-        const unknownKeys = Object.getOwnPropertyNames(knownProperties);
-        const additionalProperties = schema.additionalProperties;
-        const unknownProperties = { ...knownProperties };
-        for (const key of unknownKeys)
-            if (!knownKeys.test(key)) {
-                unknownProperties[key] = Default$1(additionalProperties, `${path}/${key}`, unknownProperties[key]);
-            }
-        return Default$1(schema, path, unknownProperties);
-    }
-    // prettier-ignore
-    function FromRef$2(schema, references, path, value) {
-        const target = Deref(schema, references);
-        return Default$1(schema, path, Visit$2(target, references, path, value));
-    }
-    // prettier-ignore
-    function FromThis$2(schema, references, path, value) {
-        const target = Deref(schema, references);
-        return Default$1(schema, path, Visit$2(target, references, path, value));
-    }
-    // prettier-ignore
-    function FromTuple$2(schema, references, path, value) {
-        return (IsArray(value) && IsArray(schema.items))
-            ? Default$1(schema, path, schema.items.map((schema, index) => Visit$2(schema, references, `${path}/${index}`, value[index])))
-            : Default$1(schema, path, value);
-    }
-    // prettier-ignore
-    function FromUnion$2(schema, references, path, value) {
-        for (const subschema of schema.anyOf) {
-            if (!Check$1(subschema, references, value))
-                continue;
-            // note: ensure interior is decoded first
-            const decoded = Visit$2(subschema, references, path, value);
-            return Default$1(schema, path, decoded);
-        }
-        return Default$1(schema, path, value);
-    }
-    // prettier-ignore
-    function Visit$2(schema, references, path, value) {
-        const references_ = typeof schema.$id === 'string' ? [...references, schema] : references;
-        const schema_ = schema;
-        switch (schema[Kind]) {
-            case 'Array':
-                return FromArray$2(schema_, references_, path, value);
-            case 'Intersect':
-                return FromIntersect$2(schema_, references_, path, value);
-            case 'Not':
-                return FromNot$2(schema_, references_, path, value);
-            case 'Object':
-                return FromObject$2(schema_, references_, path, value);
-            case 'Record':
-                return FromRecord$2(schema_, references_, path, value);
-            case 'Ref':
-                return FromRef$2(schema_, references_, path, value);
-            case 'Symbol':
-                return Default$1(schema_, path, value);
-            case 'This':
-                return FromThis$2(schema_, references_, path, value);
-            case 'Tuple':
-                return FromTuple$2(schema_, references_, path, value);
-            case 'Union':
-                return FromUnion$2(schema_, references_, path, value);
-            default:
-                return Default$1(schema_, path, value);
-        }
-    }
-    /**
-     * `[Internal]` Decodes the value and returns the result. This function requires that
-     * the caller `Check` the value before use. Passing unchecked values may result in
-     * undefined behavior. Refer to the `Value.Decode()` for implementation details.
-     */
-    function TransformDecode(schema, references, value) {
-        return Visit$2(schema, references, '', value);
-    }
-
-    // ------------------------------------------------------------------
-    // Errors
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    class TransformEncodeCheckError extends TypeBoxError {
-        constructor(schema, value, error) {
-            super(`The encoded value does not match the expected schema`);
-            this.schema = schema;
-            this.value = value;
-            this.error = error;
-        }
-    }
-    // prettier-ignore
-    class TransformEncodeError extends TypeBoxError {
-        constructor(schema, path, value, error) {
-            super(`${error instanceof Error ? error.message : 'Unknown error'}`);
-            this.schema = schema;
-            this.path = path;
-            this.value = value;
-            this.error = error;
-        }
-    }
-    // ------------------------------------------------------------------
-    // Encode
-    // ------------------------------------------------------------------
-    // prettier-ignore
-    function Default(schema, path, value) {
-        try {
-            return IsTransform(schema) ? schema[TransformKind].Encode(value) : value;
-        }
-        catch (error) {
-            throw new TransformEncodeError(schema, path, value, error);
-        }
-    }
-    // prettier-ignore
-    function FromArray$1(schema, references, path, value) {
-        const defaulted = Default(schema, path, value);
-        return IsArray(defaulted)
-            ? defaulted.map((value, index) => Visit$1(schema.items, references, `${path}/${index}`, value))
-            : defaulted;
-    }
-    // prettier-ignore
-    function FromIntersect$1(schema, references, path, value) {
-        const defaulted = Default(schema, path, value);
-        if (!IsStandardObject(value) || IsValueType(value))
-            return defaulted;
-        const knownEntries = KeyOfPropertyEntries(schema);
-        const knownKeys = knownEntries.map(entry => entry[0]);
-        const knownProperties = { ...defaulted };
-        for (const [knownKey, knownSchema] of knownEntries)
-            if (knownKey in knownProperties) {
-                knownProperties[knownKey] = Visit$1(knownSchema, references, `${path}/${knownKey}`, knownProperties[knownKey]);
-            }
-        if (!IsTransform(schema.unevaluatedProperties)) {
-            return Default(schema, path, knownProperties);
-        }
-        const unknownKeys = Object.getOwnPropertyNames(knownProperties);
-        const unevaluatedProperties = schema.unevaluatedProperties;
-        const properties = { ...knownProperties };
-        for (const key of unknownKeys)
-            if (!knownKeys.includes(key)) {
-                properties[key] = Default(unevaluatedProperties, `${path}/${key}`, properties[key]);
-            }
-        return properties;
-    }
-    // prettier-ignore
-    function FromNot$1(schema, references, path, value) {
-        return Default(schema.not, path, Default(schema, path, value));
-    }
-    // prettier-ignore
-    function FromObject$1(schema, references, path, value) {
-        const defaulted = Default(schema, path, value);
-        if (!IsStandardObject(defaulted))
-            return defaulted;
-        const knownKeys = KeyOfPropertyKeys(schema);
-        const knownProperties = { ...defaulted };
-        for (const key of knownKeys)
-            if (key in knownProperties) {
-                knownProperties[key] = Visit$1(schema.properties[key], references, `${path}/${key}`, knownProperties[key]);
-            }
-        if (!IsSchema(schema.additionalProperties)) {
-            return knownProperties;
-        }
-        const unknownKeys = Object.getOwnPropertyNames(knownProperties);
-        const additionalProperties = schema.additionalProperties;
-        const properties = { ...knownProperties };
-        for (const key of unknownKeys)
-            if (!knownKeys.includes(key)) {
-                properties[key] = Default(additionalProperties, `${path}/${key}`, properties[key]);
-            }
-        return properties;
-    }
-    // prettier-ignore
-    function FromRecord$1(schema, references, path, value) {
-        const defaulted = Default(schema, path, value);
-        if (!IsStandardObject(value))
-            return defaulted;
-        const pattern = Object.getOwnPropertyNames(schema.patternProperties)[0];
-        const knownKeys = new RegExp(pattern);
-        const knownProperties = { ...defaulted };
-        for (const key of Object.getOwnPropertyNames(value))
-            if (knownKeys.test(key)) {
-                knownProperties[key] = Visit$1(schema.patternProperties[pattern], references, `${path}/${key}`, knownProperties[key]);
-            }
-        if (!IsSchema(schema.additionalProperties)) {
-            return Default(schema, path, knownProperties);
-        }
-        const unknownKeys = Object.getOwnPropertyNames(knownProperties);
-        const additionalProperties = schema.additionalProperties;
-        const properties = { ...knownProperties };
-        for (const key of unknownKeys)
-            if (!knownKeys.test(key)) {
-                properties[key] = Default(additionalProperties, `${path}/${key}`, properties[key]);
-            }
-        return properties;
-    }
-    // prettier-ignore
-    function FromRef$1(schema, references, path, value) {
-        const target = Deref(schema, references);
-        const resolved = Visit$1(target, references, path, value);
-        return Default(schema, path, resolved);
-    }
-    // prettier-ignore
-    function FromThis$1(schema, references, path, value) {
-        const target = Deref(schema, references);
-        const resolved = Visit$1(target, references, path, value);
-        return Default(schema, path, resolved);
-    }
-    // prettier-ignore
-    function FromTuple$1(schema, references, path, value) {
-        const value1 = Default(schema, path, value);
-        return IsArray(schema.items) ? schema.items.map((schema, index) => Visit$1(schema, references, `${path}/${index}`, value1[index])) : [];
-    }
-    // prettier-ignore
-    function FromUnion$1(schema, references, path, value) {
-        // test value against union variants
-        for (const subschema of schema.anyOf) {
-            if (!Check$1(subschema, references, value))
-                continue;
-            const value1 = Visit$1(subschema, references, path, value);
-            return Default(schema, path, value1);
-        }
-        // test transformed value against union variants
-        for (const subschema of schema.anyOf) {
-            const value1 = Visit$1(subschema, references, path, value);
-            if (!Check$1(schema, references, value1))
-                continue;
-            return Default(schema, path, value1);
-        }
-        return Default(schema, path, value);
-    }
-    // prettier-ignore
-    function Visit$1(schema, references, path, value) {
-        const references_ = typeof schema.$id === 'string' ? [...references, schema] : references;
-        const schema_ = schema;
-        switch (schema[Kind]) {
-            case 'Array':
-                return FromArray$1(schema_, references_, path, value);
-            case 'Intersect':
-                return FromIntersect$1(schema_, references_, path, value);
-            case 'Not':
-                return FromNot$1(schema_, references_, path, value);
-            case 'Object':
-                return FromObject$1(schema_, references_, path, value);
-            case 'Record':
-                return FromRecord$1(schema_, references_, path, value);
-            case 'Ref':
-                return FromRef$1(schema_, references_, path, value);
-            case 'This':
-                return FromThis$1(schema_, references_, path, value);
-            case 'Tuple':
-                return FromTuple$1(schema_, references_, path, value);
-            case 'Union':
-                return FromUnion$1(schema_, references_, path, value);
-            default:
-                return Default(schema_, path, value);
-        }
-    }
-    /**
-     * `[Internal]` Encodes the value and returns the result. This function expects the
-     * caller to pass a statically checked value. This function does not check the encoded
-     * result, meaning the result should be passed to `Check` before use. Refer to the
-     * `Value.Encode()` function for implementation details.
-     */
-    function TransformEncode(schema, references, value) {
-        return Visit$1(schema, references, '', value);
-    }
-
-    // prettier-ignore
-    function FromArray(schema, references) {
-        return IsTransform(schema) || Visit(schema.items, references);
-    }
-    // prettier-ignore
-    function FromAsyncIterator(schema, references) {
-        return IsTransform(schema) || Visit(schema.items, references);
-    }
-    // prettier-ignore
-    function FromConstructor(schema, references) {
-        return IsTransform(schema) || Visit(schema.returns, references) || schema.parameters.some((schema) => Visit(schema, references));
-    }
-    // prettier-ignore
-    function FromFunction(schema, references) {
-        return IsTransform(schema) || Visit(schema.returns, references) || schema.parameters.some((schema) => Visit(schema, references));
-    }
-    // prettier-ignore
-    function FromIntersect(schema, references) {
-        return IsTransform(schema) || IsTransform(schema.unevaluatedProperties) || schema.allOf.some((schema) => Visit(schema, references));
-    }
-    // prettier-ignore
-    function FromIterator(schema, references) {
-        return IsTransform(schema) || Visit(schema.items, references);
-    }
-    // prettier-ignore
-    function FromNot(schema, references) {
-        return IsTransform(schema) || Visit(schema.not, references);
-    }
-    // prettier-ignore
-    function FromObject(schema, references) {
-        return (IsTransform(schema) ||
-            Object.values(schema.properties).some((schema) => Visit(schema, references)) ||
-            (IsSchema(schema.additionalProperties) && Visit(schema.additionalProperties, references)));
-    }
-    // prettier-ignore
-    function FromPromise(schema, references) {
-        return IsTransform(schema) || Visit(schema.item, references);
-    }
-    // prettier-ignore
-    function FromRecord(schema, references) {
-        const pattern = Object.getOwnPropertyNames(schema.patternProperties)[0];
-        const property = schema.patternProperties[pattern];
-        return IsTransform(schema) || Visit(property, references) || (IsSchema(schema.additionalProperties) && IsTransform(schema.additionalProperties));
-    }
-    // prettier-ignore
-    function FromRef(schema, references) {
-        if (IsTransform(schema))
-            return true;
-        return Visit(Deref(schema, references), references);
-    }
-    // prettier-ignore
-    function FromThis(schema, references) {
-        if (IsTransform(schema))
-            return true;
-        return Visit(Deref(schema, references), references);
-    }
-    // prettier-ignore
-    function FromTuple(schema, references) {
-        return IsTransform(schema) || (!IsUndefined(schema.items) && schema.items.some((schema) => Visit(schema, references)));
-    }
-    // prettier-ignore
-    function FromUnion(schema, references) {
-        return IsTransform(schema) || schema.anyOf.some((schema) => Visit(schema, references));
-    }
-    // prettier-ignore
-    function Visit(schema, references) {
-        const references_ = IsString(schema.$id) ? [...references, schema] : references;
-        const schema_ = schema;
-        if (schema.$id && visited.has(schema.$id))
-            return false;
-        if (schema.$id)
-            visited.add(schema.$id);
-        switch (schema[Kind]) {
-            case 'Array':
-                return FromArray(schema_, references_);
-            case 'AsyncIterator':
-                return FromAsyncIterator(schema_, references_);
-            case 'Constructor':
-                return FromConstructor(schema_, references_);
-            case 'Function':
-                return FromFunction(schema_, references_);
-            case 'Intersect':
-                return FromIntersect(schema_, references_);
-            case 'Iterator':
-                return FromIterator(schema_, references_);
-            case 'Not':
-                return FromNot(schema_, references_);
-            case 'Object':
-                return FromObject(schema_, references_);
-            case 'Promise':
-                return FromPromise(schema_, references_);
-            case 'Record':
-                return FromRecord(schema_, references_);
-            case 'Ref':
-                return FromRef(schema_, references_);
-            case 'This':
-                return FromThis(schema_, references_);
-            case 'Tuple':
-                return FromTuple(schema_, references_);
-            case 'Union':
-                return FromUnion(schema_, references_);
-            default:
-                return IsTransform(schema);
-        }
-    }
-    const visited = new Set();
-    /** Returns true if this schema contains a transform codec */
-    function HasTransform(schema, references) {
-        visited.clear();
-        return Visit(schema, references);
-    }
-
-    /** Returns true if the value matches the given type */
-    function Check(...args) {
-        return Check$1.apply(Check$1, args);
-    }
-    /** Decodes a value or throws if error */
-    function Decode(...args) {
-        const [schema, references, value] = args.length === 3 ? [args[0], args[1], args[2]] : [args[0], [], args[1]];
-        if (!Check(schema, references, value))
-            throw new TransformDecodeCheckError(schema, value, Errors(schema, references, value).First());
-        return HasTransform(schema, references) ? TransformDecode(schema, references, value) : value;
-    }
-    /** Encodes a value or throws if error */
-    function Encode(...args) {
-        const [schema, references, value] = args.length === 3 ? [args[0], args[1], args[2]] : [args[0], [], args[1]];
-        const encoded = HasTransform(schema, references) ? TransformEncode(schema, references, value) : value;
-        if (!Check(schema, references, encoded))
-            throw new TransformEncodeCheckError(schema, encoded, Errors(schema, references, encoded).First());
-        return encoded;
-    }
-    /** Returns an iterator for each error in this value. */
-    function Errors(...args) {
-        return Errors$1.apply(Errors$1, args);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore: we have to ignore this for csm output.
-    function logRelevantErrorInfo(e) {
-        const { /* schema, */ error /* , value */ } = e;
-        console.log(JSON.stringify(error, null, 2));
-    }
-    const handleResultError = (e, options) => {
-        const title = e.schema.title;
-        if (options.logErrors) {
-            logRelevantErrorInfo(e);
-            console.log(`
-    This may happen intermittently and you should catch errors appropriately.
-    However:  1) if this recently started happening on every request for a symbol
-    that used to work, Yahoo may have changed their API.  2) If this happens on
-    every request for a symbol you've never used before, but not for other
-    symbols, you've found an edge-case (OR, we may just be protecting you from
-    "bad" data sometimes stored for e.g. misspelt symbols on Yahoo's side).
-    Please see if anyone has reported this previously:
-    
-      ${pkg.repository}/issues?q=is%3Aissue+${title}
-    
-    or open a new issue (and mention the symbol):  ${pkg.name} v${pkg.version}
-    
-      ${pkg.repository}/issues/new?labels=bug%2C+validation&template=validation.md&title=${title}
-    
-    For information on how to turn off the above logging or skip these errors,
-    see https://github.com/gadicc/node-yahoo-finance2/tree/devel/docs/validation.md.
-    
-    At the end of the doc, there's also a section on how to
-    [Help Fix Validation Errors](https://github.com/gadicc/node-yahoo-finance2/blob/devel/docs/validation.md#help-fix)
-    in case you'd like to contribute to the project.  Most of the time, these
-    fixes are very quick and easy; it's just hard for our small core team to keep up,
-    so help is always appreciated!
-    `);
-        }
-        throw new FailedYahooValidationError("Failed Yahoo Schema validation", {
-            result: e.value,
-            errors: [e],
-        });
-    };
-    const handleOptionsError = (e, { logOptionsErrors }) => {
-        if (logOptionsErrors) {
-            console.error(`[yahooFinance] Invalid options ("${JSON.stringify(e.error, null, 2)}")`);
-        }
-        throw new InvalidOptionsError("Validation called with invalid options");
-    };
-    const validateAndCoerceTypebox = ({ type, data, schema, options, }) => {
-        try {
-            const validationSchema = options._internalThrowOnAdditionalProperties
-                ? { ...schema, additionalProperties: false }
-                : schema;
-            return Decode(validationSchema, data);
-        }
-        catch (e) {
-            if (e instanceof TransformDecodeError ||
-                e instanceof TransformDecodeCheckError) {
-                // TODO: The existing implementation of 'validate' assumes that the `type` parameter may not be provided
-                // and defaults to validating the options if it is not.
-                // We should probably explore validating this further up in the call chain.
-                // It'd be nice to do this in the body of a module (e.g. search) so that we can avoid
-                // polluting core code with type checks and edge cases
-                type === "result"
-                    ? handleResultError(e, options)
-                    : handleOptionsError(e, options);
-            }
-            throw e;
-        }
-    };
-
-    function setGlobalConfig(_config) {
-        const parsed = validateAndCoerceTypebox({
-            data: _config,
-            type: "options",
-            options: this._opts.validation,
-            schema: YahooFinanceOptionsSchema,
-        });
-        // Instances (e.g. cookieJar) don't validate well :)
-        const { cookieJar, ...config } = parsed;
-        mergeObjects(this._opts, config);
-        if (cookieJar) {
-            if (!(cookieJar instanceof ExtendedCookieJar))
-                throw new Error("cookieJar must be an instance of ExtendedCookieJar");
-            this._opts.cookieJar = cookieJar;
-        }
-    }
-    function mergeObjects(original, objToMerge) {
-        const ownKeys = Reflect.ownKeys(objToMerge);
-        for (const key of ownKeys) {
-            if (typeof objToMerge[key] === "object") {
-                mergeObjects(original[key], objToMerge[key]);
-            }
-            else {
-                original[key] = objToMerge[key];
-            }
-        }
-    }
-
-    // Partial implementation that covers everything we need
-    const DELIMITER = ",";
-    function camelize(str) {
-        return str
-            .split(" ")
-            .map((str, i) => i === 0
-            ? str.toLowerCase()
-            : str[0].toUpperCase() + str.substr(1).toLowerCase())
-            .join("");
-    }
-    function convert(input) {
-        if (input.match(/\d{4,4}-\d{2,2}-\d{2,2}/))
-            return new Date(input);
-        if (input.match(/^[0-9\.]+$/))
-            return parseFloat(input);
-        if (input === "null")
-            return null;
-        return input;
-    }
-    function csv2json(csv) {
-        const lines = csv.split("\n");
-        // Actually we should handle this case, i.e. headers but no data.
-        // if (lines.length === 1)
-        //  throw new Error("No newlines in: " + csv);
-        const headers = lines.shift().split(DELIMITER).map(camelize);
-        const out = new Array(lines.length);
-        for (let i = 0; i < lines.length; i++) {
-            const inRow = lines[i].split(DELIMITER);
-            const outRow = (out[i] = {});
-            for (let j = 0; j < inRow.length; j++) {
-                outRow[headers[j]] = convert(inRow[j]);
-            }
-        }
-        return out;
-    }
-
-    /*
-     * moduleExec(options: ModuleExecOptions)
-     *
-     * 1. Query Stage
-     *   1. Validate user-supplied module params, e.g. { period: '1d' }
-     *   2. Merge query params: (module defaults, user-supplied overrides, etc)
-     *   3. Optionally transform query params
-     *
-     * 2. Call lib/yahooFinanceFetch
-     *
-     * 3. Result Stage
-     *   1. Optional transform the result
-     *   2. Validate the result and coerce types
-     *
-     * Further info below, inline.
-     */
-    async function moduleExec(opts) {
-        var _a, _b;
-        const queryOpts = opts.query;
-        const moduleOpts = opts.moduleOptions;
-        const moduleName = opts.moduleName;
-        const resultOpts = opts.result;
-        if (queryOpts.assertSymbol) {
-            const symbol = queryOpts.assertSymbol;
-            if (typeof symbol !== "string")
-                throw new Error(`yahooFinance.${moduleName}() expects a single string symbol as its ` +
-                    `query, not a(n) ${typeof symbol}: ${JSON.stringify(symbol)}`);
-        }
-        // Check that query options passed by the user are valid for this module
-        validateAndCoerceTypebox({
-            type: "options",
-            data: (_a = queryOpts.overrides) !== null && _a !== void 0 ? _a : {},
-            schema: queryOpts.schema,
-            options: this._opts.validation,
-        });
-        let queryOptions = {
-            ...queryOpts.defaults, // Module defaults e.g. { period: '1wk', lang: 'en' }
-            ...queryOpts.runtime, // Runtime params e.g. { q: query }
-            ...queryOpts.overrides, // User supplied options that override above
-        };
-        /*
-         * Called with the merged (defaults,runtime,overrides) before running
-         * the query.  Useful to transform options we allow but not Yahoo, e.g.
-         * allow a "2020-01-01" date but transform this to a UNIX epoch.
-         */
-        if (queryOpts.transformWith) {
-            queryOptions = queryOpts.transformWith(queryOptions);
-        }
-        // this._fetch is lib/yahooFinanceFetch
-        let result = await this._fetch(queryOpts.url, queryOptions, moduleOpts, queryOpts.fetchType, (_b = queryOpts.needsCrumb) !== null && _b !== void 0 ? _b : false);
-        if (queryOpts.fetchType === "csv") {
-            result = csv2json(result);
-        }
-        /*
-         * Mutate the Yahoo result *before* validating and coercion.  Mostly used
-         * to e.g. throw if no (result.returnField) and return result.returnField.
-         */
-        if (resultOpts.transformWith) {
-            result = resultOpts.transformWith(result);
-        }
-        const validateResult = !moduleOpts ||
-            moduleOpts.validateResult === undefined ||
-            moduleOpts.validateResult === true;
-        const validationOpts = {
-            ...this._opts.validation,
-            // Set logErrors=false if validateResult=false
-            logErrors: validateResult ? this._opts.validation.logErrors : false,
-        };
-        /*
-         * Validate the returned result (after transforming, above) and coerce types.
-         *
-         * The coersion works as follows: if we're expecting a "Date" type, but Yahoo
-         * gives us { raw: 1231421524, fmt: "2020-01-01" }, we'll return that as
-         * `new Date(1231421524 * 1000)`.
-         *
-         * Beyond that, ensures that user won't process unexpected data, in two
-         * cases:
-         *
-         * a) Missing required properties or unexpected additional properties
-         * b) A total new change in format that we really have no idea what to do
-         *    with, e.g. a new kind of Date that we've never seen before and
-         *
-         * The idea is that if you receive a result, it's safe to use / store in
-         * database, etc.  Otherwise you'll receive an error.
-         */
-        try {
-            return validateAndCoerceTypebox({
-                type: "result",
-                data: result,
-                schema: resultOpts.schema,
-                options: validationOpts,
-            });
-        }
-        catch (error) {
-            if (validateResult)
-                throw error;
-        }
-        return result;
-    }
-
-    async function autoc() {
-        throw new Error("Yahoo decomissioned their autoc server sometime before 20 Nov 2021 " +
-            "(see https://github.com/gadicc/node-yahoo-finance2/issues/337])). " +
-            "Use `search` instead (just like they do).");
-    }
-
-    /*
-    The contents of this file are copied from:
-    * https://github.com/sinclairzx81/typebox/blob/7a42aeef5bb989c07bbfc9acdbd9d74b3febed05/example/formats/date.ts
-    * https://github.com/sinclairzx81/typebox/blob/7a42aeef5bb989c07bbfc9acdbd9d74b3febed05/example/formats/date-time.ts
-    * https://github.com/sinclairzx81/typebox/blob/7a42aeef5bb989c07bbfc9acdbd9d74b3febed05/example/formats/time.ts
-    *
-    * License info:
-    *
-    * The MIT License (MIT)
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in
-    all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-    THE SOFTWARE.
-    */
-    const DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    const DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
-    const YEAR = /^(\d\d\d\d)$/;
-    const TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
-    const DATE_TIME_SEPARATOR = /t|\s/i;
-    function IsLeapYear(year) {
-        return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-    }
-    const isYear = (value) => {
-        const matches = YEAR.exec(value);
-        return !!matches;
-    };
-    /**
-     * `[ajv-formats]` ISO8601 Date component
-     * @example `2020-12-12`
-     */
-    const isDate = (value) => {
-        const matches = DATE.exec(value);
-        if (!matches)
-            return false;
-        const year = +matches[1];
-        const month = +matches[2];
-        const day = +matches[3];
-        return (month >= 1 &&
-            month <= 12 &&
-            day >= 1 &&
-            day <= (month === 2 && IsLeapYear(year) ? 29 : DAYS[month]));
-    };
-    /**
-     * `[ajv-formats]` ISO8601 Time component
-     * @example `20:20:39+00:00`
-     */
-    const isTime = (value, strictTimeZone) => {
-        const matches = TIME.exec(value);
-        if (!matches)
-            return false;
-        const hr = +matches[1];
-        const min = +matches[2];
-        const sec = +matches[3];
-        const tz = matches[4];
-        const tzSign = matches[5] === "-" ? -1 : 1;
-        const tzH = +(matches[6] || 0);
-        const tzM = +(matches[7] || 0);
-        if (tzH > 23 || tzM > 59 || (strictTimeZone && !tz))
-            return false;
-        if (hr <= 23 && min <= 59 && sec < 60)
-            return true;
-        const utcMin = min - tzM * tzSign;
-        const utcHr = hr - tzH * tzSign - (utcMin < 0 ? 1 : 0);
-        return ((utcHr === 23 || utcHr === -1) &&
-            (utcMin === 59 || utcMin === -1) &&
-            sec < 61);
-    };
-    /**
-     * `[ajv-formats]` ISO8601 DateTime
-     * @example `2020-12-12T20:20:40+00:00`
-     */
-    const isDateTime = (value, strictTimeZone) => {
-        const dateTime = value.split(DATE_TIME_SEPARATOR);
-        return (dateTime.length === 2 &&
-            isDate(dateTime[0]) &&
-            isTime(dateTime[1], strictTimeZone));
-    };
-
-    Set$2("date", isDate);
-    Set$2("date-time", isDateTime);
-    Set$2("year", isYear);
-    // Strictly must be empty
-    const EmptyObjectCoerceToNull = Type.Transform(Type.Object({}, { maxProperties: 0, title: "EmptyObjectCoerceToNull" }))
-        .Decode(() => null)
-        .Encode(() => ({}));
-    // Technically this will also contain a string 'fmt' key but we don't care because we don't use it
-    const RawNumber = Type.Transform(Type.Object({
-        raw: Type.Number(),
-    }, {
-        title: "RawNumber",
-    }))
-        .Decode((v) => v.raw)
-        .Encode((v) => ({ raw: v }));
-    const TwoNumberRangeString = Type.Transform(Type.RegExp(/^(-?\d+(?:\.\d+)?) - (-?\d+(?:\.\d+)?)$/g, {
-        title: "TwoNumberRangeString",
-    }))
-        .Decode((value) => {
-        // Split the two numbers allowing for negatives on either side
-        const validatedNumbers = value.match(/-?\d+(?:\.\d+)?/g);
-        if (!validatedNumbers) {
-            throw new Error(`Unable to decode number range from: ${value}`);
-        }
-        const [low, high] = validatedNumbers.map((number) => parseFloat(number));
-        if (isNaN(low) || isNaN(high)) {
-            throw new Error(`Unable to decode number range from: ${value}. Decoded value for low is: ${low}, decoded value for high is: ${high}`);
-        }
-        return { low, high };
-    })
-        .Encode(({ low, high }) => `${low} - ${high}`);
-    const TwoNumberRange = Type.Object({
-        low: Type.Number(),
-        high: Type.Number(),
-    }, { title: "TwoNumberRange" });
-    const EpochTimestamp = Type.Transform(Type.Number())
-        .Decode((v) => new Date(v * 1000))
-        .Encode((v) => +v / 1000);
-    const RawDateObject = Type.Transform(Type.Object({
-        raw: EpochTimestamp,
-    }, { title: "RawDateObject" }))
-        .Decode((v) => v.raw)
-        .Encode((v) => ({
-        raw: Encode(EpochTimestamp, v),
-    }));
-    const ISOStringDate = Type.Transform(Type.Union([
-        Type.String({ format: "date" }),
-        Type.String({ format: "year" }),
-        Type.String({ format: "date-time" }),
-    ], { title: "ISOStringDate" }))
-        .Decode((v) => new Date(v))
-        .Encode((v) => v.toISOString());
-    const YahooFinanceDate = Type.Union([Type.Date(), EpochTimestamp, RawDateObject, ISOStringDate], { title: "YahooFinanceDate" });
-    /**
-     * Validates and decodes all nullable date representations produced by Yahoo
-     * e.g. accepted inputs include:
-     * - 1612313997
-     * - { raw: 1612313997 }
-     * - "2024-02-29"
-     * - "2024-05-04T13:24:41.100Z"
-     * - {} (coerces to null)
-     */
-    const NullableYahooFinanceDate = Type.Union([YahooFinanceDate, Type.Null(), EmptyObjectCoerceToNull], {
-        title: "NullableYahooFinanceDate",
-    });
-    /**
-     * Validates and decodes all number types and coerces to a number
-     * e.g. accepted inputs include:
-     * - 10.54
-     * - {raw: 10.54, fmt: "%6f"}
-     */
-    const YahooNumber = Type.Union([RawNumber, Type.Number()], {
-        title: "YahooNumber",
-    });
-    /**
-     * Validates and decodes dates represented as milliseconds since the unix epoch to Date objects
-     * e.g. accepted inputs include:
-     * - 1612313997000
-     */
-    const YahooDateInMs = Type.Transform(Type.Number({ title: "YahooDateInMs" }))
-        .Decode((v) => new Date(v))
-        .Encode((v) => +v);
-    /**
-     * Validates and decodes all nullable number types and coerces to a number or null
-     * e.g. accepted inputs include:
-     * - 10.54
-     * - {raw: 10.54, fmt: "%6f"}
-     * - null
-     * - {} (coerces to null)
-     */
-    const NullableYahooNumber = Type.Union([RawNumber, EmptyObjectCoerceToNull, Type.Number(), Type.Null()], {
-        title: "NullableYahooNumber",
-    });
-    /**
-     * Validates and decodes 2 number ranges to a consistent object format of { low: <number>, high: <number> }
-     * e.g. accepted inputs include:
-     * - { low: 103, high: 10043 }
-     * - "-32432 - 453"
-     */
-    const YahooTwoNumberRange = Type.Union([TwoNumberRange, TwoNumberRangeString], {
-        title: "YahooTwoNumberRange",
-    });
-
-    // Co-authored by @gadicc, @PythonCreator27 and @huned.
-    const ChartMetaTradingPeriod = Type.Object({
-        timezone: Type.String(), // "EST",
-        start: YahooFinanceDate, // new Date(1637355600 * 1000),
-        end: YahooFinanceDate, // new Date(1637370000 * 10000),
-        gmtoffset: YahooNumber, // -18000
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartMetaTradingPeriod",
-    });
-    const ChartMetaTradingPeriods = Type.Object({
-        pre: Type.Optional(Type.Array(Type.Array(ChartMetaTradingPeriod))),
-        post: Type.Optional(Type.Array(Type.Array(ChartMetaTradingPeriod))),
-        regular: Type.Optional(Type.Array(Type.Array(ChartMetaTradingPeriod))),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartMetaTradingPeriods",
-    });
-    const ChartResultArrayQuote = Type.Object({
-        date: YahooFinanceDate,
-        high: Type.Union([YahooNumber, Type.Null()]),
-        low: Type.Union([YahooNumber, Type.Null()]),
-        open: Type.Union([YahooNumber, Type.Null()]),
-        close: Type.Union([YahooNumber, Type.Null()]),
-        volume: Type.Union([YahooNumber, Type.Null()]),
-        adjclose: Type.Optional(Type.Union([YahooNumber, Type.Null()])),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartResultArrayQuote",
-    });
-    const ChartEventDividend = Type.Object({
-        amount: YahooNumber,
-        date: YahooFinanceDate,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartEventDividend",
-    });
-    const ChartEventDividends = Type.Object({}, {
-        additionalProperties: ChartEventDividend,
-        title: "ChartEventDividends",
-    });
-    const ChartEventSplit = Type.Object({
-        date: YahooFinanceDate, // new Date(1598880600 * 1000)
-        numerator: YahooNumber, // 4
-        denominator: YahooNumber, // 1
-        splitRatio: Type.String(), // "4:1"
-    }, {
-        additionalProperties: Type.Any(),
-    });
-    const ChartEventsArray = Type.Object({
-        dividends: Type.Optional(Type.Array(ChartEventDividend)),
-        splits: Type.Optional(Type.Array(ChartEventSplit)),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartEventsArray",
-    });
-    const ChartMeta = Type.Object({
-        currency: Type.String(), // "USD"
-        symbol: Type.String(), // "AAPL",
-        exchangeName: Type.String(), // "NMS",
-        instrumentType: Type.String(), // "EQUITY",
-        firstTradeDate: Type.Union([YahooFinanceDate, Type.Null()]), // new Date(345479400 * 1000); null in e.g. "APS.AX"
-        regularMarketTime: YahooFinanceDate, // new Date(1637355602 * 1000),
-        gmtoffset: YahooNumber, // -18000,
-        timezone: Type.String(), /// "EST",
-        exchangeTimezoneName: Type.String(), // "America/New_York",
-        regularMarketPrice: YahooNumber, // 160.55,
-        chartPreviousClose: Type.Optional(YahooNumber), // 79.75; missing in e.g. "APS.AX"
-        previousClose: Type.Optional(YahooNumber), // 1137.06
-        scale: Type.Optional(YahooNumber), // 3,
-        priceHint: YahooNumber, // 2,
-        currentTradingPeriod: Type.Object({
-            pre: ChartMetaTradingPeriod,
-            regular: ChartMetaTradingPeriod,
-            post: ChartMetaTradingPeriod,
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-        tradingPeriods: Type.Optional(
-        // TODO, would be great to use correct type as a generic based on
-        // `includePrePost` and `interval`, see #812.
-        Type.Union([
-            ChartMetaTradingPeriods,
-            Type.Array(Type.Array(ChartMetaTradingPeriod)),
-        ])),
-        dataGranularity: Type.String(), // "1d",
-        range: Type.String(), // ""
-        validRanges: Type.Array(Type.String()), // ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartMeta",
-    });
-    Type.Object({
-        meta: ChartMeta,
-        events: Type.Optional(ChartEventsArray),
-        quotes: Type.Array(ChartResultArrayQuote),
-    }, { title: "ChartResultArray" });
-    const ChartEventSplits = Type.Object({}, {
-        additionalProperties: ChartEventSplit,
-        title: "ChartEventSplits",
-    });
-    const ChartIndicatorQuote = Type.Object({
-        high: Type.Array(Type.Union([YahooNumber, Type.Null()])),
-        low: Type.Array(Type.Union([YahooNumber, Type.Null()])),
-        open: Type.Array(Type.Union([YahooNumber, Type.Null()])),
-        close: Type.Array(Type.Union([YahooNumber, Type.Null()])),
-        volume: Type.Array(Type.Union([YahooNumber, Type.Null()])),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartIndicatorQuote",
-    });
-    const ChartIndicatorAdjclose = Type.Object({
-        adjclose: Type.Optional(Type.Array(Type.Union([YahooNumber, Type.Null()]))), // Missing in e.g. "APS.AX"
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartIndicatorAdjClose",
-    });
-    const ChartEventsObject = Type.Object({
-        dividends: Type.Optional(ChartEventDividends),
-        splits: Type.Optional(ChartEventSplits),
-    }, {
-        additionalProperties: Type.Any(),
-    });
-    const ChartIndicatorsObject = Type.Object({
-        quote: Type.Array(ChartIndicatorQuote),
-        adjclose: Type.Optional(Type.Array(ChartIndicatorAdjclose)),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartIndicatorObject",
-    });
-    const ChartResultObjectSchema = Type.Object({
-        meta: ChartMeta,
-        timestamp: Type.Optional(Type.Array(YahooNumber)),
-        events: Type.Optional(ChartEventsObject),
-        indicators: ChartIndicatorsObject,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "ChartResultObject",
-    });
-    const ChartOptionsSchema = Type.Object({
-        period1: Type.Union([Type.Date(), Type.String(), YahooNumber]),
-        period2: Type.Optional(Type.Union([Type.Date(), Type.String(), YahooNumber])),
-        useYfid: Type.Optional(Type.Boolean()), // true
-        interval: Type.Optional(Type.Union([
-            Type.Literal("1m"),
-            Type.Literal("2m"),
-            Type.Literal("5m"),
-            Type.Literal("15m"),
-            Type.Literal("30m"),
-            Type.Literal("60m"),
-            Type.Literal("90m"),
-            Type.Literal("1h"),
-            Type.Literal("1d"),
-            Type.Literal("5d"),
-            Type.Literal("1wk"),
-            Type.Literal("1mo"),
-            Type.Literal("3mo"),
-        ])),
-        includePrePost: Type.Optional(Type.Boolean()), // true
-        events: Type.Optional(Type.String()), // 'history',
-        lang: Type.Optional(Type.String()), // "en-US"
-        return: Type.Optional(Type.Union([Type.Literal("array"), Type.Literal("object")])),
-    }, {
-        title: "ChartOptions",
-    });
-    Type.Composite([
-        ChartOptionsSchema,
-        Type.Object({
-            return: Type.Optional(Type.Literal("array")),
-        }),
-    ], {
-        title: "ChartOptionsWithReturnArray",
-    });
-    Type.Composite([
-        ChartOptionsSchema,
-        Type.Object({
-            return: Type.Literal("object"),
-        }),
-    ], {
-        title: "ChartOptionsWithReturnObject",
-    });
-    const queryOptionsDefaults$b = {
-        useYfid: true,
-        interval: "1d",
-        includePrePost: true,
-        events: "div|split|earn",
-        lang: "en-US",
-        return: "array",
-    };
-    /* --- array input, typed output, honor "return" param --- */
-    // TODO: make this a deprecration passthrough
-    const _chart = chart;
-    async function chart(symbol, queryOptionsOverrides, moduleOptions) {
-        var _a, _b, _c;
-        const returnAs = (queryOptionsOverrides === null || queryOptionsOverrides === void 0 ? void 0 : queryOptionsOverrides.return) || "array";
-        const result = (await this._moduleExec({
-            moduleName: "chart",
-            query: {
-                assertSymbol: symbol,
-                url: "https://${YF_QUERY_HOST}/v8/finance/chart/" + symbol,
-                schema: ChartOptionsSchema,
-                defaults: queryOptionsDefaults$b,
-                overrides: queryOptionsOverrides,
-                transformWith(queryOptions) {
-                    if (!queryOptions.period2)
-                        queryOptions.period2 = new Date();
-                    const dates = ["period1", "period2"];
-                    for (const fieldName of dates) {
-                        const value = queryOptions[fieldName];
-                        if (value instanceof Date) {
-                            queryOptions[fieldName] = Math.floor(value.getTime() / 1000);
-                        }
-                        else if (typeof value === "string") {
-                            const timestamp = new Date(value).getTime();
-                            if (isNaN(timestamp))
-                                throw new Error("yahooFinance.chart() option '" +
-                                    fieldName +
-                                    "' invalid date provided: '" +
-                                    value +
-                                    "'");
-                            queryOptions[fieldName] = Math.floor(timestamp / 1000);
-                        }
-                    }
-                    if (queryOptions.period1 === queryOptions.period2) {
-                        throw new Error("yahooFinance.chart() options `period1` and `period2` " +
-                            "cannot share the same value.");
-                    }
-                    // Don't pass this on to Yahoo
-                    delete queryOptions.return;
-                    return queryOptions;
-                },
-            },
-            result: {
-                schema: ChartResultObjectSchema,
-                transformWith(result) {
-                    if (!result.chart)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    const chart = result.chart.result[0];
-                    // If there are no quotes, chart.timestamp will be empty, but Yahoo also
-                    // gives us chart.indicators.quotes = [{}].  Let's clean that up and
-                    // deliver an empty array rather than an invalid ChartIndicatorQuote/
-                    if (!chart.timestamp) {
-                        if (chart.indicators.quote.length !== 1)
-                            throw new Error("No timestamp with quotes.length !== 1, please report with your query");
-                        if (Object.keys(chart.indicators.quote[0]).length !== 0)
-                            // i.e. {}
-                            throw new Error("No timestamp with unexpected quote, please report with your query" +
-                                JSON.stringify(chart.indicators.quote[0]));
-                        chart.indicators.quote.pop();
-                    }
-                    return chart;
-                },
-            },
-            moduleOptions,
-        }));
-        if (returnAs === "object") {
-            return result;
-        }
-        else if (returnAs === "array") {
-            const timestamp = result.timestamp;
-            /*
-            seems as though yahoo inserts extra quotes at the event times, so no need.
-            if (result.events) {
-              for (let event of ["dividends", "splits"]) {
-                // @ts-ignore
-                if (result.events[event])
-                  // @ts-ignore
-                  timestamp = timestamp.filter((ts) => !result.events[event][ts]);
-              }
-            }
-            */
-            // istanbul ignore next
-            if (timestamp &&
-                ((_a = result === null || result === void 0 ? void 0 : result.indicators) === null || _a === void 0 ? void 0 : _a.quote) &&
-                result.indicators.quote[0].high.length !== timestamp.length) {
-                console.log({
-                    origTimestampSize: result.timestamp && result.timestamp.length,
-                    filteredSize: timestamp.length,
-                    quoteSize: result.indicators.quote[0].high.length,
-                });
-                throw new Error("Timestamp count mismatch, please report this with the query you used");
-            }
-            const result2 = {
-                meta: result.meta,
-                quotes: timestamp ? new Array(timestamp.length) : [],
-            };
-            const adjclose = (_c = (_b = result === null || result === void 0 ? void 0 : result.indicators) === null || _b === void 0 ? void 0 : _b.adjclose) === null || _c === void 0 ? void 0 : _c[0].adjclose;
-            if (timestamp)
-                for (let i = 0; i < timestamp.length; i++) {
-                    result2.quotes[i] = {
-                        date: new Date(timestamp[i] * 1000),
-                        high: result.indicators.quote[0].high[i],
-                        volume: result.indicators.quote[0].volume[i],
-                        open: result.indicators.quote[0].open[i],
-                        low: result.indicators.quote[0].low[i],
-                        close: result.indicators.quote[0].close[i],
-                    };
-                    if (adjclose)
-                        result2.quotes[i].adjclose = adjclose[i];
-                }
-            if (result.events) {
-                result2.events = {};
-                for (const event of ["dividends", "splits"]) {
-                    // @ts-expect-error (eatkinson): Fix up type in follow up
-                    if (result.events[event])
-                        // @ts-expect-error (eatkinson): Fix up type in follow up
-                        result2.events[event] = Object.values(result.events[event]);
-                }
-            }
-            return result2;
-        }
-        // TypeScript runtime validation ensures no other values for
-        // "returnAs" are possible.
-    }
-
-    const HistoricalRowHistorySchema = Type.Object({
-        date: YahooFinanceDate,
-        open: YahooNumber,
-        high: YahooNumber,
-        low: YahooNumber,
-        close: YahooNumber,
-        adjClose: Type.Optional(YahooNumber),
-        volume: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "HistoricalRowHistory",
-    });
-    const HistoricalRowDividendSchema = Type.Object({
-        date: YahooFinanceDate,
-        dividends: YahooNumber,
-    }, { title: "HistoricalRowDividend" });
-    const HistoricalRowStockSplitSchema = Type.Object({
-        date: YahooFinanceDate,
-        stockSplits: Type.String(),
-    }, { title: "HistoricalRowStockSplit" });
-    const HistoricalOptionsSchema = Type.Object({
-        period1: Type.Union([Type.Date(), Type.String(), Type.Number()]),
-        period2: Type.Optional(Type.Union([Type.Date(), Type.String(), Type.Number()])),
-        interval: Type.Optional(Type.Union([
-            Type.Literal("1d"),
-            Type.Literal("1wk"),
-            Type.Literal("1mo"),
-        ])),
-        // events: Type.Optional(Type.String()),
-        events: Type.Optional(Type.Union([
-            Type.Literal("history"),
-            Type.Literal("dividends"),
-            Type.Literal("split"),
-        ])),
-        includeAdjustedClose: Type.Optional(Type.Boolean()),
-    }, { title: "HistoricalOptions" });
-    Type.Composite([
-        HistoricalOptionsSchema,
-        Type.Object({
-            events: Type.Optional(Type.Literal("history")),
-        }),
-    ], { title: "HistoricalOptionsEventsHistory" });
-    Type.Composite([
-        HistoricalOptionsSchema,
-        Type.Object({
-            events: Type.Literal("dividends"),
-        }),
-    ], { title: "HistoricalOptionsEventsDividends" });
-    Type.Composite([
-        HistoricalOptionsSchema,
-        Type.Object({
-            events: Type.Literal("split"),
-        }),
-    ], { title: "HistoricalOptionsEventsSplit" });
-    const HistoricalHistoryResultSchema = Type.Array(HistoricalRowHistorySchema, {
-        title: "HistoricalHistoryResult",
-    });
-    const HistoricalDividendsResultSchema = Type.Array(HistoricalRowDividendSchema, {
-        title: "HistoricalDividendsResult",
-    });
-    const HistoricalStockSplitsResultSchema = Type.Array(HistoricalRowStockSplitSchema, {
-        title: "HistoricalRowStockSplit",
-    });
-    const queryOptionsDefaults$a = {
-        interval: "1d",
-        events: "history",
-        includeAdjustedClose: true,
-    };
-    // Count number of null values in object (1-level deep)
-    function nullFieldCount(object) {
-        if (object == null) {
-            return;
-        }
-        let nullCount = 0;
-        for (const val of Object.values(object))
-            if (val === null)
-                nullCount++;
-        return nullCount;
-    }
-    async function historical(symbol, queryOptionsOverrides, moduleOptions) {
-        var _a, _b, _c, _d, _e;
-        showNotice("ripHistorical");
-        validateAndCoerceTypebox({
-            type: "options",
-            data: queryOptionsOverrides !== null && queryOptionsOverrides !== void 0 ? queryOptionsOverrides : {},
-            schema: HistoricalOptionsSchema,
-            options: this._opts.validation,
-        });
-        let schema;
-        if (!queryOptionsOverrides.events ||
-            queryOptionsOverrides.events === "history")
-            schema = HistoricalHistoryResultSchema;
-        else if (queryOptionsOverrides.events === "dividends")
-            schema = HistoricalDividendsResultSchema;
-        else if (queryOptionsOverrides.events === "split")
-            schema = HistoricalStockSplitsResultSchema;
-        else
-            throw new Error("No such event type:" + queryOptionsOverrides.events);
-        const queryOpts = { ...queryOptionsDefaults$a, ...queryOptionsOverrides };
-        if (!Check(HistoricalOptionsSchema, queryOpts))
-            throw new Error("Internal error, please report.  Overrides validated but not defaults?");
-        // Don't forget that queryOpts are already validated and safe-safe.
-        const eventsMap = { history: "", dividends: "div", split: "split" };
-        const chartQueryOpts = {
-            period1: queryOpts.period1,
-            period2: queryOpts.period2,
-            interval: queryOpts.interval,
-            events: eventsMap[queryOpts.events || "history"],
-        };
-        if (!Check(ChartOptionsSchema, chartQueryOpts))
-            throw new Error("Internal error, please report.  historical() provided invalid chart() query options.");
-        // TODO: do we even care?
-        if (queryOpts.includeAdjustedClose === false) ;
-        const result = await this.chart(symbol, chartQueryOpts, {
-            ...moduleOptions,
-            validateResult: true,
-        });
-        let out;
-        if (queryOpts.events === "dividends") {
-            out = ((_b = (_a = result.events) === null || _a === void 0 ? void 0 : _a.dividends) !== null && _b !== void 0 ? _b : []).map((d) => ({
-                date: d.date,
-                dividends: d.amount,
-            }));
-        }
-        else if (queryOpts.events === "split") {
-            out = ((_d = (_c = result.events) === null || _c === void 0 ? void 0 : _c.splits) !== null && _d !== void 0 ? _d : []).map((s) => ({
-                date: s.date,
-                stockSplits: s.splitRatio,
-            }));
-        }
-        else {
-            out = ((_e = result.quotes) !== null && _e !== void 0 ? _e : [])
-                .filter((quote) => {
-                const fieldCount = Object.keys(quote).length;
-                const nullCount = nullFieldCount(quote);
-                if (nullCount === 0) {
-                    // No nulls is a legit (regular) result
-                    return true;
-                }
-                else if (nullCount !== fieldCount - 1 /* skip "date" */) {
-                    // Unhandled case: some but not all values are null.
-                    // Note: no need to check for null "date", validation does it for us
-                    console.error(nullCount, quote);
-                    throw new Error("Historical returned a result with SOME (but not " +
-                        "all) null values.  Please report this, and provide the " +
-                        "query that caused it.");
-                }
-                else {
-                    // All fields (except "date") are null
-                    return false;
-                }
-            })
-                .map((quote) => {
-                if (!quote.adjclose)
-                    return quote;
-                const { adjclose, ...rest } = quote;
-                return { ...rest, adjClose: adjclose };
-            });
-        }
-        const validateResult = !moduleOptions ||
-            moduleOptions.validateResult === undefined ||
-            moduleOptions.validateResult === true;
-        const validationOpts = {
-            ...this._opts.validation,
-            // Set logErrors=false if validateResult=false
-            logErrors: validateResult ? this._opts.validation.logErrors : false,
-        };
-        try {
-            return validateAndCoerceTypebox({
-                type: "result",
-                data: out,
-                schema,
-                options: validationOpts,
-            });
-        }
-        catch (error) {
-            if (validateResult)
-                throw error;
-        }
-        return out;
-        /*
-        // Original historical() retrieval code when Yahoo API still existed.
-        return this._moduleExec({
-          moduleName: "historical",
-      
-          query: {
-            assertSymbol: symbol,
-            url: "https://${YF_QUERY_HOST}/v7/finance/download/" + symbol,
-            schema: HistoricalOptionsSchema,
-            defaults: queryOptionsDefaults,
-            overrides: queryOptionsOverrides,
-            fetchType: "csv",
-            transformWith(queryOptions: HistoricalOptions) {
-              if (!queryOptions.period2) queryOptions.period2 = new Date();
-      
-              const dates = ["period1", "period2"] as const;
-              for (const fieldName of dates) {
-                const value = queryOptions[fieldName];
-                if (value instanceof Date)
-                  queryOptions[fieldName] = Math.floor(value.getTime() / 1000);
-                else if (typeof value === "string") {
-                  const timestamp = new Date(value as string).getTime();
-      
-                  if (isNaN(timestamp))
-                    throw new Error(
-                      "yahooFinance.historical() option '" +
-                        fieldName +
-                        "' invalid date provided: '" +
-                        value +
-                        "'",
-                    );
-      
-                  queryOptions[fieldName] = Math.floor(timestamp / 1000);
-                }
-              }
-      
-              if (queryOptions.period1 === queryOptions.period2) {
-                throw new Error(
-                  "yahooFinance.historical() options `period1` and `period2` " +
-                    "cannot share the same value.",
-                );
-              }
-      
-              return queryOptions;
-            },
-          },
-      
-          result: {
-            schema,
-            transformWith(result: any) {
-              if (result.length === 0) return result;
-      
-              const filteredResults = [];
-              const fieldCount = Object.keys(result[0]).length;
-      
-              // Count number of null values in object (1-level deep)
-              function nullFieldCount(object: unknown) {
-                if (object == null) {
-                  return;
-                }
-                let nullCount = 0;
-                for (const val of Object.values(object))
-                  if (val === null) nullCount++;
-                return nullCount;
-              }
-      
-              for (const row of result) {
-                const nullCount = nullFieldCount(row);
-      
-                if (nullCount === 0) {
-                  // No nulls is a legit (regular) result
-                  filteredResults.push(row);
-                } else if (nullCount !== fieldCount - 1 /* skip "date" */ /*) {
-          // Unhandled case: some but not all values are null.
-          // Note: no need to check for null "date", validation does it for us
-          console.error(nullCount, row);
-          throw new Error(
-            "Historical returned a result with SOME (but not " +
-              "all) null values.  Please report this, and provide the " +
-              "query that caused it.",
-          );
-        } else {
-          // All fields (except "date") are null: silently skip (no-op)
-        }
-      }
-
-      /*
-       * We may consider, for future optimization, to count rows and create
-       * new array in advance, and skip consecutive blocks of null results.
-       * Of doubtful utility.
-       */ /*
-       return filteredResults;
-     },
-    },
-
-    moduleOptions,
-    });
-    */
-    }
-
-    const InsightsDirection = Type.Union([Type.Literal("Bearish"), Type.Literal("Bullish"), Type.Literal("Neutral")], { title: "InsightsDirection" });
-    const InsightsOutlookSchema = Type.Object({
-        stateDescription: Type.String(),
-        direction: InsightsDirection,
-        score: YahooNumber,
-        scoreDescription: Type.String(),
-        sectorDirection: Type.Optional(InsightsDirection),
-        sectorScore: Type.Optional(YahooNumber),
-        sectorScoreDescription: Type.Optional(Type.String()),
-        indexDirection: InsightsDirection,
-        indexScore: YahooNumber,
-        indexScoreDescription: Type.String(),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "InsightsOutlook",
-    });
-    const InsightsInstrumentInfo = Type.Object({
-        keyTechnicals: Type.Object({
-            provider: Type.String(),
-            support: Type.Optional(YahooNumber),
-            resistance: Type.Optional(YahooNumber),
-            stopLoss: Type.Optional(YahooNumber),
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-        technicalEvents: Type.Object({
-            provider: Type.String(),
-            sector: Type.Optional(Type.String()),
-            shortTermOutlook: InsightsOutlookSchema,
-            intermediateTermOutlook: InsightsOutlookSchema,
-            longTermOutlook: InsightsOutlookSchema,
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-        valuation: Type.Object({
-            color: Type.Optional(YahooNumber),
-            description: Type.Optional(Type.String()),
-            discount: Type.Optional(Type.String()),
-            provider: Type.String(),
-            relativeValue: Type.Optional(Type.String()),
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "InsightsInstrumentInfo",
-    });
-    const InsightsCompanySnapshot = Type.Object({
-        sectorInfo: Type.Optional(Type.String()),
-        company: Type.Object({
-            innovativeness: Type.Optional(YahooNumber),
-            hiring: Type.Optional(YahooNumber),
-            sustainability: Type.Optional(YahooNumber),
-            insiderSentiments: Type.Optional(YahooNumber),
-            earningsReports: Type.Optional(YahooNumber),
-            dividends: Type.Optional(YahooNumber),
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-        sector: Type.Object({
-            innovativeness: YahooNumber,
-            hiring: YahooNumber,
-            sustainability: Type.Optional(YahooNumber),
-            insiderSentiments: YahooNumber,
-            earningsReports: Type.Optional(YahooNumber),
-            dividends: YahooNumber,
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-    }, { title: "InsightsCompanySnapshot", additionalProperties: Type.Any() });
-    const InsightsEventSchema = Type.Object({
-        eventType: Type.String(),
-        pricePeriod: Type.String(),
-        tradingHorizon: Type.String(),
-        tradeType: Type.String(),
-        imageUrl: Type.String(),
-        startDate: YahooFinanceDate,
-        endDate: YahooFinanceDate,
-    }, { title: "InsightsEvent", additionalProperties: Type.Any() });
-    const InsightsReport = Type.Object({
-        id: Type.String(),
-        headHtml: Type.String(),
-        provider: Type.String(),
-        reportDate: YahooFinanceDate,
-        reportTitle: Type.String(),
-        reportType: Type.String(),
-        targetPrice: Type.Optional(YahooNumber),
-        targetPriceStatus: Type.Optional(Type.Union([
-            Type.Literal("Increased"),
-            Type.Literal("Maintained"),
-            Type.Literal("Decreased"),
-            Type.Literal("-"),
-        ])),
-        investmentRating: Type.Optional(Type.Union([
-            Type.Literal("Bullish"),
-            Type.Literal("Neutral"),
-            Type.Literal("Bearish"),
-        ])),
-        tickers: Type.Optional(Type.Array(Type.String())),
-    }, { title: "InsightsReport", additionalProperties: Type.Any() });
-    const InsightsSigDev = Type.Object({
-        headline: Type.String(),
-        date: YahooFinanceDate,
-    }, { title: "InsightsSigDev", additionalProperties: Type.Any() });
-    const InsightsUpsell = Type.Object({
-        msBullishSummary: Type.Optional(Type.Array(Type.String())),
-        msBearishSummary: Type.Optional(Type.Array(Type.String())),
-        msBullishBearishSummariesPublishDate: Type.Optional(YahooDateInMs),
-        companyName: Type.Optional(Type.String()),
-        upsellReportType: Type.Optional(Type.String()),
-    }, { title: "InsightsUpsell", additionalProperties: Type.Any() });
-    const InsightsResearchReport = Type.Object({
-        reportId: Type.String(),
-        provider: Type.String(),
-        title: Type.String(),
-        reportDate: YahooFinanceDate,
-        summary: Type.String(),
-        investmentRating: Type.Optional(Type.Union([
-            Type.Literal("Bullish"),
-            Type.Literal("Neutral"),
-            Type.Literal("Bearish"),
-        ])),
-    }, { title: "InsightsResearchReport" });
-    const InsightsSecReport = Type.Object({
-        id: Type.String(),
-        type: Type.String(),
-        title: Type.String(),
-        description: Type.String(),
-        filingDate: YahooDateInMs,
-        snapshotUrl: Type.String(),
-        formType: Type.String(),
-    }, {
-        title: "InsightsSecReport",
-        additionalProperties: Type.Any(),
-    });
-    const InsightsResultSchema = Type.Object({
-        symbol: Type.String(),
-        instrumentInfo: Type.Optional(InsightsInstrumentInfo),
-        companySnapshot: Type.Optional(InsightsCompanySnapshot),
-        recommendation: Type.Optional(Type.Object({
-            targetPrice: Type.Optional(YahooNumber),
-            provider: Type.String(),
-            rating: Type.Union([
-                Type.Literal("BUY"),
-                Type.Literal("SELL"),
-                Type.Literal("HOLD"),
-            ]),
-        })),
-        events: Type.Optional(Type.Array(InsightsEventSchema)),
-        reports: Type.Optional(Type.Array(InsightsReport)),
-        sigDevs: Type.Optional(Type.Array(InsightsSigDev)),
-        upsell: Type.Optional(InsightsUpsell),
-        upsellSearchDD: Type.Optional(Type.Object({
-            researchReports: InsightsResearchReport,
-        })),
-        secReports: Type.Optional(Type.Array(InsightsSecReport)),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "InsightsResult",
-    });
-    const InsightsOptionsSchema = Type.Object({
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        reportsCount: Type.Optional(YahooNumber),
-    }, { title: "InsightsOptions" });
-    const queryOptionsDefaults$9 = {
-        lang: "en-US",
-        region: "US",
-        getAllResearchReports: true,
-        reportsCount: 2,
-    };
-    function trendingSymbols$1(symbol, queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "insights",
-            query: {
-                assertSymbol: symbol,
-                url: "https://${YF_QUERY_HOST}/ws/insights/v2/finance/insights",
-                schema: InsightsOptionsSchema,
-                defaults: queryOptionsDefaults$9,
-                overrides: queryOptionsOverrides,
-                runtime: { symbol },
-            },
-            result: {
-                schema: InsightsResultSchema,
-                transformWith(result) {
-                    if (!result.finance)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.finance.result;
-                },
-            },
-            moduleOptions,
-        });
-    }
-
-    const QuoteBase = Type.Object({
-        language: Type.String(), // "en-US",
-        region: Type.String(), // "US",
-        quoteType: Type.String(), // "EQUITY" | "ETF" | "MUTUALFUND";
-        typeDisp: Type.Optional(Type.String()), // "Equity", not always present.
-        quoteSourceName: Type.Optional(Type.String()), // "Delayed Quote",
-        triggerable: Type.Boolean(), // true,
-        currency: Type.Optional(Type.String()), // "USD",
-        // Seems to appear / disappear based not on symbol but network load (#445)
-        customPriceAlertConfidence: Type.Optional(Type.String()), // "HIGH" | "LOW"; TODO: anything else?
-        marketState: Type.Union([
-            Type.Literal("REGULAR"),
-            Type.Literal("CLOSED"),
-            Type.Literal("PRE"),
-            Type.Literal("PREPRE"),
-            Type.Literal("POST"),
-            Type.Literal("POSTPOST"),
-        ]),
-        tradeable: Type.Boolean(), // false,
-        cryptoTradeable: Type.Optional(Type.Boolean()), // false
-        exchange: Type.String(), // "NMS",
-        shortName: Type.Optional(Type.String()), // "NVIDIA Corporation",
-        longName: Type.Optional(Type.String()), // "NVIDIA Corporation",
-        messageBoardId: Type.Optional(Type.String()), // "finmb_32307",
-        exchangeTimezoneName: Type.String(), // "America/New_York",
-        exchangeTimezoneShortName: Type.String(), // "EST",
-        gmtOffSetMilliseconds: YahooNumber, // -18000000,
-        market: Type.String(), // "us_market",
-        esgPopulated: Type.Boolean(), // false,
-        fiftyTwoWeekLowChange: Type.Optional(YahooNumber), // 362.96002,
-        fiftyTwoWeekLowChangePercent: Type.Optional(YahooNumber), // 2.0088556,
-        fiftyTwoWeekRange: Type.Optional(YahooTwoNumberRange), // "180.68 - 589.07" -> { low, high }
-        fiftyTwoWeekHighChange: Type.Optional(YahooNumber), // -45.429993,
-        fiftyTwoWeekHighChangePercent: Type.Optional(YahooNumber), // -0.07712155,
-        fiftyTwoWeekLow: Type.Optional(YahooNumber), // 180.68,
-        fiftyTwoWeekHigh: Type.Optional(YahooNumber), // 589.07,
-        fiftyTwoWeekChangePercent: Type.Optional(YahooNumber), // 22.604025
-        dividendDate: Type.Optional(YahooFinanceDate), // 1609200000,
-        // maybe always present on EQUITY?
-        earningsTimestamp: Type.Optional(YahooFinanceDate), // 1614200400,
-        earningsTimestampStart: Type.Optional(YahooFinanceDate), // 1614200400,
-        earningsTimestampEnd: Type.Optional(YahooFinanceDate), // 1614200400,
-        trailingAnnualDividendRate: Type.Optional(YahooNumber), // 0.64,
-        trailingPE: Type.Optional(YahooNumber), // 88.873634,
-        trailingAnnualDividendYield: Type.Optional(YahooNumber), // 0.0011709387,
-        epsTrailingTwelveMonths: Type.Optional(YahooNumber), // 6.117,
-        epsForward: Type.Optional(YahooNumber), // 11.68,
-        epsCurrentYear: Type.Optional(YahooNumber), // 9.72,
-        priceEpsCurrentYear: Type.Optional(YahooNumber), // 55.930042,
-        sharesOutstanding: Type.Optional(YahooNumber), // 619000000,
-        bookValue: Type.Optional(YahooNumber), // 24.772,
-        fiftyDayAverage: Type.Optional(YahooNumber), // 530.8828,
-        fiftyDayAverageChange: Type.Optional(YahooNumber), // 12.757202,
-        fiftyDayAverageChangePercent: Type.Optional(YahooNumber), // 0.024030166,
-        twoHundredDayAverage: Type.Optional(YahooNumber), // 515.8518,
-        twoHundredDayAverageChange: Type.Optional(YahooNumber), // 27.788208,
-        twoHundredDayAverageChangePercent: Type.Optional(YahooNumber), // 0.053868588,
-        marketCap: Type.Optional(YahooNumber), // 336513171456,
-        forwardPE: Type.Optional(YahooNumber), // 46.54452,
-        priceToBook: Type.Optional(YahooNumber), // 21.945745,
-        sourceInterval: YahooNumber, // 15,
-        exchangeDataDelayedBy: YahooNumber, // 0,
-        firstTradeDateMilliseconds: Type.Optional(YahooDateInMs), // 917015400000 -> Date
-        priceHint: YahooNumber, // 2,
-        postMarketChangePercent: Type.Optional(YahooNumber), // 0.093813874,
-        postMarketTime: Type.Optional(YahooFinanceDate), // 1612573179 -> new Date()
-        postMarketPrice: Type.Optional(YahooNumber), // 544.15,
-        postMarketChange: Type.Optional(YahooNumber), // 0.51000977,
-        regularMarketChange: Type.Optional(YahooNumber), // -2.9299927,
-        regularMarketChangePercent: Type.Optional(YahooNumber), // -0.53606904,
-        regularMarketTime: Type.Optional(YahooFinanceDate), // 1612558802 -> new Date()
-        regularMarketPrice: Type.Optional(YahooNumber), // 543.64,
-        regularMarketDayHigh: Type.Optional(YahooNumber), // 549.19,
-        regularMarketDayRange: Type.Optional(YahooTwoNumberRange), // "541.867 - 549.19" -> { low, high }
-        regularMarketDayLow: Type.Optional(YahooNumber), // 541.867,
-        regularMarketVolume: Type.Optional(YahooNumber), // 4228841,
-        regularMarketPreviousClose: Type.Optional(YahooNumber), // 546.57,
-        preMarketChange: Type.Optional(YahooNumber), // -2.9299927,
-        preMarketChangePercent: Type.Optional(YahooNumber), // -0.53606904,
-        preMarketTime: Type.Optional(YahooFinanceDate), // 1612558802 -> new Date()
-        preMarketPrice: Type.Optional(YahooNumber), // 543.64,
-        bid: Type.Optional(YahooNumber), // 543.84,
-        ask: Type.Optional(YahooNumber), // 544.15,
-        bidSize: Type.Optional(YahooNumber), // 18,
-        askSize: Type.Optional(YahooNumber), // 8,
-        fullExchangeName: Type.String(), // "NasdaqGS",
-        financialCurrency: Type.Optional(Type.String()), // "USD",
-        regularMarketOpen: Type.Optional(YahooNumber), // 549.0,
-        averageDailyVolume3Month: Type.Optional(YahooNumber), // 7475022,
-        averageDailyVolume10Day: Type.Optional(YahooNumber), // 5546385,
-        displayName: Type.Optional(Type.String()), // "NVIDIA",
-        symbol: Type.String(), // "NVDA"
-        underlyingSymbol: Type.Optional(Type.String()), // "LD.MI" (for LDO.MI, #363)
-        // only on ETF?  not on EQUITY?
-        ytdReturn: Type.Optional(YahooNumber), // 0.31
-        trailingThreeMonthReturns: Type.Optional(YahooNumber), // 16.98
-        trailingThreeMonthNavReturns: Type.Optional(YahooNumber), // 17.08
-        ipoExpectedDate: Type.Optional(YahooFinanceDate), // "2020-08-13",
-        newListingDate: Type.Optional(YahooFinanceDate), // "2021-02-16",
-        nameChangeDate: Type.Optional(YahooFinanceDate),
-        prevName: Type.Optional(Type.String()),
-        averageAnalystRating: Type.Optional(Type.String()),
-        pageViewGrowthWeekly: Type.Optional(YahooNumber), // Since 2021-11-11 (#326)
-        openInterest: Type.Optional(YahooNumber), // SOHO (#248)
-        beta: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-    });
-    /*
-     * [TODO] Fields seen in a query but not in this module yet:
-     *
-     *   - extendedMarketChange
-     *   - extendedMarketChangePercent
-     *   - extendedMarketPrice
-     *   - extendedMarketTime
-     *   - dayHigh (separate to regularMarketDayHigh, etc)
-     *   - dayLow (separate to regularMarketDayLow, etc)
-     *   - volume (separaet to regularMarketVolume, etc)
-     *
-     * i.e. on yahoo site, with ?fields=dayHigh,dayLow,etc.
-     */
-    /*
-     * Guaranteed fields, even we don't ask for them
-     */
-    const QuoteCryptoCurrency = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("CRYPTOCURRENCY"),
-            circulatingSupply: YahooNumber,
-            fromCurrency: Type.String(), // 'BTC'
-            toCurrency: Type.String(), // 'USD=X'
-            lastMarket: Type.String(), // 'CoinMarketCap'
-            coinImageUrl: Type.Optional(Type.String()), // 'https://s.yimg.com/uc/fin/img/reports-thumbnails/1.png'
-            volume24Hr: Type.Optional(YahooNumber), // 62631043072
-            volumeAllCurrencies: Type.Optional(YahooNumber), // 62631043072
-            startDate: Type.Optional(YahooFinanceDate), // new Date(1367103600 * 1000)
-        }),
-    ]);
-    const QuoteCurrency = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("CURRENCY"),
-        }),
-    ]);
-    const QuoteEtf = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("ETF"),
-        }),
-    ]);
-    const QuoteEquity = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("EQUITY"),
-            dividendRate: Type.Optional(Type.Number()),
-            dividendYield: Type.Optional(Type.Number()),
-        }),
-    ]);
-    const QuoteFuture = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("FUTURE"),
-            headSymbolAsString: Type.String(),
-            contractSymbol: Type.Boolean(),
-            underlyingExchangeSymbol: Type.String(),
-            expireDate: YahooFinanceDate,
-            expireIsoDate: YahooFinanceDate,
-        }),
-    ]);
-    const QuoteIndex = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("INDEX"),
-        }),
-    ]);
-    const QuoteOption = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("OPTION"),
-            strike: YahooNumber,
-            openInterest: YahooNumber,
-            expireDate: YahooNumber,
-            expireIsoDate: YahooNumber,
-            underlyingSymbol: Type.String(),
-        }),
-    ]);
-    const QuoteMutualfund = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("MUTUALFUND"),
-        }),
-    ]);
-    const QuoteSchema$1 = Type.Union([
-        QuoteCryptoCurrency,
-        QuoteCurrency,
-        QuoteEtf,
-        QuoteEquity,
-        QuoteFuture,
-        QuoteIndex,
-        QuoteMutualfund,
-        QuoteOption,
-    ]);
-    const QuoteFieldSchema = Type.KeyOf(QuoteSchema$1);
-    const ResultType = Type.Union([
-        Type.Literal("array"),
-        Type.Literal("object"),
-        Type.Literal("map"),
-    ]);
-    const QuoteResponseArraySchema = Type.Array(QuoteSchema$1);
-    const QuoteOptionsSchema = Type.Object({
-        fields: Type.Optional(Type.Array(QuoteFieldSchema)),
-        return: Type.Optional(ResultType),
-    });
-    Type.Composite([
-        QuoteOptionsSchema,
-        Type.Object({
-            return: Type.Optional(Type.Literal("array")),
-        }),
-    ]);
-    Type.Composite([
-        QuoteOptionsSchema,
-        Type.Object({
-            return: Type.Literal("map"),
-        }),
-    ]);
-    Type.Composite([
-        QuoteOptionsSchema,
-        Type.Object({
-            return: Type.Literal("object"),
-        }),
-    ]);
-    const queryOptionsDefaults$8 = {};
-    async function quote(query, queryOptionsOverrides, moduleOptions) {
-        const symbols = typeof query === "string" ? query : query.join(",");
-        const returnAs = queryOptionsOverrides && queryOptionsOverrides.return;
-        const results = await this._moduleExec({
-            moduleName: "quote",
-            query: {
-                url: "https://${YF_QUERY_HOST}/v7/finance/quote",
-                needsCrumb: true,
-                schema: QuoteOptionsSchema,
-                defaults: queryOptionsDefaults$8,
-                runtime: { symbols },
-                overrides: queryOptionsOverrides,
-                transformWith(queryOptions) {
-                    // Options validation ensures this is a string[]
-                    if (queryOptions.fields)
-                        queryOptions.fields.join(",");
-                    // Don't pass this on to Yahoo
-                    delete queryOptions.return;
-                    return queryOptions;
-                },
-            },
-            result: {
-                schema: QuoteResponseArraySchema,
-                transformWith(rawResult) {
-                    var _a;
-                    // console.log({ rawResult: JSON.stringify(rawResult, null, 2) });
-                    let results = (_a = rawResult === null || rawResult === void 0 ? void 0 : rawResult.quoteResponse) === null || _a === void 0 ? void 0 : _a.result;
-                    if (!results || !Array.isArray(results))
-                        throw new Error("Unexpected result: " + JSON.stringify(rawResult));
-                    // Filter out quoteType==='NONE'
-                    // So that delisted stocks will be undefined just like symbol-not-found
-                    results = results.filter((quote) => (quote === null || quote === void 0 ? void 0 : quote.quoteType) !== "NONE");
-                    return results;
-                },
-            },
-            moduleOptions,
-        });
-        if (returnAs) {
-            switch (returnAs) {
-                case "array":
-                    return results;
-                case "object": {
-                    const object = {};
-                    for (const result of results)
-                        object[result.symbol] = result;
-                    return object; // TODO: type
-                }
-                case "map": {
-                    const map = new Map();
-                    for (const result of results)
-                        map.set(result.symbol, result);
-                    return map; // TODO: type
-                }
-            }
-        }
-        else {
-            // By default, match the query input shape (string or string[]).
-            return typeof query === "string"
-                ? results[0]
-                : results;
-        }
-    }
-
-    /*
-     * [TODO] Fields seen in a query but not in this module yet:
-     *
-     *   - extendedMarketChange
-     *   - extendedMarketChangePercent
-     *   - extendedMarketPrice
-     *   - extendedMarketTime
-     *   - dayHigh (separate to regularMarketDayHigh, etc)
-     *   - dayLow (separate to regularMarketDayLow, etc)
-     *   - volume (separate to regularMarketVolume, etc)
-     *
-     * i.e. on yahoo site, with ?fields=dayHigh,dayLow,etc.
-     */
-    /*
-     * Guaranteed fields, even we don't ask for them
-     */
-    const QuoteCryptoCurrencySchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("CRYPTOCURRENCY"),
-            circulatingSupply: YahooNumber,
-            fromCurrency: Type.String(), // 'BTC'
-            toCurrency: Type.String(), // 'USD=X'
-            lastMarket: Type.String(), // 'CoinMarketCap'
-            coinImageUrl: Type.Optional(Type.String()), // 'https://s.yimg.com/uc/fin/img/reports-thumbnails/1.png'
-            volume24Hr: Type.Optional(YahooNumber), // 62631043072
-            volumeAllCurrencies: Type.Optional(YahooNumber), // 62631043072
-            startDate: Type.Optional(YahooFinanceDate), // new Date(1367103600 * 1000)
-        }),
-    ], { title: "QuoteCryptoCurrency" });
-    const QuoteCurrencySchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("CURRENCY"),
-        }),
-    ], { title: "QuoteCurrency" });
-    const QuoteEtfSchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("ETF"),
-        }),
-    ]);
-    const QuoteEquitySchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("EQUITY"),
-            dividendRate: Type.Optional(Type.Number()),
-            dividendYield: Type.Optional(Type.Number()),
-        }),
-    ], { title: "QuoteEquity" });
-    const QuoteFutureSchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("FUTURE"),
-            headSymbolAsString: Type.String(),
-            contractSymbol: Type.Boolean(),
-            underlyingExchangeSymbol: Type.String(),
-            expireDate: YahooFinanceDate,
-            expireIsoDate: YahooFinanceDate,
-        }),
-    ], {
-        title: "QuoteFuture",
-    });
-    const QuoteIndexSchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("INDEX"),
-        }),
-    ], {
-        title: "QuoteIndex",
-    });
-    const QuoteOptionSchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("OPTION"),
-            strike: YahooNumber,
-            openInterest: YahooNumber,
-            expireDate: YahooNumber,
-            expireIsoDate: YahooNumber,
-            underlyingSymbol: Type.String(),
-        }),
-    ], {
-        title: "QuoteOption",
-    });
-    const QuoteMutualfundSchema = Type.Composite([
-        QuoteBase,
-        Type.Object({
-            quoteType: Type.Literal("MUTUALFUND"),
-        }),
-    ], {
-        title: "QuoteMutualFund",
-    });
-    const QuoteSchema = Type.Union([
-        QuoteCryptoCurrencySchema,
-        QuoteCurrencySchema,
-        QuoteEtfSchema,
-        QuoteEquitySchema,
-        QuoteFutureSchema,
-        QuoteIndexSchema,
-        QuoteMutualfundSchema,
-        QuoteOptionSchema,
-    ], {
-        title: "Quote",
-    });
-    const CallOrPutSchema = Type.Object({
-        contractSymbol: Type.String(),
-        strike: YahooNumber,
-        currency: Type.Optional(Type.String()),
-        lastPrice: YahooNumber,
-        change: YahooNumber,
-        percentChange: Type.Optional(YahooNumber),
-        volume: Type.Optional(YahooNumber),
-        openInterest: Type.Optional(YahooNumber),
-        bid: Type.Optional(YahooNumber),
-        ask: Type.Optional(YahooNumber),
-        contractSize: Type.Literal("REGULAR"),
-        expiration: YahooFinanceDate,
-        lastTradeDate: YahooFinanceDate,
-        impliedVolatility: YahooNumber,
-        inTheMoney: Type.Boolean(),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "CallOrPut",
-    });
-    const OptionSchema = Type.Object({
-        expirationDate: YahooFinanceDate,
-        hasMiniOptions: Type.Boolean(),
-        calls: Type.Array(CallOrPutSchema),
-        puts: Type.Array(CallOrPutSchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "Option",
-    });
-    const OptionsResultSchema = Type.Object({
-        underlyingSymbol: Type.String(),
-        expirationDates: Type.Array(YahooFinanceDate),
-        strikes: Type.Array(YahooNumber),
-        hasMiniOptions: Type.Boolean(),
-        quote: QuoteSchema,
-        options: Type.Array(OptionSchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "OptionsResult",
-    });
-    const OptionsOptionsSchema = Type.Object({
-        formatted: Type.Optional(Type.Boolean()),
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        date: Type.Optional(YahooFinanceDate),
-    }, {
-        title: "OptionsOptions",
-    });
-    const queryOptionsDefaults$7 = {
-        formatted: false,
-        lang: "en-US",
-        region: "US",
-    };
-    function options(symbol, queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "options",
-            query: {
-                assertSymbol: symbol,
-                url: "https://${YF_QUERY_HOST}/v7/finance/options/" + symbol,
-                needsCrumb: true,
-                schema: OptionsOptionsSchema,
-                defaults: queryOptionsDefaults$7,
-                overrides: queryOptionsOverrides,
-                transformWith(queryOptions) {
-                    // This is honestly the easiest way to coerce the date properly
-                    const parsed = Decode(OptionsOptionsSchema, queryOptions);
-                    const transformed = parsed.date
-                        ? {
-                            ...parsed,
-                            date: Math.floor(parsed.date.getTime() / 1000),
-                        }
-                        : parsed;
-                    return transformed;
-                },
-            },
-            result: {
-                schema: OptionsResultSchema,
-                transformWith(result) {
-                    if (!result.optionChain)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.optionChain.result[0];
-                },
-            },
-            moduleOptions,
-        });
-    }
-
-    /*
-     * To generate the initial file, we took the output of all submodules for
-     * 'AAPL', 'OCDO.L', '0700.HK' and '^IXIC' and ran the results through
-     * the awesome https://app.quicktype.io/
-     * and then the smashing https://sinclairzx81.github.io/typebox-workbench
-     *
-     * Manual cleanup afterwards:
-     *
-     *  1) Spaces: 4 to 2
-     *  ~~2) Wrapped in a module~~ <--- undid this after tooling issues.
-     *  3) Alphabeticalize QuoteSummaryResult
-     */
-    var EnumGrade;
-    (function (EnumGrade) {
-        EnumGrade["Accumulate"] = "Accumulate";
-        EnumGrade["Add"] = "Add";
-        EnumGrade["Average"] = "Average";
-        EnumGrade["BelowAverage"] = "Below Average";
-        EnumGrade["Buy"] = "Buy";
-        EnumGrade["ConvictionBuy"] = "Conviction Buy";
-        EnumGrade["Empty"] = "";
-        EnumGrade["EqualWeight"] = "Equal-Weight";
-        EnumGrade["FairValue"] = "Fair Value";
-        EnumGrade["GradeEqualWeight"] = "Equal-weight";
-        EnumGrade["GradeLongTermBuy"] = "Long-term Buy";
-        EnumGrade["Hold"] = "Hold";
-        EnumGrade["LongTermBuy"] = "Long-Term Buy";
-        EnumGrade["MarketOutperform"] = "Market Outperform";
-        EnumGrade["MarketPerform"] = "Market Perform";
-        EnumGrade["Mixed"] = "Mixed";
-        EnumGrade["Negative"] = "Negative";
-        EnumGrade["Neutral"] = "Neutral";
-        EnumGrade["InLine"] = "In-Line";
-        EnumGrade["Outperform"] = "Outperform";
-        EnumGrade["Overweight"] = "Overweight";
-        EnumGrade["PeerPerform"] = "Peer Perform";
-        EnumGrade["Perform"] = "Perform";
-        EnumGrade["Positive"] = "Positive";
-        EnumGrade["Reduce"] = "Reduce";
-        EnumGrade["SectorOutperform"] = "Sector Outperform";
-        EnumGrade["SectorPerform"] = "Sector Perform";
-        EnumGrade["SectorWeight"] = "Sector Weight";
-        EnumGrade["Sell"] = "Sell";
-        EnumGrade["StrongBuy"] = "Strong Buy";
-        EnumGrade["TopPick"] = "Top Pick";
-        EnumGrade["Underperform"] = "Underperform";
-        EnumGrade["Underperformer"] = "Underperformer";
-        EnumGrade["Underweight"] = "Underweight";
-        EnumGrade["Trim"] = "Trim";
-        EnumGrade["AboveAverage"] = "Above Average";
-        EnumGrade["Inline"] = "In-line";
-        EnumGrade["Outperformer"] = "Outperformer";
-        EnumGrade["OVerweight"] = "OVerweight";
-        EnumGrade["Cautious"] = "Cautious";
-        EnumGrade["MarketWeight"] = "Market Weight";
-        EnumGrade["SectorUnderperform"] = "Sector Underperform";
-        EnumGrade["MarketUnderperform"] = "Market Underperform";
-        EnumGrade["Peerperform"] = "Peer perform";
-        EnumGrade["GraduallyAccumulate"] = "Gradually Accumulate";
-        EnumGrade["ActionListBuy"] = "Action List Buy";
-        EnumGrade["Performer"] = "Performer";
-        EnumGrade["SectorPerformer"] = "Sector Performer";
-        EnumGrade["SpeculativeBuy"] = "Speculative Buy";
-        EnumGrade["StrongSell"] = "Strong Sell";
-        EnumGrade["SpeculativeHold"] = "Speculative Hold";
-        EnumGrade["NotRated"] = "Not Rated";
-        EnumGrade["HoldNeutral"] = "Hold Neutral";
-        EnumGrade["Developing"] = "Developing";
-        EnumGrade["buy"] = "buy";
-        EnumGrade["HOld"] = "HOld";
-        EnumGrade["TradingSell"] = "Trading Sell";
-        EnumGrade["Tender"] = "Tender";
-        EnumGrade["marketperform"] = "market perform";
-        EnumGrade["BUy"] = "BUy";
-    })(EnumGrade || (EnumGrade = {}));
-    var Action;
-    (function (Action) {
-        Action["Down"] = "down";
-        Action["Init"] = "init";
-        Action["Main"] = "main";
-        Action["Reit"] = "reit";
-        Action["Up"] = "up";
-    })(Action || (Action = {}));
-    const Grade = Type.Enum(EnumGrade, { title: "QuoteSummaryEnumGrade" });
-    const ActionSchema = Type.Enum(Action, { title: "QuoteSummaryAction" });
-    const UpgradeDowngradeHistoryHistorySchema = Type.Object({
-        epochGradeDate: YahooFinanceDate,
-        firm: Type.String(),
-        toGrade: Grade,
-        fromGrade: Type.Optional(Grade),
-        action: ActionSchema,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryUpgradeDowngradeHistoryHistory",
-    });
-    const UpgradeDowngradeHistorySchema = Type.Object({
-        history: Type.Array(UpgradeDowngradeHistoryHistorySchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryUpgradeDowngradeHistory",
-    });
-    const TopHoldingsSectorWeightingSchema = Type.Object({
-        realestate: Type.Optional(YahooNumber),
-        consumer_cyclical: Type.Optional(YahooNumber),
-        basic_materials: Type.Optional(YahooNumber),
-        consumer_defensive: Type.Optional(YahooNumber),
-        technology: Type.Optional(YahooNumber),
-        communication_services: Type.Optional(YahooNumber),
-        financial_services: Type.Optional(YahooNumber),
-        utilities: Type.Optional(YahooNumber),
-        industrials: Type.Optional(YahooNumber),
-        energy: Type.Optional(YahooNumber),
-        healthcare: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTopHoldingsSectorWeighting",
-    });
-    const TopHoldingsBondRatingSchema = Type.Object({
-        a: Type.Optional(YahooNumber),
-        aa: Type.Optional(YahooNumber),
-        aaa: Type.Optional(YahooNumber),
-        other: Type.Optional(YahooNumber),
-        b: Type.Optional(YahooNumber),
-        bb: Type.Optional(YahooNumber),
-        bbb: Type.Optional(YahooNumber),
-        below_b: Type.Optional(YahooNumber),
-        us_government: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTopHoldingsBondRating",
-    });
-    const TopHoldingsEquityHoldingsSchema = Type.Object({
-        medianMarketCap: Type.Optional(YahooNumber),
-        medianMarketCapCat: Type.Optional(YahooNumber),
-        priceToBook: YahooNumber,
-        priceToBookCat: Type.Optional(YahooNumber),
-        priceToCashflow: YahooNumber,
-        priceToCashflowCat: Type.Optional(YahooNumber),
-        priceToEarnings: YahooNumber,
-        priceToEarningsCat: Type.Optional(YahooNumber),
-        priceToSales: YahooNumber,
-        priceToSalesCat: Type.Optional(YahooNumber),
-        threeYearEarningsGrowth: Type.Optional(YahooNumber),
-        threeYearEarningsGrowthCat: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTopHoldingsEquityHoldings",
-    });
-    const TopHoldingsHoldingSchema = Type.Object({
-        symbol: Type.String(),
-        holdingName: Type.String(),
-        holdingPercent: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTopHoldingsHolding",
-    });
-    const TopHoldingsSchema = Type.Object({
-        maxAge: YahooNumber,
-        stockPosition: Type.Optional(YahooNumber),
-        bondPosition: Type.Optional(YahooNumber),
-        holdings: Type.Array(TopHoldingsHoldingSchema),
-        equityHoldings: TopHoldingsEquityHoldingsSchema,
-        bondHoldings: Type.Object({}),
-        bondRatings: Type.Array(TopHoldingsBondRatingSchema),
-        sectorWeightings: Type.Array(TopHoldingsSectorWeightingSchema),
-        cashPosition: Type.Optional(YahooNumber),
-        otherPosition: Type.Optional(YahooNumber),
-        preferredPosition: Type.Optional(YahooNumber),
-        convertiblePosition: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTopHoldings",
-    });
-    const SummaryProfileSchema = Type.Object({
-        address1: Type.Optional(Type.String()),
-        address2: Type.Optional(Type.String()),
-        address3: Type.Optional(Type.String()),
-        city: Type.Optional(Type.String()),
-        state: Type.Optional(Type.String()),
-        zip: Type.Optional(Type.String()),
-        country: Type.Optional(Type.String()),
-        phone: Type.Optional(Type.String()),
-        fax: Type.Optional(Type.String()),
-        website: Type.Optional(Type.String()),
-        industry: Type.Optional(Type.String()),
-        industryDisp: Type.Optional(Type.String()),
-        sector: Type.Optional(Type.String()),
-        sectorDisp: Type.Optional(Type.String()),
-        longBusinessSummary: Type.Optional(Type.String()),
-        fullTimeEmployees: Type.Optional(YahooNumber),
-        companyOfficers: Type.Array(Type.Any()),
-        maxAge: YahooNumber,
-        twitter: Type.Optional(Type.String()), // in e.g. "ADA-USD" (#418)
-        // seems like for cryptocurency only
-        // TODO: how does this relate to Quote type.  Common base?
-        name: Type.Optional(Type.String()), // 'Bitcoin'
-        startDate: Type.Optional(YahooFinanceDate), // new Date('2013-04-28')
-        description: Type.Optional(Type.String()), // 'Bitcoin (BTC) is a cryptocurrency...'
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummarySummaryProfile",
-    });
-    const SummaryDetailSchema = Type.Object({
-        maxAge: YahooNumber,
-        priceHint: YahooNumber,
-        previousClose: Type.Optional(YahooNumber), // missing in e.g. "APS.AX"
-        open: Type.Optional(YahooNumber),
-        dayLow: Type.Optional(YahooNumber),
-        dayHigh: Type.Optional(YahooNumber),
-        regularMarketPreviousClose: Type.Optional(YahooNumber), // missing in e.g. "APS.AX"
-        regularMarketOpen: Type.Optional(YahooNumber),
-        regularMarketDayLow: Type.Optional(YahooNumber),
-        regularMarketDayHigh: Type.Optional(YahooNumber),
-        regularMarketVolume: Type.Optional(YahooNumber),
-        dividendRate: Type.Optional(YahooNumber),
-        dividendYield: Type.Optional(YahooNumber),
-        exDividendDate: Type.Optional(YahooFinanceDate),
-        payoutRatio: Type.Optional(YahooNumber),
-        fiveYearAvgDividendYield: Type.Optional(YahooNumber),
-        beta: Type.Optional(YahooNumber),
-        trailingPE: Type.Optional(YahooNumber),
-        forwardPE: Type.Optional(YahooNumber),
-        volume: Type.Optional(YahooNumber),
-        averageVolume: Type.Optional(YahooNumber),
-        averageVolume10days: Type.Optional(YahooNumber),
-        averageDailyVolume10Day: Type.Optional(YahooNumber),
-        bid: Type.Optional(YahooNumber),
-        ask: Type.Optional(YahooNumber),
-        bidSize: Type.Optional(YahooNumber),
-        askSize: Type.Optional(YahooNumber),
-        marketCap: Type.Optional(YahooNumber),
-        fiftyDayAverage: Type.Optional(YahooNumber),
-        fiftyTwoWeekLow: Type.Optional(YahooNumber),
-        fiftyTwoWeekHigh: Type.Optional(YahooNumber),
-        twoHundredDayAverage: Type.Optional(YahooNumber),
-        priceToSalesTrailing12Months: Type.Optional(YahooNumber),
-        trailingAnnualDividendRate: Type.Optional(YahooNumber),
-        trailingAnnualDividendYield: Type.Optional(YahooNumber),
-        currency: Type.String(),
-        algorithm: Type.Null(),
-        tradeable: Type.Boolean(),
-        yield: Type.Optional(YahooNumber),
-        totalAssets: Type.Optional(YahooNumber),
-        navPrice: Type.Optional(YahooNumber),
-        ytdReturn: Type.Optional(YahooNumber),
-        // crypto only (optional, or null in other types)
-        // TODO: how does Price / SummaryDetail compare? common base?
-        fromCurrency: Type.Union([Type.String(), Type.Null()]), // 'BTC'
-        toCurrency: Type.Optional(Type.Union([Type.String(), Type.Null()])), // 'USD-X'
-        lastMarket: Type.Union([Type.String(), Type.Null()]), // 'CoinMarketCap'
-        volume24Hr: Type.Optional(YahooNumber), // 62650314752
-        volumeAllCurrencies: Type.Optional(YahooNumber), // 62650314752
-        circulatingSupply: Type.Optional(YahooNumber), // 18638932
-        startDate: Type.Optional(YahooFinanceDate), // new Date(1367107200 * 1000)
-        coinMarketCapLink: Type.Optional(Type.Union([Type.String(), Type.Null()])), // "https://coinmarketcap.com/currencies/cardano"
-        // futures
-        expireDate: Type.Optional(YahooFinanceDate), // 1656374400,
-        openInterest: Type.Optional(YahooNumber), // 444411,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummarySummaryDetail",
-    });
-    // May consider switching this to string, as we keep finding more and more.
-    const FilingType = Type.Union([
-        Type.Literal("10-K"),
-        Type.Literal("10-Q"),
-        Type.Literal("8-K"),
-        Type.Literal("8-K/A"),
-        Type.Literal("10-K/A"),
-        Type.Literal("10-Q/A"),
-        Type.Literal("SD"),
-        Type.Literal("PX14A6G"),
-        Type.Literal("SC 13G/A"),
-        Type.Literal("DEFA14A"),
-        Type.Literal("25-NSE"),
-        Type.Literal("S-8 POS"),
-        Type.Literal("6-K"),
-        Type.Literal("F-3ASR"),
-        Type.Literal("SC 13D/A"),
-        Type.Literal("20-F"),
-        Type.Literal("425"),
-        Type.Literal("SC14D9C"),
-        Type.Literal("SC 13G"),
-        Type.Literal("S-8"),
-        Type.Literal("DEF 14A"),
-        Type.Literal("F-10"),
-    ], {
-        title: "QuoteSummaryFilingType",
-    });
-    const FilingSchema = Type.Object({
-        date: Type.String(),
-        epochDate: YahooFinanceDate,
-        type: FilingType,
-        title: Type.String(),
-        edgarUrl: Type.String(),
-        maxAge: YahooNumber,
-        url: Type.Optional(Type.String()),
-        exhibits: Type.Optional(Type.Array(Type.Object({
-            type: Type.String(),
-            url: Type.String(),
-            downloadUrl: Type.Optional(Type.String()),
-        }))),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFiling",
-    });
-    const SECFilingsSchema = Type.Object({
-        filings: Type.Array(FilingSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummarySECFilings",
-    });
-    const RecommendationTrendTrendSchema = Type.Object({
-        period: Type.String(),
-        strongBuy: YahooNumber,
-        buy: YahooNumber,
-        hold: YahooNumber,
-        sell: YahooNumber,
-        strongSell: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryRecommendationTrendTrend",
-    });
-    const RecommendationTrendSchema = Type.Object({
-        trend: Type.Array(RecommendationTrendTrendSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryRecommendationTrend",
-    });
-    const QuoteTypeSchema = Type.Object({
-        exchange: Type.String(),
-        quoteType: Type.String(),
-        symbol: Type.String(),
-        underlyingSymbol: Type.String(),
-        shortName: Type.Union([Type.Null(), Type.String()]),
-        longName: Type.Union([Type.Null(), Type.String()]),
-        firstTradeDateEpochUtc: NullableYahooFinanceDate,
-        timeZoneFullName: Type.String(),
-        timeZoneShortName: Type.String(),
-        uuid: Type.String(),
-        messageBoardId: Type.Optional(Type.Union([Type.Null(), Type.String()])),
-        gmtOffSetMilliseconds: YahooNumber,
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryQuoteType",
-    });
-    const PriceSchema = Type.Object({
-        averageDailyVolume10Day: Type.Optional(YahooNumber),
-        averageDailyVolume3Month: Type.Optional(YahooNumber),
-        exchange: Type.Optional(Type.String()),
-        exchangeName: Type.Optional(Type.String()),
-        exchangeDataDelayedBy: Type.Optional(YahooNumber),
-        maxAge: YahooNumber,
-        postMarketChangePercent: Type.Optional(YahooNumber),
-        postMarketChange: Type.Optional(YahooNumber),
-        postMarketTime: Type.Optional(YahooFinanceDate),
-        postMarketPrice: Type.Optional(YahooNumber),
-        postMarketSource: Type.Optional(Type.String()),
-        preMarketChangePercent: Type.Optional(YahooNumber),
-        preMarketChange: Type.Optional(YahooNumber),
-        preMarketTime: Type.Optional(YahooFinanceDate),
-        preMarketPrice: Type.Optional(YahooNumber),
-        preMarketSource: Type.Optional(Type.String()),
-        priceHint: YahooNumber,
-        regularMarketChangePercent: Type.Optional(YahooNumber),
-        regularMarketChange: Type.Optional(YahooNumber),
-        regularMarketTime: Type.Optional(YahooFinanceDate),
-        regularMarketPrice: Type.Optional(YahooNumber),
-        regularMarketDayHigh: Type.Optional(YahooNumber),
-        regularMarketDayLow: Type.Optional(YahooNumber),
-        regularMarketVolume: Type.Optional(YahooNumber),
-        regularMarketPreviousClose: Type.Optional(YahooNumber),
-        regularMarketSource: Type.Optional(Type.String()),
-        regularMarketOpen: Type.Optional(YahooNumber),
-        quoteSourceName: Type.Optional(Type.String()),
-        quoteType: Type.String(),
-        symbol: Type.String(),
-        underlyingSymbol: Type.Union([Type.Null(), Type.String()]),
-        shortName: Type.Union([Type.Null(), Type.String()]),
-        longName: Type.Union([Type.Null(), Type.String()]),
-        lastMarket: Type.Union([Type.Null(), Type.String()]),
-        marketState: Type.Optional(Type.String()),
-        marketCap: Type.Optional(YahooNumber),
-        currency: Type.Optional(Type.String()),
-        currencySymbol: Type.Optional(Type.String()),
-        fromCurrency: Type.Union([Type.String(), Type.Null()]),
-        toCurrency: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-        volume24Hr: Type.Optional(YahooNumber),
-        volumeAllCurrencies: Type.Optional(YahooNumber),
-        circulatingSupply: Type.Optional(YahooNumber),
-        expireDate: Type.Optional(YahooFinanceDate),
-        openInterest: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryPrice",
-    });
-    const NetSharePurchaseActivitySchema = Type.Object({
-        maxAge: YahooNumber,
-        period: Type.String(),
-        buyInfoCount: YahooNumber,
-        buyInfoShares: YahooNumber,
-        buyPercentInsiderShares: Type.Optional(YahooNumber),
-        sellInfoCount: YahooNumber,
-        sellInfoShares: Type.Optional(YahooNumber),
-        sellPercentInsiderShares: Type.Optional(YahooNumber),
-        netInfoCount: YahooNumber,
-        netInfoShares: YahooNumber,
-        netPercentInsiderShares: Type.Optional(YahooNumber),
-        totalInsiderShares: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryNetSharePurchaseActivity",
-    });
-    const MajorHoldersBreakdownSchema = Type.Object({
-        maxAge: YahooNumber,
-        insidersPercentHeld: Type.Optional(YahooNumber),
-        institutionsPercentHeld: Type.Optional(YahooNumber),
-        institutionsFloatPercentHeld: Type.Optional(YahooNumber),
-        institutionsCount: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryMajorHoldersBreakdown",
-    });
-    var EnumOwnership;
-    (function (EnumOwnership) {
-        EnumOwnership["D"] = "D";
-        EnumOwnership["I"] = "I";
-    })(EnumOwnership || (EnumOwnership = {}));
-    var EnumRelation;
-    (function (EnumRelation) {
-        EnumRelation["ChairmanOfTheBoard"] = "Chairman of the Board";
-        EnumRelation["ChiefExecutiveOfficer"] = "Chief Executive Officer";
-        EnumRelation["ChiefFinancialOfficer"] = "Chief Financial Officer";
-        EnumRelation["ChiefOperatingOfficer"] = "Chief Operating Officer";
-        EnumRelation["ChiefTechnologyOfficer"] = "Chief Technology Officer";
-        EnumRelation["Director"] = "Director";
-        EnumRelation["DirectorIndependent"] = "Director (Independent)";
-        EnumRelation["Empty"] = "";
-        EnumRelation["GeneralCounsel"] = "General Counsel";
-        EnumRelation["IndependentNonExecutiveDirector"] = "Independent Non-Executive Director";
-        EnumRelation["Officer"] = "Officer";
-        EnumRelation["President"] = "President";
-    })(EnumRelation || (EnumRelation = {}));
-    const Relation = Type.Enum(EnumRelation, { title: "QuoteSummaryRelation" });
-    const OwnershipEnumSchema = Type.Enum(EnumOwnership, {
-        title: "QuoteSummaryOwnershipEnum",
-    });
-    const TransactionSchema = Type.Object({
-        maxAge: YahooNumber,
-        shares: YahooNumber,
-        filerUrl: Type.String(),
-        transactionText: Type.String(),
-        filerName: Type.String(),
-        filerRelation: Type.Union([Relation, Type.String()]),
-        moneyText: Type.String(),
-        startDate: YahooFinanceDate,
-        ownership: Type.Union([OwnershipEnumSchema, Type.String()]),
-        value: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTransaction",
-    });
-    Type.Object({
-        transactions: Type.Array(TransactionSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryInsiderTransactions",
-    });
-    const HolderSchema = Type.Object({
-        maxAge: YahooNumber,
-        name: Type.String(),
-        relation: Type.Union([Relation, Type.String()]),
-        url: Type.String(),
-        transactionDescription: Type.String(),
-        latestTransDate: YahooFinanceDate,
-        positionDirect: Type.Optional(YahooNumber),
-        positionDirectDate: Type.Optional(YahooFinanceDate),
-        positionIndirect: Type.Optional(YahooNumber),
-        positionIndirectDate: Type.Optional(YahooFinanceDate),
-        positionSummaryDate: Type.Optional(YahooFinanceDate),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryHolder",
-    });
-    const HoldersSchema = Type.Object({
-        holders: Type.Array(HolderSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryHolders",
-    });
-    const TrendSchema = Type.Object({
-        maxAge: YahooNumber,
-        symbol: Type.Null(),
-        estimates: Type.Array(Type.Any()),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryTrend",
-    });
-    const EstimateSchema = Type.Object({
-        period: Type.String(),
-        growth: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEstimate",
-    });
-    const IndexTrendSchema = Type.Object({
-        maxAge: YahooNumber,
-        symbol: Type.String(),
-        peRatio: YahooNumber,
-        pegRatio: YahooNumber,
-        estimates: Type.Array(EstimateSchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryIndexTrend",
-    });
-    const IncomeStatementHistoryElementSchema = Type.Object({
-        maxAge: NullableYahooNumber,
-        endDate: YahooFinanceDate,
-        totalRevenue: NullableYahooNumber,
-        costOfRevenue: NullableYahooNumber,
-        grossProfit: NullableYahooNumber,
-        researchDevelopment: NullableYahooNumber,
-        sellingGeneralAdministrative: NullableYahooNumber,
-        nonRecurring: NullableYahooNumber,
-        otherOperatingExpenses: NullableYahooNumber,
-        totalOperatingExpenses: NullableYahooNumber,
-        operatingIncome: NullableYahooNumber,
-        totalOtherIncomeExpenseNet: NullableYahooNumber,
-        ebit: NullableYahooNumber,
-        interestExpense: NullableYahooNumber,
-        incomeBeforeTax: NullableYahooNumber,
-        incomeTaxExpense: NullableYahooNumber,
-        minorityInterest: NullableYahooNumber,
-        netIncomeFromContinuingOps: NullableYahooNumber,
-        discontinuedOperations: NullableYahooNumber,
-        extraordinaryItems: NullableYahooNumber,
-        effectOfAccountingCharges: NullableYahooNumber,
-        otherItems: NullableYahooNumber,
-        netIncome: NullableYahooNumber,
-        netIncomeApplicableToCommonShares: NullableYahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryIncomeStatementHistoryElement",
-    });
-    const IncomeStatementHistorySchema = Type.Object({
-        incomeStatementHistory: Type.Array(IncomeStatementHistoryElementSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryIncomeStatementHistory",
-    });
-    const FundProfileBrokerageSchema = Type.Object({}, {
-        title: "QuoteSummaryFundProfileBrokerage",
-    });
-    const FundProfileFeesExpensesInvestmentSchema = Type.Object({
-        annualHoldingsTurnover: Type.Optional(YahooNumber),
-        annualReportExpenseRatio: Type.Optional(YahooNumber),
-        grossExpRatio: Type.Optional(YahooNumber),
-        netExpRatio: Type.Optional(YahooNumber),
-        projectionValues: Type.Object({}),
-        totalNetAssets: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundProfileFeesExpensesInvestment",
-    });
-    const FundProfileFeesExpensesInvestmentCatSchema = Type.Composite([
-        Type.Omit(FundProfileFeesExpensesInvestmentSchema, ["projectionValues"]),
-        Type.Object({
-            projectionValuesCat: Type.Object({}),
-        }),
-    ], {
-        title: "QuoteSummaryFundProfileFeesExpensesInvestmentCat",
-        additionalProperties: Type.Any(),
-    });
-    const FundProfileManagementInfoSchema = Type.Object({
-        managerName: Type.Union([Type.Null(), Type.String()]),
-        managerBio: Type.Union([Type.Null(), Type.String()]),
-        startdate: Type.Optional(YahooFinanceDate),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundProfileManagementInfo",
-    });
-    const FundProfileSchema = Type.Object({
-        maxAge: YahooNumber,
-        styleBoxUrl: Type.Optional(Type.Union([Type.Null(), Type.String()])),
-        family: Type.Union([Type.Null(), Type.String()]),
-        categoryName: Type.Union([Type.Null(), Type.String()]),
-        legalType: Type.Union([Type.Null(), Type.String()]),
-        managementInfo: Type.Optional(FundProfileManagementInfoSchema),
-        feesExpensesInvestment: Type.Optional(FundProfileFeesExpensesInvestmentSchema),
-        feesExpensesInvestmentCat: Type.Optional(FundProfileFeesExpensesInvestmentCatSchema),
-        brokerages: Type.Optional(Type.Array(FundProfileBrokerageSchema)),
-        initInvestment: Type.Optional(YahooNumber),
-        initIraInvestment: Type.Optional(YahooNumber),
-        initAipInvestment: Type.Optional(YahooNumber),
-        subseqInvestment: Type.Optional(YahooNumber),
-        subseqIraInvestment: Type.Optional(YahooNumber),
-        subseqAipInvestment: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundProfile",
-    });
-    const FundPerformanceRiskOverviewStatsRowSchema = Type.Object({
-        year: Type.String(), // "5y" | "3y" | "10y" | anything else?
-        alpha: YahooNumber, // 7.76
-        beta: YahooNumber, // 1.04
-        meanAnnualReturn: YahooNumber, // 2.05
-        rSquared: YahooNumber, // 84.03
-        stdDev: Type.Optional(YahooNumber), // 17.12
-        sharpeRatio: YahooNumber, // 1.37
-        treynorRatio: YahooNumber, // 23.61
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformanceRiskOverviewStatsRow",
-    });
-    const FundPerformanceRiskOverviewStatsCatSchema = Type.Object({
-        riskStatisticsCat: Type.Array(FundPerformanceRiskOverviewStatsRowSchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformanceRiskOverviewStatsCat",
-    });
-    const FundPerformanceRiskOverviewStatsSchema = Type.Object({
-        riskStatistics: Type.Array(FundPerformanceRiskOverviewStatsRowSchema),
-        riskRating: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformanceRiskOverviewStats",
-    });
-    const FundPerformanceReturnsRowSchema = Type.Object({
-        year: YahooFinanceDate,
-        annualValue: Type.Optional(YahooNumber),
-        q1: Type.Optional(YahooNumber),
-        q2: Type.Optional(YahooNumber),
-        q3: Type.Optional(YahooNumber),
-        q4: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformanceReturnsRow",
-    });
-    const FundPerformanceReturnsSchema = Type.Object({
-        returns: Type.Array(FundPerformanceReturnsRowSchema),
-        returnsCat: Type.Optional(Type.Array(FundPerformanceReturnsRowSchema)),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformanceReturns",
-    });
-    const FundPerformancePerformanceOverviewCatSchema = Type.Object({
-        ytdReturnPct: Type.Optional(YahooNumber),
-        fiveYrAvgReturnPct: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformancePerformanceOverviewCat",
-    });
-    const FundPerformancePerformanceOverviewSchema = Type.Object({
-        asOfDate: Type.Optional(YahooFinanceDate),
-        ytdReturnPct: Type.Optional(YahooNumber),
-        oneYearTotalReturn: Type.Optional(YahooNumber),
-        threeYearTotalReturn: Type.Optional(YahooNumber),
-        fiveYrAvgReturnPct: Type.Optional(YahooNumber),
-        morningStarReturnRating: Type.Optional(YahooNumber),
-        numYearsUp: Type.Optional(YahooNumber),
-        numYearsDown: Type.Optional(YahooNumber),
-        bestOneYrTotalReturn: Type.Optional(YahooNumber),
-        worstOneYrTotalReturn: Type.Optional(YahooNumber),
-        bestThreeYrTotalReturn: Type.Optional(YahooNumber),
-        worstThreeYrTotalReturn: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformancePerformanceOverview",
-    });
-    const PeriodRangeSchema = Type.Object({
-        asOfDate: Type.Optional(YahooFinanceDate),
-        ytd: Type.Optional(YahooNumber),
-        oneMonth: Type.Optional(YahooNumber),
-        threeMonth: Type.Optional(YahooNumber),
-        oneYear: Type.Optional(YahooNumber),
-        threeYear: Type.Optional(YahooNumber),
-        fiveYear: Type.Optional(YahooNumber),
-        tenYear: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryPeriodRange",
-    });
-    const FundPerformanceTrailingReturnsSchema = Type.Composite([
-        PeriodRangeSchema,
-        Type.Object({
-            lastBullMkt: Type.Optional(YahooNumber),
-            lastBearMkt: Type.Optional(YahooNumber),
-        }, {
-            additionalProperties: Type.Any(),
-        }),
-    ], {
-        title: "QuoteSummaryFundPerformanceTrailingReturns",
-    });
-    const FundPerformanceSchema = Type.Object({
-        maxAge: YahooNumber,
-        loadAdjustedReturns: Type.Optional(PeriodRangeSchema),
-        rankInCategory: Type.Optional(PeriodRangeSchema),
-        performanceOverview: FundPerformancePerformanceOverviewSchema,
-        performanceOverviewCat: FundPerformancePerformanceOverviewCatSchema,
-        trailingReturns: FundPerformanceTrailingReturnsSchema,
-        trailingReturnsNav: FundPerformanceTrailingReturnsSchema,
-        trailingReturnsCat: FundPerformanceTrailingReturnsSchema,
-        annualTotalReturns: FundPerformanceReturnsSchema,
-        pastQuarterlyReturns: FundPerformanceReturnsSchema,
-        riskOverviewStatistics: FundPerformanceRiskOverviewStatsSchema,
-        riskOverviewStatisticsCat: FundPerformanceRiskOverviewStatsCatSchema,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFundPerformance",
-    });
-    const OwnershipListSchema = Type.Object({
-        maxAge: YahooNumber,
-        reportDate: YahooFinanceDate,
-        organization: Type.String(),
-        pctHeld: YahooNumber,
-        position: YahooNumber,
-        value: YahooNumber,
-        pctChange: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryOwnershipList",
-    });
-    const OwnershipSchema = Type.Object({
-        maxAge: YahooNumber,
-        ownershipList: Type.Array(OwnershipListSchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryOwnership",
-    });
-    const FinancialDataSchema = Type.Object({
-        maxAge: YahooNumber,
-        currentPrice: Type.Optional(YahooNumber),
-        targetHighPrice: Type.Optional(YahooNumber),
-        targetLowPrice: Type.Optional(YahooNumber),
-        targetMeanPrice: Type.Optional(YahooNumber),
-        targetMedianPrice: Type.Optional(YahooNumber),
-        recommendationMean: Type.Optional(YahooNumber),
-        recommendationKey: Type.String(),
-        numberOfAnalystOpinions: Type.Optional(YahooNumber),
-        totalCash: Type.Optional(YahooNumber),
-        totalCashPerShare: Type.Optional(YahooNumber),
-        ebitda: Type.Optional(YahooNumber),
-        totalDebt: Type.Optional(YahooNumber),
-        quickRatio: Type.Optional(YahooNumber),
-        currentRatio: Type.Optional(YahooNumber),
-        totalRevenue: Type.Optional(YahooNumber),
-        debtToEquity: Type.Optional(YahooNumber),
-        revenuePerShare: Type.Optional(YahooNumber),
-        returnOnAssets: Type.Optional(YahooNumber),
-        returnOnEquity: Type.Optional(YahooNumber),
-        grossProfits: Type.Optional(YahooNumber),
-        freeCashflow: Type.Optional(YahooNumber),
-        operatingCashflow: Type.Optional(YahooNumber),
-        earningsGrowth: Type.Optional(YahooNumber),
-        revenueGrowth: Type.Optional(YahooNumber),
-        grossMargins: Type.Optional(YahooNumber),
-        ebitdaMargins: Type.Optional(YahooNumber),
-        operatingMargins: Type.Optional(YahooNumber),
-        profitMargins: Type.Optional(YahooNumber),
-        financialCurrency: Type.Union([Type.String(), Type.Null()]),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFinancialData",
-    });
-    const RevenueEstimateSchema = Type.Object({
-        avg: NullableYahooNumber,
-        low: NullableYahooNumber,
-        high: NullableYahooNumber,
-        numberOfAnalysts: NullableYahooNumber,
-        yearAgoRevenue: NullableYahooNumber,
-        growth: NullableYahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryRevenueEstimate",
-    });
-    const EpsTrendSchema = Type.Object({
-        current: NullableYahooNumber,
-        "7daysAgo": NullableYahooNumber,
-        "30daysAgo": NullableYahooNumber,
-        "60daysAgo": NullableYahooNumber,
-        "90daysAgo": NullableYahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEpsTrend",
-    });
-    const EpsRevisionsSchema = Type.Object({
-        upLast7days: NullableYahooNumber,
-        upLast30days: NullableYahooNumber,
-        downLast30days: NullableYahooNumber,
-        downLast90days: NullableYahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEpsRevisions",
-    });
-    const EarningsEstimateSchema = Type.Object({
-        avg: NullableYahooNumber,
-        low: NullableYahooNumber,
-        high: NullableYahooNumber,
-        yearAgoEps: NullableYahooNumber,
-        numberOfAnalysts: NullableYahooNumber,
-        growth: NullableYahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsEstimate",
-    });
-    const EarningsTrendTrendSchema = Type.Object({
-        maxAge: YahooNumber,
-        period: Type.String(),
-        endDate: NullableYahooFinanceDate,
-        growth: NullableYahooNumber,
-        earningsEstimate: EarningsEstimateSchema,
-        revenueEstimate: RevenueEstimateSchema,
-        epsTrend: EpsTrendSchema,
-        epsRevisions: EpsRevisionsSchema,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsTrendTrend",
-    });
-    const EarningsTrendSchema = Type.Object({
-        trend: Type.Array(EarningsTrendTrendSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsTrend",
-    });
-    const EarningsHistoryHistorySchema = Type.Object({
-        maxAge: YahooNumber,
-        epsActual: NullableYahooNumber,
-        epsEstimate: NullableYahooNumber,
-        epsDifference: NullableYahooNumber,
-        surprisePercent: NullableYahooNumber,
-        quarter: NullableYahooFinanceDate,
-        period: Type.String(),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsHistoryHistory",
-    });
-    const EarningsHistorySchema = Type.Object({
-        history: Type.Array(EarningsHistoryHistorySchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsHistory",
-    });
-    const YearlySchema = Type.Object({
-        date: YahooNumber,
-        revenue: YahooNumber,
-        earnings: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryYearly",
-    });
-    const FinancialsChartQuarterlySchema = Type.Object({
-        date: Type.String(),
-        revenue: YahooNumber,
-        earnings: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFinancialsChartQuarterly",
-    });
-    const FinancialsChartSchema = Type.Object({
-        yearly: Type.Array(YearlySchema),
-        quarterly: Type.Array(FinancialsChartQuarterlySchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryFinancialsChart",
-    });
-    const EarningsChartQuarterlySchema = Type.Object({
-        date: Type.String(),
-        actual: YahooNumber,
-        estimate: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsChartQuarterly",
-    });
-    const EarningsChartSchema = Type.Object({
-        quarterly: Type.Array(EarningsChartQuarterlySchema),
-        currentQuarterEstimate: Type.Optional(YahooNumber),
-        currentQuarterEstimateDate: Type.Optional(Type.String()),
-        currentQuarterEstimateYear: Type.Optional(YahooNumber),
-        earningsDate: Type.Array(YahooFinanceDate),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarningsChart",
-    });
-    const QuoteSummaryEarningsSchema = Type.Object({
-        maxAge: YahooNumber,
-        earningsChart: EarningsChartSchema,
-        financialsChart: FinancialsChartSchema,
-        financialCurrency: Type.Optional(Type.String()),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryEarnings",
-    });
-    const DefaultKeyStatisticsSchema = Type.Object({
-        maxAge: YahooNumber,
-        priceHint: YahooNumber,
-        enterpriseValue: Type.Optional(YahooNumber),
-        forwardPE: Type.Optional(YahooNumber),
-        profitMargins: Type.Optional(YahooNumber),
-        floatShares: Type.Optional(YahooNumber),
-        sharesOutstanding: Type.Optional(YahooNumber),
-        sharesShort: Type.Optional(YahooNumber),
-        sharesShortPriorMonth: Type.Optional(YahooFinanceDate),
-        sharesShortPreviousMonthDate: Type.Optional(YahooFinanceDate),
-        dateShortInterest: Type.Optional(YahooNumber),
-        sharesPercentSharesOut: Type.Optional(YahooNumber),
-        heldPercentInsiders: Type.Optional(YahooNumber),
-        heldPercentInstitutions: Type.Optional(YahooNumber),
-        shortRatio: Type.Optional(YahooNumber),
-        shortPercentOfFloat: Type.Optional(YahooNumber),
-        beta: Type.Optional(YahooNumber),
-        impliedSharesOutstanding: Type.Optional(YahooNumber),
-        category: Type.Union([Type.Null(), Type.String()]),
-        bookValue: Type.Optional(YahooNumber),
-        priceToBook: Type.Optional(YahooNumber),
-        fundFamily: Type.Union([Type.Null(), Type.String()]),
-        legalType: Type.Union([Type.Null(), Type.String()]),
-        lastFiscalYearEnd: Type.Optional(YahooFinanceDate),
-        nextFiscalYearEnd: Type.Optional(YahooFinanceDate),
-        mostRecentQuarter: Type.Optional(YahooFinanceDate),
-        earningsQuarterlyGrowth: Type.Optional(YahooNumber),
-        netIncomeToCommon: Type.Optional(YahooNumber),
-        trailingEps: Type.Optional(YahooNumber),
-        forwardEps: Type.Optional(YahooNumber),
-        pegRatio: Type.Optional(YahooNumber),
-        lastSplitFactor: Type.Union([Type.Null(), Type.String()]),
-        lastSplitDate: Type.Optional(YahooNumber),
-        enterpriseToRevenue: Type.Optional(YahooNumber),
-        enterpriseToEbitda: Type.Optional(YahooNumber),
-        "52WeekChange": Type.Optional(YahooNumber),
-        SandP52WeekChange: Type.Optional(YahooNumber),
-        lastDividendValue: Type.Optional(YahooNumber),
-        lastDividendDate: Type.Optional(YahooFinanceDate),
-        ytdReturn: Type.Optional(YahooNumber),
-        beta3Year: Type.Optional(YahooNumber),
-        totalAssets: Type.Optional(YahooNumber),
-        yield: Type.Optional(YahooNumber),
-        fundInceptionDate: Type.Optional(YahooFinanceDate),
-        threeYearAverageReturn: Type.Optional(YahooNumber),
-        fiveYearAverageReturn: Type.Optional(YahooNumber),
-        morningStarOverallRating: Type.Optional(YahooNumber),
-        morningStarRiskRating: Type.Optional(YahooNumber),
-        annualReportExpenseRatio: Type.Optional(YahooNumber),
-        lastCapGain: Type.Optional(YahooNumber),
-        annualHoldingsTurnover: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryDefaultKeyStatistics",
-    });
-    const CashflowStatementSchema = Type.Object({
-        maxAge: YahooNumber,
-        endDate: YahooFinanceDate,
-        netIncome: YahooNumber,
-        depreciation: Type.Optional(YahooNumber),
-        changeToNetincome: Type.Optional(YahooNumber),
-        changeToAccountReceivables: Type.Optional(YahooNumber),
-        changeToLiabilities: Type.Optional(YahooNumber),
-        changeToInventory: Type.Optional(YahooNumber),
-        changeToOperatingActivities: Type.Optional(YahooNumber),
-        totalCashFromOperatingActivities: Type.Optional(YahooNumber),
-        capitalExpenditures: Type.Optional(YahooNumber),
-        investments: Type.Optional(YahooNumber),
-        otherCashflowsFromInvestingActivities: Type.Optional(YahooNumber),
-        totalCashflowsFromInvestingActivities: Type.Optional(YahooNumber),
-        dividendsPaid: Type.Optional(YahooNumber),
-        netBorrowings: Type.Optional(YahooNumber),
-        otherCashflowsFromFinancingActivities: Type.Optional(YahooNumber),
-        totalCashFromFinancingActivities: Type.Optional(YahooNumber),
-        changeInCash: Type.Optional(YahooNumber),
-        repurchaseOfStock: Type.Optional(YahooNumber),
-        issuanceOfStock: Type.Optional(YahooNumber),
-        effectOfExchangeRate: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryCashflowStatement",
-    });
-    const CashflowStatementHistorySchema = Type.Object({
-        cashflowStatements: Type.Array(CashflowStatementSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryCashflowStatementHistory",
-    });
-    const CalendarEventsEarningsSchema = Type.Object({
-        earningsDate: Type.Array(YahooFinanceDate),
-        earningsAverage: Type.Optional(YahooNumber),
-        earningsLow: Type.Optional(YahooNumber),
-        earningsHigh: Type.Optional(YahooNumber),
-        revenueAverage: Type.Optional(YahooNumber),
-        revenueLow: Type.Optional(YahooNumber),
-        revenueHigh: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSumamryCalendarEventsEarnings",
-    });
-    const CalendarEventsSchema = Type.Object({
-        maxAge: YahooNumber,
-        earnings: CalendarEventsEarningsSchema,
-        exDividendDate: Type.Optional(YahooFinanceDate),
-        dividendDate: Type.Optional(YahooFinanceDate),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryCalendarEvents",
-    });
-    const BalanceSheetStatementSchema = Type.Object({
-        maxAge: YahooNumber,
-        endDate: YahooFinanceDate,
-        cash: Type.Optional(YahooNumber),
-        shortTermInvestments: Type.Optional(YahooNumber),
-        netReceivables: Type.Optional(YahooNumber),
-        inventory: Type.Optional(YahooNumber),
-        otherCurrentAssets: Type.Optional(YahooNumber),
-        totalCurrentAssets: Type.Optional(YahooNumber),
-        longTermInvestments: Type.Optional(YahooNumber),
-        propertyPlantEquipment: Type.Optional(YahooNumber),
-        otherAssets: Type.Optional(YahooNumber),
-        totalAssets: Type.Optional(YahooNumber),
-        accountsPayable: Type.Optional(YahooNumber),
-        shortLongTermDebt: Type.Optional(YahooNumber),
-        otherCurrentLiab: Type.Optional(YahooNumber),
-        longTermDebt: Type.Optional(YahooNumber),
-        otherLiab: Type.Optional(YahooNumber),
-        totalCurrentLiabilities: Type.Optional(YahooNumber),
-        totalLiab: Type.Optional(YahooNumber),
-        commonStock: Type.Optional(YahooNumber),
-        retainedEarnings: Type.Optional(YahooNumber),
-        treasuryStock: Type.Optional(YahooNumber),
-        otherStockholderEquity: Type.Optional(YahooNumber),
-        totalStockholderEquity: Type.Optional(YahooNumber),
-        netTangibleAssets: Type.Optional(YahooNumber),
-        goodWill: Type.Optional(YahooNumber),
-        intangibleAssets: Type.Optional(YahooNumber),
-        deferredLongTermAssetCharges: Type.Optional(YahooNumber),
-        deferredLongTermLiab: Type.Optional(YahooNumber),
-        minorityInterest: Type.Optional(NullableYahooNumber),
-        capitalSurplus: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryBalanceSheetStatement",
-    });
-    const BalanceSheetHistorySchema = Type.Object({
-        balanceSheetStatements: Type.Array(BalanceSheetStatementSchema),
-        maxAge: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryBalanceSheetHistory",
-    });
-    const CompanyOfficerSchema = Type.Object({
-        maxAge: YahooNumber,
-        name: Type.String(),
-        age: Type.Optional(YahooNumber),
-        title: Type.String(),
-        yearBorn: Type.Optional(YahooNumber),
-        fiscalYear: Type.Optional(YahooNumber),
-        totalPay: Type.Optional(YahooNumber),
-        exercisedValue: Type.Optional(YahooNumber),
-        unexercisedValue: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryCompanyOfficer",
-    });
-    const AssetProfileSchema = Type.Object({
-        maxAge: YahooNumber,
-        address1: Type.Optional(Type.String()),
-        address2: Type.Optional(Type.String()),
-        address3: Type.Optional(Type.String()),
-        city: Type.Optional(Type.String()),
-        state: Type.Optional(Type.String()),
-        zip: Type.Optional(Type.String()),
-        country: Type.Optional(Type.String()),
-        phone: Type.Optional(Type.String()),
-        fax: Type.Optional(Type.String()),
-        website: Type.Optional(Type.String()),
-        industry: Type.Optional(Type.String()),
-        industryDisp: Type.Optional(Type.String()),
-        industryKey: Type.Optional(Type.String()),
-        industrySymbol: Type.Optional(Type.String()),
-        sector: Type.Optional(Type.String()),
-        sectorDisp: Type.Optional(Type.String()),
-        sectorKey: Type.Optional(Type.String()),
-        longBusinessSummary: Type.Optional(Type.String()),
-        fullTimeEmployees: Type.Optional(YahooNumber),
-        companyOfficers: Type.Array(CompanyOfficerSchema),
-        auditRisk: Type.Optional(YahooNumber),
-        boardRisk: Type.Optional(YahooNumber),
-        compensationRisk: Type.Optional(YahooNumber),
-        shareHolderRightsRisk: Type.Optional(YahooNumber),
-        overallRisk: Type.Optional(YahooNumber),
-        governanceEpochDate: Type.Optional(YahooFinanceDate),
-        compensationAsOfEpochDate: Type.Optional(YahooFinanceDate),
-        name: Type.Optional(Type.String()), // 'Bitcoin';
-        startDate: Type.Optional(YahooFinanceDate), // new Date('2013-04-28')
-        description: Type.Optional(Type.String()), // 'Bitcoin (BTC) is a cryptocurrency...'
-        twitter: Type.Optional(Type.String()), // in e.g. "ADA-USD" (#418)
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryAssetProfile",
-    });
-    const QuoteSummaryResultSchema = Type.Object({
-        assetProfile: Type.Optional(AssetProfileSchema),
-        balanceSheetHistory: Type.Optional(BalanceSheetHistorySchema),
-        balanceSheetHistoryQuarterly: Type.Optional(BalanceSheetHistorySchema),
-        calendarEvents: Type.Optional(CalendarEventsSchema),
-        cashflowStatementHistory: Type.Optional(CashflowStatementHistorySchema),
-        cashflowStatementHistoryQuarterly: Type.Optional(CashflowStatementHistorySchema),
-        defaultKeyStatistics: Type.Optional(DefaultKeyStatisticsSchema),
-        earnings: Type.Optional(QuoteSummaryEarningsSchema),
-        earningsHistory: Type.Optional(EarningsHistorySchema),
-        earningsTrend: Type.Optional(EarningsTrendSchema),
-        financialData: Type.Optional(FinancialDataSchema),
-        fundOwnership: Type.Optional(OwnershipSchema),
-        fundPerformance: Type.Optional(FundPerformanceSchema),
-        fundProfile: Type.Optional(FundProfileSchema),
-        incomeStatementHistory: Type.Optional(IncomeStatementHistorySchema),
-        incomeStatementHistoryQuarterly: Type.Optional(IncomeStatementHistorySchema),
-        indexTrend: Type.Optional(IndexTrendSchema),
-        industryTrend: Type.Optional(TrendSchema),
-        // insiderHolders: Type.Optional(InsiderTransactionsSchema), // <--
-        institutionOwnership: Type.Optional(OwnershipSchema),
-        majorDirectHolders: Type.Optional(HoldersSchema),
-        majorHoldersBreakdown: Type.Optional(MajorHoldersBreakdownSchema),
-        netSharePurchaseActivity: Type.Optional(NetSharePurchaseActivitySchema),
-        price: Type.Optional(PriceSchema),
-        quoteType: Type.Optional(QuoteTypeSchema),
-        recommendationTrend: Type.Optional(RecommendationTrendSchema),
-        secFilings: Type.Optional(SECFilingsSchema),
-        sectorTrend: Type.Optional(TrendSchema),
-        summaryDetail: Type.Optional(SummaryDetailSchema),
-        summaryProfile: Type.Optional(SummaryProfileSchema),
-        topHoldings: Type.Optional(TopHoldingsSchema),
-        upgradeDowngradeHistory: Type.Optional(UpgradeDowngradeHistorySchema),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "QuoteSummaryResult",
-    });
-
-    const QuoteSummaryModules = Type.Union([
-        Type.Literal("assetProfile"),
-        Type.Literal("balanceSheetHistory"),
-        Type.Literal("balanceSheetHistoryQuarterly"),
-        Type.Literal("calendarEvents"),
-        Type.Literal("cashflowStatementHistory"),
-        Type.Literal("cashflowStatementHistoryQuarterly"),
-        Type.Literal("defaultKeyStatistics"),
-        Type.Literal("earnings"),
-        Type.Literal("earningsHistory"),
-        Type.Literal("earningsTrend"),
-        Type.Literal("financialData"),
-        Type.Literal("fundOwnership"),
-        Type.Literal("fundPerformance"),
-        Type.Literal("fundProfile"),
-        Type.Literal("incomeStatementHistory"),
-        Type.Literal("incomeStatementHistoryQuarterly"),
-        Type.Literal("indexTrend"),
-        Type.Literal("industryTrend"),
-        Type.Literal("insiderHolders"),
-        Type.Literal("insiderTransactions"),
-        Type.Literal("institutionOwnership"),
-        Type.Literal("majorDirectHolders"),
-        Type.Literal("majorHoldersBreakdown"),
-        Type.Literal("netSharePurchaseActivity"),
-        Type.Literal("price"),
-        Type.Literal("quoteType"),
-        Type.Literal("recommendationTrend"),
-        Type.Literal("secFilings"),
-        Type.Literal("sectorTrend"),
-        Type.Literal("summaryDetail"),
-        Type.Literal("summaryProfile"),
-        Type.Literal("topHoldings"),
-        Type.Literal("upgradeDowngradeHistory"),
-    ]);
-    const quoteSummaryModules = [
-        "assetProfile",
-        "balanceSheetHistory",
-        "balanceSheetHistoryQuarterly",
-        "calendarEvents",
-        "cashflowStatementHistory",
-        "cashflowStatementHistoryQuarterly",
-        "defaultKeyStatistics",
-        "earnings",
-        "earningsHistory",
-        "earningsTrend",
-        "financialData",
-        "fundOwnership",
-        "fundPerformance",
-        "fundProfile",
-        "incomeStatementHistory",
-        "incomeStatementHistoryQuarterly",
-        "indexTrend",
-        "industryTrend",
-        "insiderHolders",
-        "insiderTransactions",
-        "institutionOwnership",
-        "majorDirectHolders",
-        "majorHoldersBreakdown",
-        "netSharePurchaseActivity",
-        "price",
-        "quoteType",
-        "recommendationTrend",
-        "secFilings",
-        "sectorTrend",
-        "summaryDetail",
-        "summaryProfile",
-        "topHoldings",
-        "upgradeDowngradeHistory",
-    ];
-    const QuoteSummaryOptionsSchema = Type.Object({
-        formatted: Type.Optional(Type.Boolean()),
-        modules: Type.Optional(Type.Union([Type.Array(QuoteSummaryModules), Type.Literal("all")])),
-    });
-    const queryOptionsDefaults$6 = {
-        formatted: false,
-        modules: ["price", "summaryDetail"],
-    };
-    function quoteSummary(symbol, queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "quoteSummary",
-            query: {
-                assertSymbol: symbol,
-                url: "https://${YF_QUERY_HOST}/v10/finance/quoteSummary/" + symbol,
-                needsCrumb: true,
-                schema: QuoteSummaryOptionsSchema,
-                defaults: queryOptionsDefaults$6,
-                overrides: queryOptionsOverrides,
-                transformWith(options) {
-                    if (typeof options === "object" &&
-                        options != null &&
-                        "modules" in options &&
-                        options.modules === "all")
-                        options.modules =
-                            quoteSummaryModules;
-                    return options;
-                },
-            },
-            result: {
-                schema: QuoteSummaryResultSchema,
-                transformWith(result) {
-                    if (!result.quoteSummary)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.quoteSummary.result[0];
-                },
-            },
-            moduleOptions,
-        });
-    }
-
-    var financials = [
-    	"TotalRevenue",
-    	"OperatingRevenue",
-    	"CostOfRevenue",
-    	"GrossProfit",
-    	"SellingGeneralAndAdministration",
-    	"SellingAndMarketingExpense",
-    	"GeneralAndAdministrativeExpense",
-    	"OtherGandA",
-    	"ResearchAndDevelopment",
-    	"DepreciationAmortizationDepletionIncomeStatement",
-    	"DepletionIncomeStatement",
-    	"DepreciationAndAmortizationInIncomeStatement",
-    	"Amortization",
-    	"AmortizationOfIntangiblesIncomeStatement",
-    	"DepreciationIncomeStatement",
-    	"OtherOperatingExpenses",
-    	"OperatingExpense",
-    	"OperatingIncome",
-    	"InterestExpenseNonOperating",
-    	"InterestIncomeNonOperating",
-    	"TotalOtherFinanceCost",
-    	"NetNonOperatingInterestIncomeExpense",
-    	"WriteOff",
-    	"SpecialIncomeCharges",
-    	"GainOnSaleOfPPE",
-    	"GainOnSaleOfBusiness",
-    	"GainOnSaleOfSecurity",
-    	"OtherSpecialCharges",
-    	"OtherIncomeExpense",
-    	"OtherNonOperatingIncomeExpenses",
-    	"TotalExpenses",
-    	"PretaxIncome",
-    	"TaxProvision",
-    	"NetIncomeContinuousOperations",
-    	"NetIncomeIncludingNoncontrollingInterests",
-    	"MinorityInterests",
-    	"NetIncomeFromTaxLossCarryforward",
-    	"NetIncomeExtraordinary",
-    	"NetIncomeDiscontinuousOperations",
-    	"PreferredStockDividends",
-    	"OtherunderPreferredStockDividend",
-    	"NetIncomeCommonStockholders",
-    	"NetIncome",
-    	"BasicAverageShares",
-    	"DilutedAverageShares",
-    	"DividendPerShare",
-    	"ReportedNormalizedBasicEPS",
-    	"ContinuingAndDiscontinuedBasicEPS",
-    	"BasicEPSOtherGainsLosses",
-    	"TaxLossCarryforwardBasicEPS",
-    	"NormalizedBasicEPS",
-    	"BasicEPS",
-    	"BasicAccountingChange",
-    	"BasicExtraordinary",
-    	"BasicDiscontinuousOperations",
-    	"BasicContinuousOperations",
-    	"ReportedNormalizedDilutedEPS",
-    	"ContinuingAndDiscontinuedDilutedEPS",
-    	"TaxLossCarryforwardDilutedEPS",
-    	"AverageDilutionEarnings",
-    	"NormalizedDilutedEPS",
-    	"DilutedEPS",
-    	"DilutedAccountingChange",
-    	"DilutedExtraordinary",
-    	"DilutedContinuousOperations",
-    	"DilutedDiscontinuousOperations",
-    	"DilutedNIAvailtoComStockholders",
-    	"DilutedEPSOtherGainsLosses",
-    	"TotalOperatingIncomeAsReported",
-    	"NetIncomeFromContinuingAndDiscontinuedOperation",
-    	"NormalizedIncome",
-    	"NetInterestIncome",
-    	"EBIT",
-    	"EBITDA",
-    	"ReconciledCostOfRevenue",
-    	"ReconciledDepreciation",
-    	"NetIncomeFromContinuingOperationNetMinorityInterest",
-    	"TotalUnusualItemsExcludingGoodwill",
-    	"TotalUnusualItems",
-    	"NormalizedEBITDA",
-    	"TaxRateForCalcs",
-    	"TaxEffectOfUnusualItems",
-    	"RentExpenseSupplemental",
-    	"EarningsFromEquityInterestNetOfTax",
-    	"ImpairmentOfCapitalAssets",
-    	"RestructuringAndMergernAcquisition",
-    	"SecuritiesAmortization",
-    	"EarningsFromEquityInterest",
-    	"OtherTaxes",
-    	"ProvisionForDoubtfulAccounts",
-    	"InsuranceAndClaims",
-    	"RentAndLandingFees",
-    	"SalariesAndWages",
-    	"ExciseTaxes",
-    	"InterestExpense",
-    	"InterestIncome",
-    	"TotalMoneyMarketInvestments",
-    	"InterestIncomeAfterProvisionForLoanLoss",
-    	"OtherThanPreferredStockDividend",
-    	"LossonExtinguishmentofDebt",
-    	"IncomefromAssociatesandOtherParticipatingInterests",
-    	"NonInterestExpense",
-    	"OtherNonInterestExpense",
-    	"ProfessionalExpenseAndContractServicesExpense",
-    	"OccupancyAndEquipment",
-    	"Equipment",
-    	"NetOccupancyExpense",
-    	"CreditLossesProvision",
-    	"NonInterestIncome",
-    	"OtherNonInterestIncome",
-    	"GainLossonSaleofAssets",
-    	"GainonSaleofInvestmentProperty",
-    	"GainonSaleofLoans",
-    	"ForeignExchangeTradingGains",
-    	"TradingGainLoss",
-    	"InvestmentBankingProfit",
-    	"DividendIncome",
-    	"FeesAndCommissions",
-    	"FeesandCommissionExpense",
-    	"FeesandCommissionIncome",
-    	"OtherCustomerServices",
-    	"CreditCard",
-    	"SecuritiesActivities",
-    	"TrustFeesbyCommissions",
-    	"ServiceChargeOnDepositorAccounts",
-    	"TotalPremiumsEarned",
-    	"OtherInterestExpense",
-    	"InterestExpenseForFederalFundsSoldAndSecuritiesPurchaseUnderAgreementsToResell",
-    	"InterestExpenseForLongTermDebtAndCapitalSecurities",
-    	"InterestExpenseForShortTermDebt",
-    	"InterestExpenseForDeposit",
-    	"OtherInterestIncome",
-    	"InterestIncomeFromFederalFundsSoldAndSecuritiesPurchaseUnderAgreementsToResell",
-    	"InterestIncomeFromDeposits",
-    	"InterestIncomeFromSecurities",
-    	"InterestIncomeFromLoansAndLease",
-    	"InterestIncomeFromLeases",
-    	"InterestIncomeFromLoans",
-    	"DepreciationDepreciationIncomeStatement",
-    	"OperationAndMaintenance",
-    	"OtherCostofRevenue",
-    	"ExplorationDevelopmentAndMineralPropertyLeaseExpenses"
-    ];
-    var Timeseries_Keys = {
-    	financials: financials,
-    	"balance-sheet": [
-    	"NetDebt",
-    	"TreasurySharesNumber",
-    	"PreferredSharesNumber",
-    	"OrdinarySharesNumber",
-    	"ShareIssued",
-    	"TotalDebt",
-    	"TangibleBookValue",
-    	"InvestedCapital",
-    	"WorkingCapital",
-    	"NetTangibleAssets",
-    	"CapitalLeaseObligations",
-    	"CommonStockEquity",
-    	"PreferredStockEquity",
-    	"TotalCapitalization",
-    	"TotalEquityGrossMinorityInterest",
-    	"MinorityInterest",
-    	"StockholdersEquity",
-    	"OtherEquityInterest",
-    	"GainsLossesNotAffectingRetainedEarnings",
-    	"OtherEquityAdjustments",
-    	"FixedAssetsRevaluationReserve",
-    	"ForeignCurrencyTranslationAdjustments",
-    	"MinimumPensionLiabilities",
-    	"UnrealizedGainLoss",
-    	"TreasuryStock",
-    	"RetainedEarnings",
-    	"AdditionalPaidInCapital",
-    	"CapitalStock",
-    	"OtherCapitalStock",
-    	"CommonStock",
-    	"PreferredStock",
-    	"TotalPartnershipCapital",
-    	"GeneralPartnershipCapital",
-    	"LimitedPartnershipCapital",
-    	"TotalLiabilitiesNetMinorityInterest",
-    	"TotalNonCurrentLiabilitiesNetMinorityInterest",
-    	"OtherNonCurrentLiabilities",
-    	"LiabilitiesHeldforSaleNonCurrent",
-    	"RestrictedCommonStock",
-    	"PreferredSecuritiesOutsideStockEquity",
-    	"DerivativeProductLiabilities",
-    	"EmployeeBenefits",
-    	"NonCurrentPensionAndOtherPostretirementBenefitPlans",
-    	"NonCurrentAccruedExpenses",
-    	"DuetoRelatedPartiesNonCurrent",
-    	"TradeandOtherPayablesNonCurrent",
-    	"NonCurrentDeferredLiabilities",
-    	"NonCurrentDeferredRevenue",
-    	"NonCurrentDeferredTaxesLiabilities",
-    	"LongTermDebtAndCapitalLeaseObligation",
-    	"LongTermCapitalLeaseObligation",
-    	"LongTermDebt",
-    	"LongTermProvisions",
-    	"CurrentLiabilities",
-    	"OtherCurrentLiabilities",
-    	"CurrentDeferredLiabilities",
-    	"CurrentDeferredRevenue",
-    	"CurrentDeferredTaxesLiabilities",
-    	"CurrentDebtAndCapitalLeaseObligation",
-    	"CurrentCapitalLeaseObligation",
-    	"CurrentDebt",
-    	"OtherCurrentBorrowings",
-    	"LineOfCredit",
-    	"CommercialPaper",
-    	"CurrentNotesPayable",
-    	"PensionandOtherPostRetirementBenefitPlansCurrent",
-    	"CurrentProvisions",
-    	"PayablesAndAccruedExpenses",
-    	"CurrentAccruedExpenses",
-    	"InterestPayable",
-    	"Payables",
-    	"OtherPayable",
-    	"DuetoRelatedPartiesCurrent",
-    	"DividendsPayable",
-    	"TotalTaxPayable",
-    	"IncomeTaxPayable",
-    	"AccountsPayable",
-    	"TotalAssets",
-    	"TotalNonCurrentAssets",
-    	"OtherNonCurrentAssets",
-    	"DefinedPensionBenefit",
-    	"NonCurrentPrepaidAssets",
-    	"NonCurrentDeferredAssets",
-    	"NonCurrentDeferredTaxesAssets",
-    	"DuefromRelatedPartiesNonCurrent",
-    	"NonCurrentNoteReceivables",
-    	"NonCurrentAccountsReceivable",
-    	"FinancialAssets",
-    	"InvestmentsAndAdvances",
-    	"OtherInvestments",
-    	"InvestmentinFinancialAssets",
-    	"HeldToMaturitySecurities",
-    	"AvailableForSaleSecurities",
-    	"FinancialAssetsDesignatedasFairValueThroughProfitorLossTotal",
-    	"TradingSecurities",
-    	"LongTermEquityInvestment",
-    	"InvestmentsinJointVenturesatCost",
-    	"InvestmentsInOtherVenturesUnderEquityMethod",
-    	"InvestmentsinAssociatesatCost",
-    	"InvestmentsinSubsidiariesatCost",
-    	"InvestmentProperties",
-    	"GoodwillAndOtherIntangibleAssets",
-    	"OtherIntangibleAssets",
-    	"Goodwill",
-    	"NetPPE",
-    	"AccumulatedDepreciation",
-    	"GrossPPE",
-    	"Leases",
-    	"ConstructionInProgress",
-    	"OtherProperties",
-    	"MachineryFurnitureEquipment",
-    	"BuildingsAndImprovements",
-    	"LandAndImprovements",
-    	"Properties",
-    	"CurrentAssets",
-    	"OtherCurrentAssets",
-    	"HedgingAssetsCurrent",
-    	"AssetsHeldForSaleCurrent",
-    	"CurrentDeferredAssets",
-    	"CurrentDeferredTaxesAssets",
-    	"RestrictedCash",
-    	"PrepaidAssets",
-    	"Inventory",
-    	"InventoriesAdjustmentsAllowances",
-    	"OtherInventories",
-    	"FinishedGoods",
-    	"WorkInProcess",
-    	"RawMaterials",
-    	"Receivables",
-    	"ReceivablesAdjustmentsAllowances",
-    	"OtherReceivables",
-    	"DuefromRelatedPartiesCurrent",
-    	"TaxesReceivable",
-    	"AccruedInterestReceivable",
-    	"NotesReceivable",
-    	"LoansReceivable",
-    	"AccountsReceivable",
-    	"AllowanceForDoubtfulAccountsReceivable",
-    	"GrossAccountsReceivable",
-    	"CashCashEquivalentsAndShortTermInvestments",
-    	"OtherShortTermInvestments",
-    	"CashAndCashEquivalents",
-    	"CashEquivalents",
-    	"CashFinancial",
-    	"OtherLiabilities",
-    	"LiabilitiesOfDiscontinuedOperations",
-    	"SubordinatedLiabilities",
-    	"AdvanceFromFederalHomeLoanBanks",
-    	"TradingLiabilities",
-    	"DuetoRelatedParties",
-    	"SecuritiesLoaned",
-    	"FederalFundsPurchasedAndSecuritiesSoldUnderAgreementToRepurchase",
-    	"FinancialInstrumentsSoldUnderAgreementsToRepurchase",
-    	"FederalFundsPurchased",
-    	"TotalDeposits",
-    	"NonInterestBearingDeposits",
-    	"InterestBearingDepositsLiabilities",
-    	"CustomerAccounts",
-    	"DepositsbyBank",
-    	"OtherAssets",
-    	"AssetsHeldForSale",
-    	"DeferredAssets",
-    	"DeferredTaxAssets",
-    	"DueFromRelatedParties",
-    	"AllowanceForNotesReceivable",
-    	"GrossNotesReceivable",
-    	"NetLoan",
-    	"UnearnedIncome",
-    	"AllowanceForLoansAndLeaseLosses",
-    	"GrossLoan",
-    	"OtherLoanAssets",
-    	"MortgageLoan",
-    	"ConsumerLoan",
-    	"CommercialLoan",
-    	"LoansHeldForSale",
-    	"DerivativeAssets",
-    	"SecuritiesAndInvestments",
-    	"BankOwnedLifeInsurance",
-    	"OtherRealEstateOwned",
-    	"ForeclosedAssets",
-    	"CustomerAcceptances",
-    	"FederalHomeLoanBankStock",
-    	"SecurityBorrowed",
-    	"CashCashEquivalentsAndFederalFundsSold",
-    	"MoneyMarketInvestments",
-    	"FederalFundsSoldAndSecuritiesPurchaseUnderAgreementsToResell",
-    	"SecurityAgreeToBeResell",
-    	"FederalFundsSold",
-    	"RestrictedCashAndInvestments",
-    	"RestrictedInvestments",
-    	"RestrictedCashAndCashEquivalents",
-    	"InterestBearingDepositsAssets",
-    	"CashAndDueFromBanks",
-    	"BankIndebtedness",
-    	"MineralProperties"
-    ],
-    	"cash-flow": [
-    	"FreeCashFlow",
-    	"ForeignSales",
-    	"DomesticSales",
-    	"AdjustedGeographySegmentData",
-    	"RepurchaseOfCapitalStock",
-    	"RepaymentOfDebt",
-    	"IssuanceOfDebt",
-    	"IssuanceOfCapitalStock",
-    	"CapitalExpenditure",
-    	"InterestPaidSupplementalData",
-    	"IncomeTaxPaidSupplementalData",
-    	"EndCashPosition",
-    	"OtherCashAdjustmentOutsideChangeinCash",
-    	"BeginningCashPosition",
-    	"EffectOfExchangeRateChanges",
-    	"ChangesInCash",
-    	"OtherCashAdjustmentInsideChangeinCash",
-    	"CashFlowFromDiscontinuedOperation",
-    	"FinancingCashFlow",
-    	"CashFromDiscontinuedFinancingActivities",
-    	"CashFlowFromContinuingFinancingActivities",
-    	"NetOtherFinancingCharges",
-    	"InterestPaidCFF",
-    	"ProceedsFromStockOptionExercised",
-    	"CashDividendsPaid",
-    	"PreferredStockDividendPaid",
-    	"CommonStockDividendPaid",
-    	"NetPreferredStockIssuance",
-    	"PreferredStockPayments",
-    	"PreferredStockIssuance",
-    	"NetCommonStockIssuance",
-    	"CommonStockPayments",
-    	"CommonStockIssuance",
-    	"NetIssuancePaymentsOfDebt",
-    	"NetShortTermDebtIssuance",
-    	"ShortTermDebtPayments",
-    	"ShortTermDebtIssuance",
-    	"NetLongTermDebtIssuance",
-    	"LongTermDebtPayments",
-    	"LongTermDebtIssuance",
-    	"InvestingCashFlow",
-    	"CashFromDiscontinuedInvestingActivities",
-    	"CashFlowFromContinuingInvestingActivities",
-    	"NetOtherInvestingChanges",
-    	"InterestReceivedCFI",
-    	"DividendsReceivedCFI",
-    	"NetInvestmentPurchaseAndSale",
-    	"SaleOfInvestment",
-    	"PurchaseOfInvestment",
-    	"NetInvestmentPropertiesPurchaseAndSale",
-    	"SaleOfInvestmentProperties",
-    	"PurchaseOfInvestmentProperties",
-    	"NetBusinessPurchaseAndSale",
-    	"SaleOfBusiness",
-    	"PurchaseOfBusiness",
-    	"NetIntangiblesPurchaseAndSale",
-    	"SaleOfIntangibles",
-    	"PurchaseOfIntangibles",
-    	"NetPPEPurchaseAndSale",
-    	"SaleOfPPE",
-    	"PurchaseOfPPE",
-    	"CapitalExpenditureReported",
-    	"OperatingCashFlow",
-    	"CashFromDiscontinuedOperatingActivities",
-    	"CashFlowFromContinuingOperatingActivities",
-    	"TaxesRefundPaid",
-    	"InterestReceivedCFO",
-    	"InterestPaidCFO",
-    	"DividendReceivedCFO",
-    	"DividendPaidCFO",
-    	"ChangeInWorkingCapital",
-    	"ChangeInOtherWorkingCapital",
-    	"ChangeInOtherCurrentLiabilities",
-    	"ChangeInOtherCurrentAssets",
-    	"ChangeInPayablesAndAccruedExpense",
-    	"ChangeInAccruedExpense",
-    	"ChangeInInterestPayable",
-    	"ChangeInPayable",
-    	"ChangeInDividendPayable",
-    	"ChangeInAccountPayable",
-    	"ChangeInTaxPayable",
-    	"ChangeInIncomeTaxPayable",
-    	"ChangeInPrepaidAssets",
-    	"ChangeInInventory",
-    	"ChangeInReceivables",
-    	"ChangesInAccountReceivables",
-    	"OtherNonCashItems",
-    	"ExcessTaxBenefitFromStockBasedCompensation",
-    	"StockBasedCompensation",
-    	"UnrealizedGainLossOnInvestmentSecurities",
-    	"ProvisionandWriteOffofAssets",
-    	"AssetImpairmentCharge",
-    	"AmortizationOfSecurities",
-    	"DeferredTax",
-    	"DeferredIncomeTax",
-    	"Depletion",
-    	"DepreciationAndAmortization",
-    	"AmortizationCashFlow",
-    	"AmortizationOfIntangibles",
-    	"Depreciation",
-    	"OperatingGainsLosses",
-    	"PensionAndEmployeeBenefitExpense",
-    	"EarningsLossesFromEquityInvestments",
-    	"GainLossOnInvestmentSecurities",
-    	"NetForeignCurrencyExchangeGainLoss",
-    	"GainLossOnSaleOfPPE",
-    	"GainLossOnSaleOfBusiness",
-    	"NetIncomeFromContinuingOperations",
-    	"CashFlowsfromusedinOperatingActivitiesDirect",
-    	"TaxesRefundPaidDirect",
-    	"InterestReceivedDirect",
-    	"InterestPaidDirect",
-    	"DividendsReceivedDirect",
-    	"DividendsPaidDirect",
-    	"ClassesofCashPayments",
-    	"OtherCashPaymentsfromOperatingActivities",
-    	"PaymentsonBehalfofEmployees",
-    	"PaymentstoSuppliersforGoodsandServices",
-    	"ClassesofCashReceiptsfromOperatingActivities",
-    	"OtherCashReceiptsfromOperatingActivities",
-    	"ReceiptsfromGovernmentGrants",
-    	"ReceiptsfromCustomers",
-    	"IncreaseDecreaseInDeposit",
-    	"ChangeInFederalFundsAndSecuritiesSoldForRepurchase",
-    	"NetProceedsPaymentForLoan",
-    	"PaymentForLoans",
-    	"ProceedsFromLoans",
-    	"ProceedsPaymentInInterestBearingDepositsInBank",
-    	"IncreaseinInterestBearingDepositsinBank",
-    	"DecreaseinInterestBearingDepositsinBank",
-    	"ProceedsPaymentFederalFundsSoldAndSecuritiesPurchasedUnderAgreementToResell",
-    	"ChangeInLoans",
-    	"ChangeInDeferredCharges",
-    	"ProvisionForLoanLeaseAndOtherLosses",
-    	"AmortizationOfFinancingCostsAndDiscounts",
-    	"DepreciationAmortizationDepletion",
-    	"RealizedGainLossOnSaleOfLoansAndLease",
-    	"AllTaxesPaid",
-    	"InterestandCommissionPaid",
-    	"CashPaymentsforLoans",
-    	"CashPaymentsforDepositsbyBanksandCustomers",
-    	"CashReceiptsfromFeesandCommissions",
-    	"CashReceiptsfromSecuritiesRelatedActivities",
-    	"CashReceiptsfromLoans",
-    	"CashReceiptsfromDepositsbyBanksandCustomers",
-    	"CashReceiptsfromTaxRefunds",
-    	"AmortizationAmortizationCashFlow"
-    ]
-    };
-
-    const FundamentalsTimeSeries_Types = ["quarterly", "annual", "trailing"];
-    const FundamentalsTimeSeries_Modules = [
-        "financials",
-        "balance-sheet",
-        "cash-flow",
-        "all",
-    ];
-    const FundamentalsTimeSeriesResultSchema = Type.Object({
-        date: YahooFinanceDate,
-    }, {
-        additionalProperties: Type.Unknown(),
-        title: "FundamentalsTimeSeriesResult",
-    });
-    const FundamentalsTimeSeriesOptionsSchema = Type.Object({
-        period1: Type.Union([YahooFinanceDate, YahooNumber, Type.String()]),
-        period2: Type.Optional(Type.Union([YahooFinanceDate, YahooNumber, Type.String()])),
-        type: Type.Optional(Type.String()),
-        merge: Type.Optional(Type.Boolean()), // This returns a completely different format that will break the transformer
-        padTimeSeries: Type.Optional(Type.Boolean()), // Not exactly sure what this does, assume it pads p1 and p2???
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        module: Type.String(),
-    }, {
-        title: "FundamentalsTimeSeriesOptions",
-    });
-    const FundamentalsTimeSeriesResultsSchema = Type.Array(FundamentalsTimeSeriesResultSchema);
-    const queryOptionsDefaults$5 = {
-        merge: false,
-        padTimeSeries: true,
-        lang: "en-US",
-        region: "US",
-        type: "quarterly",
-    };
-    function fundamentalsTimeSeries(symbol, queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "options",
-            query: {
-                assertSymbol: symbol,
-                url: `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${symbol}`,
-                needsCrumb: false,
-                schema: FundamentalsTimeSeriesOptionsSchema,
-                defaults: queryOptionsDefaults$5,
-                overrides: queryOptionsOverrides,
-                transformWith: processQuery,
-            },
-            result: {
-                schema: FundamentalsTimeSeriesResultsSchema,
-                transformWith(response) {
-                    if (!response || !response.timeseries)
-                        throw new Error(`Unexpected result: ${JSON.stringify(response)}`);
-                    return processResponse(response);
-                },
-            },
-            moduleOptions,
-        });
-    }
-    /**
-     * Transform the input options into query parameters.
-     * The options module defines which keys that are used in the query.
-     * The keys are joined together into the query parameter type and
-     * pre-fixed with the options type (e.g. annualTotalRevenue).
-     * @param queryOptions Input query options.
-     * @returns Query parameters.
-     */
-    const processQuery = function (queryOptions) {
-        // Convert dates
-        if (!queryOptions.period2)
-            queryOptions.period2 = new Date();
-        const dates = ["period1", "period2"];
-        for (const fieldName of dates) {
-            const value = queryOptions[fieldName];
-            if (value instanceof Date)
-                queryOptions[fieldName] = Math.floor(value.getTime() / 1000);
-            else if (typeof value === "string") {
-                const timestamp = new Date(value).getTime();
-                if (isNaN(timestamp))
-                    throw new Error("yahooFinance.fundamentalsTimeSeries() option '" +
-                        fieldName +
-                        "' invalid date provided: '" +
-                        value +
-                        "'");
-                queryOptions[fieldName] = Math.floor(timestamp / 1000);
-            }
-        }
-        // Validate query parameters.
-        if (queryOptions.period1 === queryOptions.period2) {
-            throw new Error("yahooFinance.fundamentalsTimeSeries() options `period1` and `period2` " +
-                "cannot share the same value.");
-        }
-        else if (!FundamentalsTimeSeries_Types.includes(queryOptions.type || "")) {
-            throw new Error("yahooFinance.fundamentalsTimeSeries() option type invalid.");
-        }
-        else if (!FundamentalsTimeSeries_Modules.includes(queryOptions.module || "")) {
-            throw new Error("yahooFinance.fundamentalsTimeSeries() option module invalid.");
-        }
-        // Join the keys for the module into query types.
-        const keys = Object.entries(Timeseries_Keys).reduce((previous, [module, keys]) => {
-            if (queryOptions.module == "all") {
-                return previous.concat(keys);
-            }
-            else if (module == queryOptions.module) {
-                return previous.concat(keys);
-            }
-            else
-                return previous;
-        }, []);
-        const queryType = queryOptions.type + keys.join(`,${queryOptions.type}`);
-        return {
-            period1: queryOptions.period1,
-            period2: queryOptions.period2,
-            type: queryType,
-        };
-    };
-    /**
-     * Transforms the time-series into an array with reported values per period.
-     * Each object represents a period and its properties are the data points.
-     * Financial statement content variates and keys are skipped when empty.
-     * The query keys include the option type  (e.g. annualTotalRevenue).
-     * In the response the type is removed (e.g. totalRevenue) for
-     * easier mapping by the client.
-     * @param response Query response.
-     * @returns Formatted response.
-     */
-    const processResponse = function (response) {
-        const keyedByTimestamp = {};
-        const replace = new RegExp(FundamentalsTimeSeries_Types.join("|"));
-        for (let ct = 0; ct < response.timeseries.result.length; ct++) {
-            const result = response.timeseries.result[ct];
-            if (!result.timestamp || !result.timestamp.length) {
-                continue;
-            }
-            for (let ct = 0; ct < result.timestamp.length; ct++) {
-                const timestamp = result.timestamp[ct];
-                const dataKey = Object.keys(result)[2];
-                if (!keyedByTimestamp[timestamp]) {
-                    keyedByTimestamp[timestamp] = { date: timestamp };
-                }
-                if (!result[dataKey][ct] ||
-                    !result[dataKey][ct].reportedValue ||
-                    !result[dataKey][ct].reportedValue.raw) {
-                    continue;
-                }
-                const short = dataKey.replace(replace, "");
-                const key = short == short.toUpperCase()
-                    ? short
-                    : short[0].toLowerCase() + short.slice(1);
-                keyedByTimestamp[timestamp][key] = result[dataKey][ct].reportedValue.raw;
-            }
-        }
-        return Object.keys(keyedByTimestamp).map((k) => keyedByTimestamp[k]);
-    };
-
-    const RecommendationsBySymbolResponse = Type.Object({
-        recommendedSymbols: Type.Array(Type.Object({
-            score: YahooNumber, // 0.1927
-            symbol: Type.String(), // "BMW.DE"
-        }, {
-            additionalProperties: Type.Any(),
-        })),
-        symbol: Type.String(),
-    }, {
-        additionalProperties: Type.Any(),
-    });
-    const RecommendationsBySymbolResponseArray = Type.Array(RecommendationsBySymbolResponse);
-    const RecommendationsBySymbolOptions = Type.Object({});
-    const queryOptionsDefaults$4 = {};
-    function recommendationsBySymbol(query, queryOptionsOverrides, moduleOptions) {
-        const symbols = typeof query === "string" ? query : query.join(",");
-        return this._moduleExec({
-            moduleName: "recommendationsBySymbol",
-            query: {
-                url: "https://${YF_QUERY_HOST}/v6/finance/recommendationsbysymbol/" +
-                    symbols,
-                schema: RecommendationsBySymbolOptions,
-                defaults: queryOptionsDefaults$4,
-                overrides: queryOptionsOverrides,
-            },
-            result: {
-                schema: RecommendationsBySymbolResponseArray,
-                transformWith(result) {
-                    if (!result.finance)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.finance.result;
-                },
-            },
-            moduleOptions,
-        }).then((results) => {
-            return typeof query === "string"
-                ? results[0]
-                : results;
-        });
-    }
-
-    const SearchQuoteYahoo = Type.Object({
-        symbol: Type.String(), // "BABA"
-        isYahooFinance: Type.Literal(true), // true
-        exchange: Type.String(), // "NYQ"
-        exchDisp: Type.Optional(Type.String()), // "London", e.g. with BJ0CDD2
-        shortname: Type.Optional(Type.String()), // "Alibaba Group Holding Limited"
-        longname: Type.Optional(Type.String()), // "Alibaba Group Holding Limited"
-        index: Type.Literal("quotes"), // "quotes"
-        score: YahooNumber, // 1111958.0
-        newListingDate: Type.Optional(YahooFinanceDate), // "2021-02-16"
-        prevName: Type.Optional(Type.String()),
-        nameChangeDate: Type.Optional(YahooFinanceDate),
-        sector: Type.Optional(Type.String()), // "Industrials"
-        industry: Type.Optional(Type.String()), // "Building Products & Equipment"
-        dispSecIndFlag: Type.Optional(Type.Boolean()), // true
-    }, {
-        additionalProperties: Type.Any(),
-    });
-    const SearchQuoteYahooEquity = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("EQUITY"),
-            typeDisp: Type.Literal("Equity"),
-        }),
-    ], {
-        title: "SearchQuoteYahooEntity",
-    });
-    const SearchQuoteYahooOption = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("OPTION"),
-            typeDisp: Type.Literal("Option"),
-        }),
-    ], {
-        title: "SearchQuoteYahooOption",
-    });
-    const SearchQuoteYahooETF = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("ETF"),
-            typeDisp: Type.Literal("ETF"),
-        }),
-    ], {
-        title: "SearchQuoteYahooETF",
-    });
-    const SearchQuoteYahooFund = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("MUTUALFUND"),
-            typeDisp: Type.Literal("Fund"),
-        }),
-    ], {
-        title: "SearchQuoteYahooFund",
-    });
-    const SearchQuoteYahooIndex = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("INDEX"),
-            typeDisp: Type.Literal("Index"),
-        }),
-    ], {
-        title: "SearchQuoteYahooIndex",
-    });
-    const SearchQuoteYahooCurrency = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("CURRENCY"),
-            typeDisp: Type.Literal("Currency"),
-        }),
-    ], {
-        title: "SearchQuoteYahooCurrency",
-    });
-    const SearchQuoteYahooCryptocurrency = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("CRYPTOCURRENCY"),
-            typeDisp: Type.Literal("Cryptocurrency"),
-        }),
-    ]);
-    const SearchQuoteYahooFuture = Type.Composite([
-        SearchQuoteYahoo,
-        Type.Object({
-            quoteType: Type.Literal("FUTURE"),
-            typeDisp: Type.Union([Type.Literal("Future"), Type.Literal("Futures")]),
-        }),
-    ], {
-        title: "SearchQuoteYahooFuture",
-    });
-    const SearchQuoteNonYahoo = Type.Object({
-        index: Type.String(), // '78ddc07626ff4bbcae663e88514c23a0'
-        name: Type.String(), // 'AAPlasma'
-        permalink: Type.String(), // 'aaplasma'
-        isYahooFinance: Type.Literal(false), // false
-    }, {
-        additionalProperties: Type.Any(),
-        title: "SearchQuoteNonYahoo",
-    });
-    const SearchNewsThumbnailResolution = Type.Object({
-        url: Type.String(),
-        width: YahooNumber,
-        height: YahooNumber,
-        tag: Type.String(),
-    }, {
-        title: "SearchNewsThumbnailResolution",
-    });
-    const SearchNews = Type.Object({
-        uuid: Type.String(), // "9aff624a-e84c-35f3-9c23-db39852006dc"
-        title: Type.String(), // "Analyst Report: Alibaba Group Holding Limited"
-        publisher: Type.String(), // "Morningstar Research"
-        link: Type.String(), // "https://finance.yahoo.com/m/9aff624a-e84c-35f3-9c23-db39852006dc/analyst-report%3A-alibaba-group.html"
-        providerPublishTime: YahooFinanceDate, // coerced to New Date(1611285342 * 1000)
-        type: Type.String(), // "STORY"   TODO "STORY" | ???
-        thumbnail: Type.Optional(Type.Object({
-            resolutions: Type.Array(SearchNewsThumbnailResolution),
-        })),
-        relatedTickers: Type.Optional(Type.Array(Type.String())), // [ "AAPL" ]
-    }, {
-        additionalProperties: Type.Any(),
-        title: "SearchNews",
-    });
-    const SearchResultSchema = Type.Object({
-        explains: Type.Array(Type.Any()),
-        count: YahooNumber,
-        quotes: Type.Array(Type.Union([
-            SearchQuoteYahooEquity,
-            SearchQuoteYahooOption,
-            SearchQuoteYahooETF,
-            SearchQuoteYahooFund,
-            SearchQuoteYahooIndex,
-            SearchQuoteYahooCurrency,
-            SearchQuoteYahooCryptocurrency,
-            SearchQuoteNonYahoo,
-            SearchQuoteYahooFuture,
-        ])),
-        news: Type.Array(SearchNews),
-        nav: Type.Array(Type.Any()),
-        lists: Type.Array(Type.Any()),
-        researchReports: Type.Array(Type.Any()),
-        totalTime: YahooNumber,
-        // ALWAYS present, but TEMPORARILY marked optional ("?") since its
-        // sudden appearance, let's make sure it doesn't get suddenly removed.
-        // Array<any> until we can find some examples of what it actually looks
-        // like (#255).
-        screenerFieldResults: Type.Optional(Type.Array(Type.Any())),
-        // ALWAYS present, but TEMPORARILY marked optional ("?") since its
-        // sudden appearance, let's make sure it doesn't get suddenly removed.
-        // Array<any> until we can find some examples of what it actually looks
-        // like (#399).
-        culturalAssets: Type.Optional(Type.Array(Type.Any())),
-        timeTakenForQuotes: YahooNumber, // 26
-        timeTakenForNews: YahooNumber, // 419
-        timeTakenForAlgowatchlist: YahooNumber, // 700
-        timeTakenForPredefinedScreener: YahooNumber, // 400
-        timeTakenForCrunchbase: YahooNumber, // 400
-        timeTakenForNav: YahooNumber, // 400
-        timeTakenForResearchReports: YahooNumber, // 0
-        // ALWAYS present, but TEMPORARILY marked optional ("?") since its
-        // sudden appearance, let's make sure it doesn't get suddenly removed.
-        timeTakenForScreenerField: Type.Optional(YahooNumber),
-        // ALWAYS present, but TEMPORARILY marked optional ("?") since its
-        // sudden appearance, let's make sure it doesn't get suddenly removed.
-        timeTakenForCulturalAssets: Type.Optional(YahooNumber),
-    }, {
-        additionalProperties: Type.Any(),
-        title: "SearchResults",
-    });
-    const SearchOptionsSchema = Type.Object({
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        quotesCount: Type.Optional(YahooNumber),
-        newsCount: Type.Optional(YahooNumber),
-        enableFuzzyQuery: Type.Optional(Type.Boolean()),
-        quotesQueryId: Type.Optional(Type.String()),
-        multiQuoteQueryId: Type.Optional(Type.String()),
-        newsQueryId: Type.Optional(Type.String()),
-        enableCb: Type.Optional(Type.Boolean()),
-        enableNavLinks: Type.Optional(Type.Boolean()),
-        enableEnhancedTrivialQuery: Type.Optional(Type.Boolean()),
-    }, {
-        title: "SearchOptions",
-        additionalProperties: false,
-    });
-    const queryOptionsDefaults$3 = {
-        lang: "en-US",
-        region: "US",
-        quotesCount: 6,
-        newsCount: 4,
-        enableFuzzyQuery: false,
-        quotesQueryId: "tss_match_phrase_query",
-        multiQuoteQueryId: "multi_quote_single_token_query",
-        newsQueryId: "news_cie_vespa",
-        enableCb: true,
-        enableNavLinks: true,
-        enableEnhancedTrivialQuery: true,
-    };
-    function search(query, queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "searchTypebox",
-            query: {
-                url: "https://${YF_QUERY_HOST}/v1/finance/search",
-                schema: SearchOptionsSchema,
-                defaults: queryOptionsDefaults$3,
-                runtime: { q: query },
-                overrides: queryOptionsOverrides,
-                needsCrumb: false,
-            },
-            result: {
-                schema: SearchResultSchema,
-            },
-            moduleOptions,
-        });
-    }
-
-    const TrendingSymbol = Type.Object({
-        symbol: Type.String(),
-    }, {
-        additionalProperties: Type.Any(),
-    });
-    const TrendingSymbolsResult = Type.Object({
-        count: YahooNumber,
-        quotes: Type.Array(TrendingSymbol),
-        jobTimestamp: YahooNumber,
-        startInterval: YahooNumber,
-    }, {
-        additionalProperties: Type.Any(),
-        title: "TrendingSymbolsResult",
-    });
-    const TrendingSymbolsOptions = Type.Optional(Type.Object({
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        count: Type.Optional(YahooNumber),
-    }, {
-        title: "TrendingSymbolsOptions",
-    }));
-    const queryOptionsDefaults$2 = {
-        lang: "en-US",
-        count: 5,
-    };
-    function trendingSymbols(query, queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "trendingSymbols",
-            query: {
-                url: "https://${YF_QUERY_HOST}/v1/finance/trending/" + query,
-                schema: TrendingSymbolsOptions,
-                defaults: queryOptionsDefaults$2,
-                overrides: queryOptionsOverrides,
-            },
-            result: {
-                schema: TrendingSymbolsResult,
-                transformWith(result) {
-                    if (!result.finance)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.finance.result[0];
-                },
-            },
-            moduleOptions,
-        });
-    }
-
-    const DailyGainersCriterum = Type.Object({
-        field: Type.String(),
-        operators: Type.Array(Type.String()),
-        values: Type.Array(YahooNumber),
-        labelsSelected: Type.Array(YahooNumber),
-        dependentValues: Type.Array(Type.Any()),
-    }, { title: "DailyGainersCriterium" });
-    const DailyGainersQuote = Type.Object({
-        language: Type.String(),
-        region: Type.String(),
-        quoteType: Type.String(),
-        typeDisp: Type.String(),
-        quoteSourceName: Type.String(),
-        triggerable: Type.Boolean(),
-        customPriceAlertConfidence: Type.String(),
-        lastCloseTevEbitLtm: Type.Optional(YahooNumber),
-        lastClosePriceToNNWCPerShare: Type.Optional(YahooNumber),
-        firstTradeDateMilliseconds: YahooNumber,
-        priceHint: YahooNumber,
-        postMarketChangePercent: Type.Optional(YahooNumber),
-        postMarketTime: Type.Optional(YahooNumber),
-        postMarketPrice: Type.Optional(YahooNumber),
-        postMarketChange: Type.Optional(YahooNumber),
-        regularMarketChange: YahooNumber,
-        regularMarketTime: YahooNumber,
-        regularMarketPrice: YahooNumber,
-        regularMarketDayHigh: YahooNumber,
-        regularMarketDayRange: Type.String(),
-        currency: Type.String(),
-        regularMarketDayLow: YahooNumber,
-        regularMarketVolume: YahooNumber,
-        regularMarketPreviousClose: YahooNumber,
-        bid: Type.Optional(YahooNumber),
-        ask: Type.Optional(YahooNumber),
-        bidSize: Type.Optional(YahooNumber),
-        askSize: Type.Optional(YahooNumber),
-        market: Type.String(),
-        messageBoardId: Type.String(),
-        fullExchangeName: Type.String(),
-        longName: Type.String(),
-        financialCurrency: Type.Optional(Type.String()),
-        regularMarketOpen: YahooNumber,
-        averageDailyVolume3Month: YahooNumber,
-        averageDailyVolume10Day: YahooNumber,
-        fiftyTwoWeekLowChange: YahooNumber,
-        fiftyTwoWeekLowChangePercent: YahooNumber,
-        fiftyTwoWeekRange: Type.String(),
-        fiftyTwoWeekHighChange: YahooNumber,
-        fiftyTwoWeekHighChangePercent: YahooNumber,
-        fiftyTwoWeekChangePercent: YahooNumber,
-        earningsTimestamp: Type.Optional(YahooNumber),
-        earningsTimestampStart: Type.Optional(YahooNumber),
-        earningsTimestampEnd: Type.Optional(YahooNumber),
-        trailingAnnualDividendRate: YahooNumber,
-        trailingAnnualDividendYield: YahooNumber,
-        marketState: Type.String(),
-        epsTrailingTwelveMonths: Type.Optional(YahooNumber),
-        epsForward: Type.Optional(YahooNumber),
-        epsCurrentYear: Type.Optional(YahooNumber),
-        priceEpsCurrentYear: Type.Optional(YahooNumber),
-        sharesOutstanding: YahooNumber,
-        bookValue: Type.Optional(YahooNumber),
-        fiftyDayAverage: YahooNumber,
-        fiftyDayAverageChange: YahooNumber,
-        fiftyDayAverageChangePercent: YahooNumber,
-        twoHundredDayAverage: YahooNumber,
-        twoHundredDayAverageChange: YahooNumber,
-        twoHundredDayAverageChangePercent: YahooNumber,
-        marketCap: YahooNumber,
-        forwardPE: Type.Optional(YahooNumber),
-        priceToBook: Type.Optional(YahooNumber),
-        sourceInterval: YahooNumber,
-        exchangeDataDelayedBy: YahooNumber,
-        exchangeTimezoneName: Type.String(),
-        exchangeTimezoneShortName: Type.String(),
-        gmtOffSetMilliseconds: YahooNumber,
-        esgPopulated: Type.Boolean(),
-        tradeable: Type.Boolean(),
-        cryptoTradeable: Type.Boolean(),
-        exchange: Type.String(),
-        fiftyTwoWeekLow: YahooNumber,
-        fiftyTwoWeekHigh: YahooNumber,
-        shortName: Type.String(),
-        averageAnalystRating: Type.Optional(Type.String()),
-        regularMarketChangePercent: YahooNumber,
-        symbol: Type.String(),
-        dividendDate: Type.Optional(YahooNumber),
-        displayName: Type.Optional(Type.String()),
-        trailingPE: Type.Optional(YahooNumber),
-        prevName: Type.Optional(Type.String()),
-        nameChangeDate: Type.Optional(YahooNumber),
-        ipoExpectedDate: Type.Optional(YahooNumber),
-        dividendYield: Type.Optional(YahooNumber),
-        dividendRate: Type.Optional(YahooNumber),
-    }, { title: "DailyGainersQuote" });
-    const DailyGainersOptionsSchema = Type.Object({
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        count: Type.Optional(YahooNumber),
-    }, { title: "DailyGainersOptions" });
-    const DailyGainersCriteriaMeta = Type.Object({
-        size: YahooNumber,
-        offset: YahooNumber,
-        sortField: Type.String(),
-        sortType: Type.String(),
-        quoteType: Type.String(),
-        criteria: Type.Array(DailyGainersCriterum),
-        topOperator: Type.String(),
-    }, { title: "DailyGainersCriteriaMeta" });
-    const DailyGainersResultSchema = Type.Object({
-        id: Type.String(),
-        title: Type.String(),
-        description: Type.String(),
-        canonicalName: Type.String(),
-        criteriaMeta: DailyGainersCriteriaMeta,
-        rawCriteria: Type.String(),
-        start: YahooNumber,
-        count: YahooNumber,
-        total: YahooNumber,
-        quotes: Type.Array(DailyGainersQuote),
-        useRecords: Type.Boolean(),
-        predefinedScr: Type.Boolean(),
-        versionId: YahooNumber,
-        creationDate: YahooNumber,
-        lastUpdated: YahooNumber,
-        isPremium: Type.Boolean(),
-        iconUrl: Type.String(),
-    }, { title: "DailyGainersResult" });
-    const queryOptionsDefaults$1 = {
-        lang: "en-US",
-        region: "US",
-        scrIds: "day_gainers",
-        count: 5,
-    };
-    function dailyGainers(queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "dailyGainers",
-            query: {
-                url: "https://${YF_QUERY_HOST}/v1/finance/screener/predefined/saved",
-                schema: DailyGainersOptionsSchema,
-                defaults: queryOptionsDefaults$1,
-                overrides: queryOptionsOverrides,
-                needsCrumb: true,
-            },
-            result: {
-                schema: DailyGainersResultSchema,
-                transformWith(result) {
-                    if (!result.finance)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.finance.result[0];
-                },
-            },
-            moduleOptions,
-        });
-    }
-
-    const ScreenerCriterum = Type.Object({
-        field: Type.String(),
-        operators: Type.Array(Type.String()),
-        values: Type.Array(YahooNumber),
-        labelsSelected: Type.Array(YahooNumber),
-        dependentValues: Type.Array(Type.Any()),
-    }, {
-        title: "ScreenerCriterum",
-    });
-    const ScreenerCriteriaMeta = Type.Object({
-        size: YahooNumber,
-        offset: YahooNumber,
-        sortField: Type.String(),
-        sortType: Type.String(),
-        quoteType: Type.String(),
-        criteria: Type.Array(ScreenerCriterum),
-        topOperator: Type.String(),
-    }, {
-        title: "ScreenerCriteriaMeta",
-    });
-    const ScreenerQuote = Type.Object({
-        language: Type.String(),
-        region: Type.String(),
-        quoteType: Type.String(),
-        typeDisp: Type.String(),
-        quoteSourceName: Type.String(),
-        triggerable: Type.Boolean(),
-        customPriceAlertConfidence: Type.String(),
-        lastCloseTevEbitLtm: Type.Optional(YahooNumber),
-        lastClosePriceToNNWCPerShare: Type.Optional(YahooNumber),
-        firstTradeDateMilliseconds: YahooNumber,
-        priceHint: YahooNumber,
-        postMarketChangePercent: Type.Optional(YahooNumber),
-        postMarketTime: Type.Optional(YahooNumber),
-        postMarketPrice: Type.Optional(YahooNumber),
-        postMarketChange: Type.Optional(YahooNumber),
-        regularMarketChange: YahooNumber,
-        regularMarketTime: YahooNumber,
-        regularMarketPrice: YahooNumber,
-        regularMarketDayHigh: Type.Optional(YahooNumber),
-        regularMarketDayRange: YahooTwoNumberRange,
-        currency: Type.String(),
-        regularMarketDayLow: Type.Optional(YahooNumber),
-        regularMarketVolume: Type.Optional(YahooNumber),
-        regularMarketPreviousClose: YahooNumber,
-        bid: Type.Optional(YahooNumber),
-        ask: Type.Optional(YahooNumber),
-        bidSize: Type.Optional(YahooNumber),
-        askSize: Type.Optional(YahooNumber),
-        market: Type.String(),
-        messageBoardId: Type.String(),
-        fullExchangeName: Type.String(),
-        longName: Type.String(),
-        financialCurrency: Type.Optional(Type.String()),
-        regularMarketOpen: Type.Optional(YahooNumber),
-        averageDailyVolume3Month: YahooNumber,
-        averageDailyVolume10Day: YahooNumber,
-        fiftyTwoWeekLowChange: YahooNumber,
-        fiftyTwoWeekLowChangePercent: YahooNumber,
-        fiftyTwoWeekRange: YahooTwoNumberRange,
-        fiftyTwoWeekHighChange: YahooNumber,
-        fiftyTwoWeekHighChangePercent: YahooNumber,
-        fiftyTwoWeekChangePercent: YahooNumber,
-        earningsTimestamp: Type.Optional(YahooNumber),
-        earningsTimestampStart: Type.Optional(YahooNumber),
-        earningsTimestampEnd: Type.Optional(YahooNumber),
-        trailingAnnualDividendRate: Type.Optional(YahooNumber),
-        trailingAnnualDividendYield: Type.Optional(YahooNumber),
-        marketState: Type.String(),
-        epsTrailingTwelveMonths: Type.Optional(YahooNumber),
-        epsForward: Type.Optional(YahooNumber),
-        epsCurrentYear: Type.Optional(YahooNumber),
-        priceEpsCurrentYear: Type.Optional(YahooNumber),
-        sharesOutstanding: Type.Optional(YahooNumber),
-        bookValue: Type.Optional(YahooNumber),
-        fiftyDayAverage: YahooNumber,
-        fiftyDayAverageChange: YahooNumber,
-        fiftyDayAverageChangePercent: YahooNumber,
-        twoHundredDayAverage: YahooNumber,
-        twoHundredDayAverageChange: YahooNumber,
-        twoHundredDayAverageChangePercent: YahooNumber,
-        marketCap: Type.Optional(YahooNumber),
-        forwardPE: Type.Optional(YahooNumber),
-        priceToBook: Type.Optional(YahooNumber),
-        sourceInterval: YahooNumber,
-        exchangeDataDelayedBy: YahooNumber,
-        exchangeTimezoneName: Type.String(),
-        exchangeTimezoneShortName: Type.String(),
-        gmtOffSetMilliseconds: YahooNumber,
-        esgPopulated: Type.Boolean(),
-        tradeable: Type.Boolean(),
-        cryptoTradeable: Type.Boolean(),
-        exchange: Type.String(),
-        fiftyTwoWeekLow: YahooNumber,
-        fiftyTwoWeekHigh: YahooNumber,
-        shortName: Type.String(),
-        averageAnalystRating: Type.Optional(Type.String()),
-        regularMarketChangePercent: YahooNumber,
-        symbol: Type.String(),
-        dividendDate: Type.Optional(YahooFinanceDate),
-        displayName: Type.Optional(Type.String()),
-        trailingPE: Type.Optional(YahooNumber),
-        prevName: Type.Optional(Type.String()),
-        nameChangeDate: Type.Optional(YahooFinanceDate),
-        ipoExpectedDate: Type.Optional(YahooFinanceDate),
-        dividendYield: Type.Optional(YahooNumber),
-        dividendRate: Type.Optional(YahooNumber),
-        yieldTTM: Type.Optional(YahooNumber),
-        peTTM: Type.Optional(YahooNumber),
-        annualReturnNavY3: Type.Optional(YahooNumber),
-        annualReturnNavY5: Type.Optional(YahooNumber),
-        ytdReturn: Type.Optional(YahooNumber),
-        trailingThreeMonthReturns: Type.Optional(YahooNumber),
-        netAssets: Type.Optional(YahooNumber),
-        netExpenseRatio: Type.Optional(YahooNumber),
-    }, {
-        title: "ScreenerQuote",
-    });
-    const ScreenerResult = Type.Object({
-        id: Type.String(),
-        title: Type.String(),
-        description: Type.String(),
-        canonicalName: Type.String(),
-        criteriaMeta: ScreenerCriteriaMeta,
-        rawCriteria: Type.String(),
-        start: YahooNumber,
-        count: YahooNumber,
-        total: YahooNumber,
-        quotes: Type.Array(ScreenerQuote),
-        useRecords: Type.Boolean(),
-        predefinedScr: Type.Boolean(),
-        versionId: YahooNumber,
-        creationDate: YahooFinanceDate,
-        lastUpdated: YahooFinanceDate,
-        isPremium: Type.Boolean(),
-        iconUrl: Type.String(),
-    }, {
-        title: "ScreenerResult",
-    });
-    const PredefinedScreenerModules = Type.Union([
-        Type.Literal("aggressive_small_caps"),
-        Type.Literal("conservative_foreign_funds"),
-        Type.Literal("day_gainers"),
-        Type.Literal("day_losers"),
-        Type.Literal("growth_technology_stocks"),
-        Type.Literal("high_yield_bond"),
-        Type.Literal("most_actives"),
-        Type.Literal("most_shorted_stocks"),
-        Type.Literal("portfolio_anchors"),
-        Type.Literal("small_cap_gainers"),
-        Type.Literal("solid_large_growth_funds"),
-        Type.Literal("solid_midcap_growth_funds"),
-        Type.Literal("top_mutual_funds"),
-        Type.Literal("undervalued_growth_stocks"),
-        Type.Literal("undervalued_large_caps"),
-    ], {
-        title: "ScreenerPredefinedScreenerModules",
-    });
-    const queryOptionsDefaults = {
-        lang: "en-US",
-        region: "US",
-        scrIds: "day_gainers",
-        count: 5,
-    };
-    const ScreenerOptions = Type.Object({
-        lang: Type.Optional(Type.String()),
-        region: Type.Optional(Type.String()),
-        scrIds: PredefinedScreenerModules,
-        count: Type.Optional(Type.Number()),
-    });
-    function screener(queryOptionsOverrides, moduleOptions) {
-        return this._moduleExec({
-            moduleName: "screener",
-            query: {
-                url: "https://${YF_QUERY_HOST}/v1/finance/screener/predefined/saved",
-                schema: ScreenerOptions,
-                defaults: queryOptionsDefaults,
-                overrides: queryOptionsOverrides,
-                needsCrumb: true,
-            },
-            result: {
-                schema: ScreenerResult,
-                transformWith(result) {
-                    // console.log(result);
-                    if (!result.finance)
-                        throw new Error("Unexpected result: " + JSON.stringify(result));
-                    return result.finance.result[0];
-                },
-            },
-            moduleOptions,
-        });
-    }
-
-    const DEBOUNCE_TIME = 50;
-    const slugMap = new Map();
-    function quoteCombine(query, queryOptionsOverrides = {}, moduleOptions) {
-        const symbol = query;
-        if (typeof symbol !== "string")
-            throw new Error("quoteCombine expects a string query parameter, received: " +
-                JSON.stringify(symbol, null, 2));
-        validateAndCoerceTypebox({
-            type: "options",
-            data: queryOptionsOverrides,
-            schema: QuoteOptionsSchema,
-            options: this._opts.validation,
-        });
-        // Make sure we only combine requests with same options
-        const slug = JSON.stringify(queryOptionsOverrides);
-        let entry = slugMap.get(slug);
-        if (!entry) {
-            entry = {
-                timeout: null,
-                queryOptionsOverrides,
-                symbols: new Map(),
-            };
-            slugMap.set(slug, entry);
-        }
-        if (entry.timeout)
-            clearTimeout(entry.timeout);
-        const thisQuote = quote.bind(this);
-        return new Promise((resolve, reject) => {
-            let symbolPromiseCallbacks = entry.symbols.get(symbol);
-            /* istanbul ignore else */
-            if (!symbolPromiseCallbacks) {
-                symbolPromiseCallbacks = [];
-                entry.symbols.set(symbol, symbolPromiseCallbacks);
-            }
-            symbolPromiseCallbacks.push({ resolve, reject });
-            entry.timeout = setTimeout(() => {
-                slugMap.delete(slug);
-                const symbols = Array.from(entry.symbols.keys());
-                // @ts-ignore
-                thisQuote(symbols, queryOptionsOverrides, moduleOptions)
-                    .then((results) => {
-                    for (const result of results) {
-                        for (const promise of entry.symbols.get(result.symbol)) {
-                            promise.resolve(result);
-                            promise.resolved = true;
-                        }
-                    }
-                    // Check for symbols we asked for and didn't get back,
-                    // e.g. non-existent symbols (#150)
-                    for (const [_, promises] of entry.symbols) {
-                        for (const promise of promises) {
-                            if (!promise.resolved) {
-                                promise.resolve(undefined);
-                            }
-                        }
-                    }
-                })
-                    .catch((error) => {
-                    for (const symbolPromiseCallbacks of entry.symbols.values())
-                        for (const promise of symbolPromiseCallbacks)
-                            promise.reject(error);
-                });
-            }, DEBOUNCE_TIME);
-        });
-    }
-
-    // libs
-    var yahooFinance = {
-        // internal
-        _env: {},
-        _fetch: yahooFinanceFetch,
-        _moduleExec: moduleExec,
-        _opts: options$1,
-        // common
-        errors: errors$1,
-        setGlobalConfig,
-        suppressNotices,
-        // modules,
-        autoc,
-        chart,
-        _chart,
-        historical,
-        insights: trendingSymbols$1,
-        options: options,
-        quote,
-        quoteSummary,
-        fundamentalsTimeSeries,
-        recommendationsBySymbol,
-        search,
-        trendingSymbols,
-        dailyGainers,
-        screener,
-        // other
-        quoteCombine,
-    };
-
-    var nodeEnvironment = {
-        fetch,
-        URLSearchParams: url.URLSearchParams,
-    };
-
-    yahooFinance._env = nodeEnvironment;
-
-    var __defProp$8 = Object.defineProperty;
-    var __defNormalProp$8 = (obj, key, value) => key in obj ? __defProp$8(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$8 = (obj, key, value) => __defNormalProp$8(obj, typeof key !== "symbol" ? key + "" : key, value);
+    var __defProp$7 = Object.defineProperty;
+    var __defNormalProp$7 = (obj, key, value) => key in obj ? __defProp$7(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$7 = (obj, key, value) => __defNormalProp$7(obj, typeof key !== "symbol" ? key + "" : key, value);
     class ScopeManager {
       constructor() {
-        __publicField$8(this, "scopes", []);
-        __publicField$8(this, "scopeTypes", []);
-        __publicField$8(this, "scopeCounts", /* @__PURE__ */ new Map());
-        __publicField$8(this, "contextBoundVars", /* @__PURE__ */ new Set());
-        __publicField$8(this, "arrayPatternElements", /* @__PURE__ */ new Set());
-        __publicField$8(this, "rootParams", /* @__PURE__ */ new Set());
-        __publicField$8(this, "varKinds", /* @__PURE__ */ new Map());
-        __publicField$8(this, "loopVars", /* @__PURE__ */ new Set());
-        __publicField$8(this, "loopVarNames", /* @__PURE__ */ new Map());
+        __publicField$7(this, "scopes", []);
+        __publicField$7(this, "scopeTypes", []);
+        __publicField$7(this, "scopeCounts", /* @__PURE__ */ new Map());
+        __publicField$7(this, "contextBoundVars", /* @__PURE__ */ new Set());
+        __publicField$7(this, "arrayPatternElements", /* @__PURE__ */ new Set());
+        __publicField$7(this, "rootParams", /* @__PURE__ */ new Set());
+        __publicField$7(this, "varKinds", /* @__PURE__ */ new Map());
+        __publicField$7(this, "loopVars", /* @__PURE__ */ new Set());
+        __publicField$7(this, "loopVarNames", /* @__PURE__ */ new Map());
         // Map original names to transformed names
-        __publicField$8(this, "paramIdCounter", 0);
-        __publicField$8(this, "cacheIdCounter", 0);
-        __publicField$8(this, "tempVarCounter", 0);
+        __publicField$7(this, "paramIdCounter", 0);
+        __publicField$7(this, "cacheIdCounter", 0);
+        __publicField$7(this, "tempVarCounter", 0);
         this.pushScope("glb");
       }
       get nextParamIdArg() {
@@ -29842,9 +15677,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       return _wraperFunction(this);
     }
 
-    var __defProp$7 = Object.defineProperty;
-    var __defNormalProp$7 = (obj, key, value) => key in obj ? __defProp$7(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$7 = (obj, key, value) => __defNormalProp$7(obj, typeof key !== "symbol" ? key + "" : key, value);
+    var __defProp$6 = Object.defineProperty;
+    var __defNormalProp$6 = (obj, key, value) => key in obj ? __defProp$6(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$6 = (obj, key, value) => __defNormalProp$6(obj, typeof key !== "symbol" ? key + "" : key, value);
     class PineTS {
       constructor(source, tickerId, timeframe, limit, sDate, eDate) {
         this.source = source;
@@ -29853,25 +15688,25 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         this.limit = limit;
         this.sDate = sDate;
         this.eDate = eDate;
-        __publicField$7(this, "data", []);
+        __publicField$6(this, "data", []);
         //#region [Pine Script built-in variables]
-        __publicField$7(this, "open", []);
-        __publicField$7(this, "high", []);
-        __publicField$7(this, "low", []);
-        __publicField$7(this, "close", []);
-        __publicField$7(this, "volume", []);
-        __publicField$7(this, "hl2", []);
-        __publicField$7(this, "hlc3", []);
-        __publicField$7(this, "ohlc4", []);
-        __publicField$7(this, "openTime", []);
-        __publicField$7(this, "closeTime", []);
+        __publicField$6(this, "open", []);
+        __publicField$6(this, "high", []);
+        __publicField$6(this, "low", []);
+        __publicField$6(this, "close", []);
+        __publicField$6(this, "volume", []);
+        __publicField$6(this, "hl2", []);
+        __publicField$6(this, "hlc3", []);
+        __publicField$6(this, "ohlc4", []);
+        __publicField$6(this, "openTime", []);
+        __publicField$6(this, "closeTime", []);
         //#endregion
         //#region run context
-        __publicField$7(this, "_periods");
+        __publicField$6(this, "_periods");
         //#endregion
         //public fn: Function;
-        __publicField$7(this, "_readyPromise", null);
-        __publicField$7(this, "_ready", false);
+        __publicField$6(this, "_readyPromise", null);
+        __publicField$6(this, "_ready", false);
         this._readyPromise = new Promise((resolve) => {
           this.loadMarketData(source, tickerId, timeframe, limit, sDate, eDate).then((data) => {
             const marketData = data.reverse();
@@ -29977,13 +15812,13 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
     }
 
-    var __defProp$6 = Object.defineProperty;
-    var __defNormalProp$6 = (obj, key, value) => key in obj ? __defProp$6(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$6 = (obj, key, value) => __defNormalProp$6(obj, key + "" , value);
+    var __defProp$5 = Object.defineProperty;
+    var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, key + "" , value);
     class Core {
       constructor(context) {
         this.context = context;
-        __publicField$6(this, "color", {
+        __publicField$5(this, "color", {
           param: (source, index = 0) => {
             if (Array.isArray(source)) {
               return source[index];
@@ -30109,13 +15944,13 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
     }
 
-    var __defProp$5 = Object.defineProperty;
-    var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, key + "" , value);
+    var __defProp$4 = Object.defineProperty;
+    var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, key + "" , value);
     class PineMath {
       constructor(context) {
         this.context = context;
-        __publicField$5(this, "_cache", {});
+        __publicField$4(this, "_cache", {});
       }
       param(source, index, name) {
         if (!this.context.params[name]) this.context.params[name] = [];
@@ -30206,14 +16041,14 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
     }
 
-    var __defProp$4 = Object.defineProperty;
-    var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, key + "" , value);
+    var __defProp$3 = Object.defineProperty;
+    var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, key + "" , value);
     const TIMEFRAMES = ["1", "3", "5", "15", "30", "45", "60", "120", "180", "240", "D", "W", "M"];
     class PineRequest {
       constructor(context) {
         this.context = context;
-        __publicField$4(this, "_cache", {});
+        __publicField$3(this, "_cache", {});
       }
       param(source, index, name) {
         if (!this.context.params[name]) this.context.params[name] = [];
@@ -30771,9 +16606,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       return [supertrend, direction];
     }
 
-    var __defProp$3 = Object.defineProperty;
-    var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, key + "" , value);
+    var __defProp$2 = Object.defineProperty;
+    var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, key + "" , value);
     class PineArrayObject {
       constructor(array) {
         this.array = array;
@@ -30782,7 +16617,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
     class PineArray {
       constructor(context) {
         this.context = context;
-        __publicField$3(this, "_cache", {});
+        __publicField$2(this, "_cache", {});
       }
       param(source, index = 0) {
         if (Array.isArray(source)) {
@@ -30963,9 +16798,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
     }
 
-    var __defProp$2 = Object.defineProperty;
-    var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, typeof key !== "symbol" ? key + "" : key, value);
+    var __defProp$1 = Object.defineProperty;
+    var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, typeof key !== "symbol" ? key + "" : key, value);
     class Context {
       constructor({
         marketData,
@@ -30976,7 +16811,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         sDate,
         eDate
       }) {
-        __publicField$2(this, "data", {
+        __publicField$1(this, "data", {
           open: [],
           high: [],
           low: [],
@@ -30986,31 +16821,31 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
           hlc3: [],
           ohlc4: []
         });
-        __publicField$2(this, "cache", {});
-        __publicField$2(this, "useTACache", false);
-        __publicField$2(this, "NA", NaN);
-        __publicField$2(this, "math");
-        __publicField$2(this, "ta");
-        __publicField$2(this, "input");
-        __publicField$2(this, "request");
-        __publicField$2(this, "array");
-        __publicField$2(this, "core");
-        __publicField$2(this, "lang");
-        __publicField$2(this, "idx", 0);
-        __publicField$2(this, "params", {});
-        __publicField$2(this, "const", {});
-        __publicField$2(this, "var", {});
-        __publicField$2(this, "let", {});
-        __publicField$2(this, "result");
-        __publicField$2(this, "plots", {});
-        __publicField$2(this, "marketData");
-        __publicField$2(this, "source");
-        __publicField$2(this, "tickerId");
-        __publicField$2(this, "timeframe", "");
-        __publicField$2(this, "limit");
-        __publicField$2(this, "sDate");
-        __publicField$2(this, "eDate");
-        __publicField$2(this, "pineTSCode");
+        __publicField$1(this, "cache", {});
+        __publicField$1(this, "useTACache", false);
+        __publicField$1(this, "NA", NaN);
+        __publicField$1(this, "math");
+        __publicField$1(this, "ta");
+        __publicField$1(this, "input");
+        __publicField$1(this, "request");
+        __publicField$1(this, "array");
+        __publicField$1(this, "core");
+        __publicField$1(this, "lang");
+        __publicField$1(this, "idx", 0);
+        __publicField$1(this, "params", {});
+        __publicField$1(this, "const", {});
+        __publicField$1(this, "var", {});
+        __publicField$1(this, "let", {});
+        __publicField$1(this, "result");
+        __publicField$1(this, "plots", {});
+        __publicField$1(this, "marketData");
+        __publicField$1(this, "source");
+        __publicField$1(this, "tickerId");
+        __publicField$1(this, "timeframe", "");
+        __publicField$1(this, "limit");
+        __publicField$1(this, "sDate");
+        __publicField$1(this, "eDate");
+        __publicField$1(this, "pineTSCode");
         this.marketData = marketData;
         this.source = source;
         this.tickerId = tickerId;
@@ -31096,9 +16931,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       //#endregion
     }
 
-    var __defProp$1 = Object.defineProperty;
-    var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, typeof key !== "symbol" ? key + "" : key, value);
+    var __defProp = Object.defineProperty;
+    var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
     const BINANCE_API_URL = "https://api.binance.com/api/v3";
     const timeframe_to_binance = {
       "1": "1m",
@@ -31136,10 +16971,10 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       M: "1M"
       // 1 month
     };
-    class CacheManager$1 {
+    class CacheManager {
       constructor(cacheDuration = 5 * 60 * 1e3) {
-        __publicField$1(this, "cache");
-        __publicField$1(this, "cacheDuration");
+        __publicField(this, "cache");
+        __publicField(this, "cacheDuration");
         this.cache = /* @__PURE__ */ new Map();
         this.cacheDuration = cacheDuration;
       }
@@ -31178,8 +17013,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
     }
     class BinanceProvider {
       constructor() {
-        __publicField$1(this, "cacheManager");
-        this.cacheManager = new CacheManager$1(5 * 60 * 1e3);
+        __publicField(this, "cacheManager");
+        this.cacheManager = new CacheManager(5 * 60 * 1e3);
       }
       async getMarketDataInterval(tickerId, timeframe, sDate, eDate) {
         try {
@@ -31288,128 +17123,34 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
       }
     }
 
-    var __defProp = Object.defineProperty;
-    var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-    var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-    class CacheManager {
-      constructor(cacheDuration = 5 * 60 * 1e3) {
-        __publicField(this, "cache");
-        __publicField(this, "cacheDuration");
-        this.cache = /* @__PURE__ */ new Map();
-        this.cacheDuration = cacheDuration;
-      }
-      generateKey(params) {
-        return Object.entries(params).filter(([_, value]) => value !== void 0).map(([key, value]) => `${key}:${value}`).join("|");
-      }
-      get(params) {
-        const key = this.generateKey(params);
-        const cached = this.cache.get(key);
-        if (!cached) return null;
-        if (Date.now() - cached.timestamp > this.cacheDuration) {
-          this.cache.delete(key);
-          return null;
-        }
-        return cached.data;
-      }
-      set(params, data) {
-        const key = this.generateKey(params);
-        this.cache.set(key, {
-          data,
-          timestamp: Date.now()
-        });
-      }
-      clear() {
-        this.cache.clear();
-      }
-      /**
-       * Optional: Remove expired entries.
-       */
-      cleanup() {
-        const now = Date.now();
-        for (const [key, entry] of this.cache.entries()) {
-          if (now - entry.timestamp > this.cacheDuration) {
-            this.cache.delete(key);
-          }
-        }
-      }
-    }
-    const timeframe_to_yfinance = {
-      "1": "1m",
-      "3": "2m",
-      // Yahoo Finance doesn't support a 3-minute interval directly
-      "5": "5m",
-      "15": "15m",
-      "30": "30m",
-      "60": "1h",
-      "1H": "1h",
-      "1D": "1d",
-      "D": "1d",
-      "1W": "1wk",
-      "W": "1wk",
-      "1M": "1mo",
-      "M": "1mo"
-    };
-    class YFinanceProvider {
-      constructor() {
-        __publicField(this, "cacheManager");
-        this.cacheManager = new CacheManager(5 * 60 * 1e3);
-      }
-      /**
-       * Retrieves market data for the given ticker and timeframe.
-       *
-       * If start (sDate) and end (eDate) dates are provided, they are used to limit the data;
-       * otherwise, a default range (1 month) is used.
-       *
-       * @param tickerId - The ticker symbol (e.g., "AAPL").
-       * @param timeframe - The timeframe identifier (e.g., "1", "5", "1D").
-       * @param limit - Optional limit (ignored if sDate and eDate are provided).
-       * @param sDate - Optional start date in milliseconds.
-       * @param eDate - Optional end date in milliseconds.
-       * @returns A promise that resolves to an array of market data objects.
-       */
-      async getMarketData(tickerId, timeframe, limit, sDate, eDate) {
-        try {
-          const cacheParams = { tickerId, timeframe, limit, sDate, eDate };
-          const cachedData = this.cacheManager.get(cacheParams);
-          if (cachedData) {
-            console.log("YFinance cache hit:", tickerId, timeframe, limit, sDate, eDate);
-            return cachedData;
-          }
-          const queryOptions = {};
-          const interval = timeframe_to_yfinance[timeframe.toUpperCase()];
-          if (!interval) {
-            console.error(`Unsupported timeframe for YFinance: ${timeframe}`);
-            return [];
-          }
-          queryOptions.interval = interval;
-          if (sDate && eDate) {
-            queryOptions.period1 = Math.floor(sDate / 1e3);
-            queryOptions.period2 = Math.floor(eDate / 1e3);
-          } else {
-            queryOptions.range = "1mo";
-          }
-          const result = await yahooFinance.historical(tickerId, queryOptions);
-          const data = result.map((item) => ({
-            time: new Date(item.date).getTime(),
-            // Convert date to milliseconds
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            close: item.close,
-            volume: item.volume
-          }));
-          this.cacheManager.set(cacheParams, data);
-          return data;
-        } catch (error) {
-          console.error("Error in YFinanceProvider.getMarketData:", error);
-          return [];
-        }
-      }
-    }
+    ({
+      Binance: new BinanceProvider()
+      //TODO : add other providers (polygon, etc.)
+    });
 
-    const Provider = {
-      Binance: new BinanceProvider(),
-      yFinance: new YFinanceProvider()};
+    function convertTime(t) {
+        if (lightweightCharts.isUTCTimestamp(t))
+            return t * 1000;
+        if (lightweightCharts.isBusinessDay(t))
+            return new Date(t.year, t.month, t.day).valueOf();
+        const [year, month, day] = t.split('-').map(parseInt);
+        return new Date(year, month, day).valueOf();
+    }
+    function formattedDateAndTime(timestamp) {
+        if (!timestamp)
+            return ['', ''];
+        const dateObj = new Date(timestamp);
+        // Format date string
+        const year = dateObj.getFullYear();
+        const month = dateObj.toLocaleString('default', { month: 'short' });
+        const date = dateObj.getDate().toString().padStart(2, '0');
+        const formattedDate = `${date} ${month} ${year}`;
+        // Format time string
+        const hours = dateObj.getHours().toString().padStart(2, '0');
+        const minutes = dateObj.getMinutes().toString().padStart(2, '0');
+        const formattedTime = `${hours}:${minutes}`;
+        return [formattedDate, formattedTime];
+    }
 
     /*
      * Copyright (C) 2025 EsIstJosh
@@ -31513,21 +17254,6 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 this.executePineTS();
             };
             actionsContainer.appendChild(executeButton);
-            // Add to Chart button.
-            const addToChartButton = document.createElement("button");
-            addToChartButton.innerText = "Add to Chart";
-            Object.assign(addToChartButton.style, {
-                backgroundColor: "#2196f3",
-                color: "white",
-                border: "none",
-                padding: "5px 10px",
-                cursor: "pointer",
-            });
-            addToChartButton.onclick = () => {
-                // Call the integrated add-to-chart method.
-                this.addPineTSToChart();
-            };
-            actionsContainer.appendChild(addToChartButton);
             // Append left container (title + actions) and then the close button.
             leftContainer.appendChild(actionsContainer);
             // Create the close button.
@@ -31562,7 +17288,20 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
          */
         initializeMonaco() {
             this.editorInstance = monaco__namespace.editor.create(this.editorDiv, {
-                value: "Feature not implemented yet",
+                value: `
+/*
+ * @EsIstJosh
+ * This feature implements a variation of PineTS, source : <https://github.com/alaa-eddine/PineTS> and is 
+ * licensed under the GNU AGPL v3.0. V
+ * 
+ * Note: This file imports modules that remain under the MIT license (e.g., from the original project).
+ * The original MIT license text is included in the MIT_LICENSE file in the repository.
+ *
+ * For the full text of the GNU AGPL v3.0, see <https://www.gnu.org/licenses/agpl-3.0.html>.
+ */
+//-----------------Work in Progress, Not Functional Yet-------------------//
+
+      `,
                 language: "typescript",
                 theme: "vs-dark",
                 automaticLayout: true,
@@ -31597,21 +17336,48 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         getValue() {
             return this.editorInstance?.getValue() || "";
         }
-        /**
-         * Executes the PineTS code from the editor.
-         * It compiles the code into a function that accepts 'context', runs it via PineTS,
-         * and then adds the resulting plots to the chart using the global Handler instance.
-         */
         async executePineTS() {
             try {
-                const code = this.getValue();
-                const userCallback = new Function('context', code);
-                // Create a new PineTS instance (adjust parameters as needed).
-                const pineTS = new PineTS(Provider.yFinance, 'BTCUSDT', 'D', 100);
-                // Run the indicator code.
-                const { result, plots } = await pineTS.run(userCallback);
-                console.log("PineTS execution result:", result);
-                // Use the Handler passed via constructor.
+                const code = this.getValue(); // Code as a string from the editor.
+                // If you need to create a dynamic userCallback, you can uncomment and adapt the following lines:
+                /*
+                const userCallback = new Function(
+                    'context',
+                    `return (async () => {
+                        console.log("Received context:", context);
+                        const { close, high, low } = context.data; // import OHLCV data
+                        const { plot, plotchar, nz, color } = context.core; // import core functions
+                        const ta = context.ta; // import technical analysis namespace
+                        const math = context.math; // import math namespace
+                        const input = context.input; // import input namespace
+                        ${code}
+                    })();`
+                ) as (context: any) => Promise<any>;
+                */
+                // Prepare data
+                const data = [...this.handler.series.data()];
+                const sDate = data[0].time;
+                const eDate = data[data.length - 1].time;
+                // Instantiate PineTS
+                const pineTS = new PineTS([...transformDataToArray([...this.handler.series.data()], [...this.handler.volumeSeries.data()])], this.handler.series.options().title, '1D', 400, convertTime(sDate), convertTime(eDate));
+                // Run your indicator exactly once
+                const { plots } = await pineTS.run((context) => {
+                    try {
+                        const { close, high, low } = context.data;
+                        const ta = context.ta;
+                        const math = context.math;
+                        const input = context.input;
+                        const { plot, plotchar, nz, color } = context.core;
+                        //-------------------------------------------------//
+                        const ema = ta.ema(close, 21);
+                        plot(ema, { color: '#ff0000', style: "line", linewidth: 2 });
+                    }
+                    catch (error) {
+                        console.error('Error inside Squeeze Momentum logic:', error);
+                    }
+                });
+                console.log(plots);
+                // Update the chart with the resulting plots
                 for (const plotName in plots) {
                     if (plots.hasOwnProperty(plotName)) {
                         addPlotToHandler(this.handler, plotName, plots[plotName]);
@@ -31619,30 +17385,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 }
             }
             catch (error) {
-                console.error("Error executing PineTS code:", error);
-            }
-        }
-        /**
-         * Adds or updates the chart series using the PineTS code from the editor.
-         * The logic is similar to executePineTS; you can modify it to update existing series if desired.
-         */
-        async addPineTSToChart() {
-            try {
-                const code = this.getValue();
-                const userCallback = new Function('context', code);
-                const pineTS = new PineTS(Provider.yFinance, 'BTCUSDT', 'D', 100);
-                const { result, plots } = await pineTS.run(userCallback);
-                console.log("PineTS run (Add to Chart) result:", result);
-                for (const plotName in plots) {
-                    if (plots.hasOwnProperty(plotName)) {
-                        // For simplicity, we're adding a new series.
-                        // You can add logic to check for an existing series and update it.
-                        addPlotToHandler(this.handler, plotName, plots[plotName]);
-                    }
-                }
-            }
-            catch (error) {
-                console.error("Error executing PineTS code (Add to Chart):", error);
+                console.error('Error executing PineTS code:', error);
             }
         }
         /**
@@ -31722,16 +17465,51 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 createdSeries = handler.createLineSeries(plotName, baseOptions);
                 break;
         }
+        const baseData = [...handler.series.data()];
         // 3) Convert PineTS data into a format Lightweight Charts expects: { time, value, color? }
         //    PineTS often uses milliseconds. Lightweight Charts expects 'time' in seconds or a Date-like object.
-        const seriesData = data.map((pt) => ({
-            time: Math.floor(pt.time / 1000), // convert ms -> seconds
+        const seriesData = data.map((pt, idx) => ({
+            time: baseData[idx].time, // convert ms -> seconds
             value: pt.value,
             // If you want per-point color, pass 'color' here. The series must support it (e.g. histogram).
             color: pt.color ?? options?.color,
         }));
         // 4) Set data on the newly created series
         createdSeries.series.setData(seriesData);
+    }
+    /**
+     * Transforms an array of data objects (each containing at least a "time" field and OHLCV values)
+     * into an array of objects with added "openTime" and "closeTime" fields.
+     * If volume is missing on an item, it attempts to use a corresponding value from volumeData.
+     *
+     * @param data Array of data objects.
+     * @param volumeData Array of volume data objects (optional).
+     * @returns An array of transformed data objects.
+     */
+    function transformDataToArray(data, volumeData = []) {
+        return data.map((item, idx) => {
+            // Parse the "time" field into a timestamp.
+            let parsedTime;
+            if (typeof item.time === "number") {
+                parsedTime = item.time;
+            }
+            else {
+                parsedTime = new Date(item.time).getTime();
+            }
+            if (isNaN(parsedTime)) {
+                console.warn(`Invalid time format: ${item.time}`);
+                return null; // Skip this item if time is invalid.
+            }
+            return {
+                ...item,
+                openTime: parsedTime,
+                closeTime: parsedTime + 86400, // 1 second (1000ms) before openTime.
+                // Parse volume; if missing, try to use volumeData.
+                volume: item.volume !== undefined
+                    ? Number(item.volume)
+                    : (volumeData[idx] !== undefined ? Number(volumeData[idx].value) : 0)
+            };
+        }).filter(item => item !== null);
     }
 
     class Menu {
@@ -31782,6 +17560,73 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.isOpen = false;
         }
     }
+    class ChartMenu {
+        makeButton;
+        div;
+        isOpen = false;
+        widget;
+        globalCallback;
+        constructor(makeButton, items, activeItem, separator, align, callbackName, globalCallback) {
+            this.makeButton = makeButton;
+            this.globalCallback = globalCallback;
+            this.div = document.createElement("div");
+            this.div.classList.add("topbar-menu");
+            // Create the main widget button with the active item.
+            this.widget = this.makeButton(activeItem + " ↓", null, separator, true, align);
+            // Initialize the menu items.
+            this.updateMenuItems(items);
+            // Toggle the dropdown on widget click.
+            this.widget.elem.addEventListener("click", () => {
+                this.isOpen = !this.isOpen;
+                if (!this.isOpen) {
+                    this.div.style.display = "none";
+                    return;
+                }
+                const rect = this.widget.elem.getBoundingClientRect();
+                this.div.style.display = "flex";
+                this.div.style.flexDirection = "column";
+                const center = rect.x + rect.width / 2;
+                this.div.style.left = center - this.div.clientWidth / 2 + "px";
+                this.div.style.top = rect.y + rect.height + "px";
+            });
+            document.body.appendChild(this.div);
+        }
+        updateMenuItems(items) {
+            this.div.innerHTML = "";
+            items.forEach(item => {
+                const button = this.makeButton(item.label, null, false, false);
+                button.elem.addEventListener("click", () => {
+                    this._clickHandler(item);
+                });
+                button.elem.style.margin = "4px 4px";
+                button.elem.style.padding = "2px 2px";
+                this.div.appendChild(button.elem);
+            });
+            // Update the main widget to show the first item's label.
+            if (items.length > 0) {
+                this.widget.elem.innerText = items[0].label + " ↓";
+            }
+        }
+        _clickHandler(item) {
+            // Update the widget text.
+            this.widget.elem.innerText = item.label + " ↓";
+            // If the item has its own callback, invoke it.
+            if (item.callback) {
+                item.callback();
+            }
+            else if (this.globalCallback) {
+                // Otherwise, fallback to the global callback if provided.
+                this.globalCallback(item.label);
+            }
+            else {
+                // Alternatively, you might call a global function:
+                window.callbackFunction(`${item.label}`);
+            }
+            // Hide the menu.
+            this.div.style.display = "none";
+            this.isOpen = false;
+        }
+    }
 
     /*
      * Portions of this file are derived from [lightweight-charts-python] and are
@@ -31811,8 +17656,12 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.left = createTopBarContainer('flex-start');
             this.right = createTopBarContainer('flex-end');
             this.codeEditor = new CodeEditor(this._handler); // ✅ Instantiate the Monaco Editor
+            this.makeChartMenu([
+                { label: "Add Series", callback: () => this.openCSVFile("add") },
+                { label: "Edit Series", callback: () => this.openCSVFile("edit") }
+            ], "Add Series", true, "left");
             // ✅ Add a button to open the editor
-            this.makeButton("()=> ƒ", true, true, "right", false, undefined, () => this.codeEditor.open());
+            this.makeButton("{}=> ƒ", true, true, "right", false, undefined, () => this.codeEditor.open());
         }
         makeSwitcher(items, defaultItem, callbackName, align = 'left') {
             const switcherElement = document.createElement('div');
@@ -31886,6 +17735,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         }
         makeMenu(items, activeItem, separator, align, callbackName) {
             return new Menu(this.makeButton.bind(this), items, activeItem, separator, align, callbackName);
+        }
+        makeChartMenu(items, activeItem, separator, align, callbackName, globalCallback) {
+            return new ChartMenu(this.makeButton.bind(this), items, activeItem, separator, align, callbackName, globalCallback);
         }
         makeButton(defaultText, separator, append = true, align = 'left', toggle = false, callbackName, callable) {
             let button = document.createElement('button');
@@ -31969,6 +17821,114 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             else
                 div.appendChild(widget);
             this._handler.reSize();
+        }
+        /**
+         * Opens a file explorer dialog to select a CSV file, parses it as JSON,
+         * verifies that it contains the required OHLCV columns, and if so, updates the chart.
+         *
+         * If mode is "edit", it updates the current series.
+         * If mode is "add", it creates a new series using createCustomOHLCSeries.
+         *
+         * @param mode "edit" or "add"
+         */
+        openCSVFile(mode) {
+            // Create an invisible file input element for CSV files.
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = ".csv";
+            input.style.display = "none";
+            input.addEventListener("change", (event) => {
+                const target = event.target;
+                if (target.files && target.files.length > 0) {
+                    const file = target.files[0];
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const csvText = e.target?.result;
+                        // Parse CSV text using our simple parser.
+                        const data = this.parseCSV(csvText);
+                        if (data.length === 0) {
+                            alert("The CSV file is empty.");
+                            return;
+                        }
+                        // Validate required OHLCV columns.
+                        const requiredColumns = ["time", "open", "high", "low", "close"];
+                        const headers = Object.keys(data[0]);
+                        const valid = requiredColumns.every((col) => headers.includes(col));
+                        if (!valid) {
+                            alert("The selected CSV does not contain all required OHLCV columns: " +
+                                requiredColumns.join(", "));
+                            return;
+                        }
+                        try {
+                            if (mode === "edit") {
+                                // Update existing series.
+                                this._handler.series.setData(data);
+                                console.log("Series data updated successfully.");
+                            }
+                            else if (mode === "add") {
+                                // Use the file's name (without extension) as the new series title.
+                                const name = file.name.replace(/\.[^/.]+$/, "");
+                                // Create a new custom OHLC series.
+                                const newSeries = this._handler.createCustomOHLCSeries(name, {});
+                                newSeries.series.setData(data);
+                                console.log("New series added successfully.");
+                            }
+                        }
+                        catch (error) {
+                            console.error("Error updating chart data:", error);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            });
+            document.body.appendChild(input);
+            input.click();
+            document.body.removeChild(input);
+        }
+        /**
+         * A minimal CSV parser that converts CSV text into an array of objects.
+         * - Assumes the first line contains headers.
+         * - If a header named "time" exists (case-insensitive), it is used as is.
+         * - Otherwise, if a header named "date" exists, it is renamed to "time".
+         * - If neither exists, the first column is assumed to be the datetime index and renamed to "time".
+         *
+         * This parser does NOT handle quoted values or embedded commas.
+         *
+         * @param csvText The CSV text to parse.
+         * @returns An array of objects representing the CSV rows.
+         */
+        parseCSV(csvText) {
+            // Split into lines, filtering out any blank lines.
+            const lines = csvText.split(/\r?\n/).filter(line => line.trim().length > 0);
+            if (lines.length === 0)
+                return [];
+            // Extract header row.
+            let headers = lines[0].split(",").map(header => header.trim());
+            // Convert headers to lowercase for comparison.
+            const lowerHeaders = headers.map(h => h.toLowerCase());
+            if (!lowerHeaders.includes("time")) {
+                if (lowerHeaders.includes("date")) {
+                    // Replace the header "date" with "time"
+                    const dateIndex = lowerHeaders.indexOf("date");
+                    headers[dateIndex] = "time";
+                }
+                else {
+                    // If neither "time" nor "date" exists, assume the first column is the datetime index.
+                    headers[0] = "time";
+                }
+            }
+            // Map each remaining line to an object.
+            const data = lines.slice(1).map(line => {
+                const values = line.split(",").map(value => value.trim());
+                const obj = {};
+                headers.forEach((header, index) => {
+                    // Attempt to convert numeric values.
+                    const num = Number(values[index]);
+                    obj[header] = isNaN(num) ? values[index] : num;
+                });
+                return obj;
+            });
+            return data;
         }
         static getClientWidth(element) {
             document.body.appendChild(element);
@@ -32158,30 +18118,6 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         const offset = centreOffset(lineBitmapWidth);
         const position = scaledPosition - offset;
         return { position, length: lineBitmapWidth };
-    }
-
-    function convertTime(t) {
-        if (lightweightCharts.isUTCTimestamp(t))
-            return t * 1000;
-        if (lightweightCharts.isBusinessDay(t))
-            return new Date(t.year, t.month, t.day).valueOf();
-        const [year, month, day] = t.split('-').map(parseInt);
-        return new Date(year, month, day).valueOf();
-    }
-    function formattedDateAndTime(timestamp) {
-        if (!timestamp)
-            return ['', ''];
-        const dateObj = new Date(timestamp);
-        // Format date string
-        const year = dateObj.getFullYear();
-        const month = dateObj.toLocaleString('default', { month: 'short' });
-        const date = dateObj.getDate().toString().padStart(2, '0');
-        const formattedDate = `${date} ${month} ${year}`;
-        // Format time string
-        const hours = dateObj.getHours().toString().padStart(2, '0');
-        const minutes = dateObj.getMinutes().toString().padStart(2, '0');
-        const formattedTime = `${hours}:${minutes}`;
-        return [formattedDate, formattedTime];
     }
 
     class TooltipCrosshairLinePaneRenderer {
@@ -32546,7 +18482,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         rgba; // [R, G, B, A]
         opacity;
         applySelection;
-        constructor(initialValue, applySelection) {
+        customColors;
+        constructor(initialValue, applySelection, customColors) {
             this.applySelection = applySelection;
             this.rgba = ColorPicker.extractRGBA(initialValue);
             this.opacity = this.rgba[3];
@@ -32554,19 +18491,118 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.container.classList.add("color-picker");
             this.container.style.display = "flex";
             this.container.style.flexDirection = "column";
-            this.container.style.width = "150px";
-            this.container.style.height = "300px";
+            this.container.style.width = "200px";
+            this.container.style.height = "350px";
             this.container.style.position = "relative"; // Ensure proper positioning for the exit button.
             // Build UI elements
             const colorGrid = this.createColorGrid();
             const opacityUI = this.createOpacityUI();
             this.exitButton = this.createExitButton(); // Create the exit button.
+            this.customColors = customColors ?? undefined;
             // Append elements to the container
             this.container.appendChild(colorGrid);
             this.container.appendChild(this.createSeparator());
+            if (this.customColors && this.customColors.length !== 0) {
+                this.createCustomColorSection();
+            }
             this.container.appendChild(this.createSeparator());
             this.container.appendChild(opacityUI);
             this.container.appendChild(this.exitButton); // Append the exit button last
+        }
+        createCustomColorSection() {
+            // Only build the custom colors section if a custom colors list is provided.
+            if (!this.customColors || this.customColors.length === 0) {
+                return null;
+            }
+            const customContainer = document.createElement("div");
+            customContainer.style.display = "flex";
+            customContainer.style.flexDirection = "column";
+            customContainer.style.alignItems = "center";
+            customContainer.style.margin = "8px 0";
+            const title = document.createElement("div");
+            title.innerText = "Custom Colors";
+            title.style.fontSize = "14px";
+            title.style.color = "white";
+            customContainer.appendChild(title);
+            // Create a container row for custom color swatches.
+            const swatchContainer = document.createElement("div");
+            swatchContainer.style.display = "flex";
+            swatchContainer.style.flexWrap = "wrap";
+            swatchContainer.style.justifyContent = "center";
+            swatchContainer.style.gap = "5px";
+            // Function to create a swatch element.
+            const createSwatch = (color) => {
+                const swatch = document.createElement("div");
+                swatch.style.width = "20px";
+                swatch.style.height = "20px";
+                swatch.style.borderRadius = "4px";
+                swatch.style.cursor = "pointer";
+                swatch.style.border = "1px solid #999";
+                swatch.style.backgroundColor = color;
+                swatch.title = color;
+                // When clicked, update the target color using this custom color.
+                swatch.addEventListener("click", () => {
+                    this.updateTargetColor();
+                });
+                return swatch;
+            };
+            // Append existing custom color swatches.
+            this.customColors.forEach((color) => {
+                swatchContainer.appendChild(createSwatch(color));
+            });
+            // Create an additional swatch for adding a new custom color.
+            const addSwatch = document.createElement("div");
+            addSwatch.style.width = "20px";
+            addSwatch.style.height = "20px";
+            addSwatch.style.borderRadius = "4px";
+            addSwatch.style.cursor = "pointer";
+            addSwatch.style.border = "1px solid #999";
+            addSwatch.style.backgroundColor = "rgba(0,0,0,0)"; // Transparent background
+            addSwatch.style.display = "flex";
+            addSwatch.style.justifyContent = "center";
+            addSwatch.style.alignItems = "center";
+            addSwatch.style.color = "#999";
+            addSwatch.style.fontSize = "16px";
+            addSwatch.innerText = "+";
+            addSwatch.title = "Add custom color";
+            addSwatch.addEventListener("click", (evt) => {
+                // Create a hidden input of type color (native color picker, often displayed as a gradient wheel)
+                const colorInput = document.createElement("input");
+                colorInput.type = "color";
+                // Optionally, set a default value (using current color)
+                colorInput.value = this.color;
+                // Hide the input element.
+                colorInput.style.position = "absolute";
+                colorInput.style.left = "-9999px";
+                document.body.appendChild(colorInput);
+                // When a color is picked:
+                colorInput.addEventListener("input", () => {
+                    this.color = colorInput.value;
+                    this.updateTargetColor();
+                    if (!this.customColors.includes(this.color)) {
+                        this.customColors.push(this.color);
+                        swatchContainer.appendChild(createSwatch(this.color));
+                        this.saveColors();
+                    }
+                    document.body.removeChild(colorInput);
+                }, { once: true });
+                // Programmatically open the native color picker.
+                colorInput.click();
+            });
+            swatchContainer.appendChild(addSwatch);
+            customContainer.appendChild(swatchContainer);
+            return customContainer;
+        }
+        saveColors() {
+            // Ensure customColors exists.
+            // Convert the updated customColors array to a pretty-printed JSON string.
+            const dataString = JSON.stringify(this.customColors, null, 2);
+            // Define the key for the saved defaults. You can use a default key such as "customColors".
+            const key = "colors";
+            // Build the message using your standard format.
+            const message = `save_defaults_${key}_~_${dataString}`;
+            // Call the global callback function to save the defaults.
+            window.callbackFunction(message);
         }
         createExitButton() {
             const button = document.createElement('div');
@@ -32700,37 +18736,58 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         openMenu(event, parentMenuWidth, // Width of the parent menu
         applySelection) {
             this.applySelection = applySelection;
-            // Attach menu to the DOM temporarily to calculate dimensions
+            // Attach menu to DOM temporarily to calculate dimensions.
             this.container.style.display = 'block';
             document.body.appendChild(this.container);
-            console.log('Menu attached:', this.container);
-            // Calculate submenu dimensions
-            const submenuWidth = this.container.offsetWidth || 150; // Default submenu width
-            const submenuHeight = this.container.offsetHeight || 250; // Default submenu height
-            console.log('Submenu dimensions:', { submenuWidth, submenuHeight });
-            // Get mouse position
+            // Calculate submenu dimensions.
+            const submenuWidth = this.container.offsetWidth || 150;
+            const submenuHeight = this.container.offsetHeight || 250;
+            // Get mouse position.
             const cursorX = event.clientX;
             const cursorY = event.clientY;
-            console.log('Mouse position:', { cursorX, cursorY });
-            // Get viewport dimensions
+            // Get viewport dimensions.
             const viewportWidth = window.innerWidth;
             const viewportHeight = window.innerHeight;
-            // Calculate position relative to the parent menu
-            let left = cursorX + parentMenuWidth; // Offset by parent menu width
+            // Calculate position relative to the parent menu.
+            let left = cursorX + parentMenuWidth;
             let top = cursorY;
-            // Adjust position to avoid overflowing viewport
+            // Adjust position to avoid overflowing viewport.
             const adjustedLeft = left + submenuWidth > viewportWidth ? cursorX - submenuWidth : left;
             const adjustedTop = top + submenuHeight > viewportHeight ? viewportHeight - submenuHeight - 10 : top;
-            console.log({ left, top, adjustedLeft, adjustedTop });
-            // Apply calculated position
             this.container.style.left = `${adjustedLeft}px`;
             this.container.style.top = `${adjustedTop}px`;
             this.container.style.display = 'flex';
             this.container.style.position = 'absolute';
-            // Ensure the exit button stays within bounds
+            // Ensure the exit button stays within bounds.
             this.exitButton.style.bottom = '5px';
             this.exitButton.style.right = '5px';
-            // Close menu when clicking outside
+            // Define the auto-close handler.
+            const onMouseMove = (e) => {
+                const rect = this.container.getBoundingClientRect();
+                // Extend the container bounds.
+                const extendedRect = {
+                    left: rect.left - submenuWidth,
+                    right: rect.right + submenuWidth,
+                    top: rect.top - submenuHeight,
+                    bottom: rect.bottom + submenuHeight,
+                };
+                if (e.clientX < extendedRect.left ||
+                    e.clientX > extendedRect.right ||
+                    e.clientY < extendedRect.top ||
+                    e.clientY > extendedRect.bottom) {
+                    this.closeMenu();
+                    document.removeEventListener('mousemove', onMouseMove);
+                }
+            };
+            // Only start auto-close tracking when the mouse is over the container.
+            this.container.addEventListener('mouseenter', () => {
+                document.addEventListener('mousemove', onMouseMove);
+            });
+            this.container.addEventListener('mouseleave', () => {
+                document.removeEventListener('mousemove', onMouseMove);
+                this.closeMenu();
+            });
+            // Also close the menu when clicking outside.
             document.addEventListener('mousedown', this._handleOutsideClick.bind(this), { once: true });
         }
         closeMenu() {
@@ -36502,12 +22559,14 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         handler;
         // Optionally, a custom color picker component reference.
         colorPicker = null;
+        _originalOpacities = {};
         /**
          * Pass in your chart handler so that the modal controls can read and update chart options.
          */
         constructor(handler) {
             this.handler = handler;
-            this.colorPicker = new ColorPicker('#000000', (color) => null);
+            const defaultColors = Array.isArray(this.handler.defaultsManager.get('colors')) ? [...this.handler.defaultsManager.get('colors')] : [];
+            this.colorPicker = new ColorPicker("#ff0000", () => null, defaultColors && defaultColors.length !== 0 ? defaultColors : undefined);
             // Create the backdrop
             this.backdrop = document.createElement("div");
             this.backdrop.style.position = "fixed";
@@ -36634,6 +22693,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                     label: "Series Colors",
                     buildContent: () => this.buildSeriesColorsTab(),
                 },
+                {
+                    id: "primitive-colors", // The main tab for color editing across *all* series
+                    label: "Primitives Colors",
+                    buildContent: () => this.buildPrimitivesTab(),
+                },
                 // Your other tabs ...
                 {
                     id: "layout-options",
@@ -36680,6 +22744,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                     cursor: "pointer",
                     borderBottom: "1px solid #3C3C3C",
                 });
+                this.buildSeriesColorsTab();
                 catBtn.addEventListener("click", () => this.switchCategory(cat.id));
                 leftNav.appendChild(catBtn);
             });
@@ -36706,6 +22771,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 this.container.style.opacity = "1";
                 this.container.style.transform = "translate(-50%, -50%) scale(1)";
             }, 10);
+            this.buildSeriesColorsTab();
         }
         close(confirmed) {
             // If “Ok” was clicked, do final logic (like saving user changes).
@@ -36751,7 +22817,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         buildLayoutOptionsTab() {
             const title = document.createElement("div");
             title.innerText = "Layout Options";
-            title.style.fontSize = "14px";
+            title.style.fontSize = "16px";
             title.style.fontWeight = "bold";
             title.style.marginBottom = "8px";
             this.contentArea.appendChild(title);
@@ -36771,7 +22837,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                     });
                 });
             }
-            else if (currentBackground && currentBackground.type === lightweightCharts.ColorType.VerticalGradient) {
+            else if (currentBackground &&
+                currentBackground.type === lightweightCharts.ColorType.VerticalGradient) {
                 // Gradient background colors
                 let topColor = currentBackground.topColor || "rgba(255,0,0,0.33)";
                 let bottomColor = currentBackground.bottomColor || "rgba(0,255,0,0.33)";
@@ -36779,7 +22846,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                     bottomColor = currentBackground.bottomColor || "rgba(0,255,0,0.33)";
                     this.handler.chart.applyOptions({
                         layout: {
-                            background: { type: lightweightCharts.ColorType.VerticalGradient, topColor: color, bottomColor },
+                            background: {
+                                type: lightweightCharts.ColorType.VerticalGradient,
+                                topColor: color,
+                                bottomColor,
+                            },
                         },
                     });
                 });
@@ -36787,7 +22858,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                     topColor = currentBackground.topColor || "rgba(255,0,0,0.33)";
                     this.handler.chart.applyOptions({
                         layout: {
-                            background: { type: lightweightCharts.ColorType.VerticalGradient, topColor, bottomColor: color },
+                            background: {
+                                type: lightweightCharts.ColorType.VerticalGradient,
+                                topColor,
+                                bottomColor: color,
+                            },
                         },
                     });
                 });
@@ -36809,7 +22884,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         buildGridOptionsTab() {
             const title = document.createElement("div");
             title.innerText = "Grid Options";
-            title.style.fontSize = "14px";
+            title.style.fontSize = "16px";
             title.style.fontWeight = "bold";
             title.style.marginBottom = "8px";
             this.contentArea.appendChild(title);
@@ -36825,11 +22900,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             });
             // 1) Build a lookup that maps the user-friendly string to the numeric enum
             const styleMapping = {
-                "Solid": lightweightCharts.LineStyle.Solid,
-                "Dotted": lightweightCharts.LineStyle.Dotted,
-                "Dashed": lightweightCharts.LineStyle.Dashed,
-                "LargeDashed": lightweightCharts.LineStyle.LargeDashed,
-                "SparseDotted": lightweightCharts.LineStyle.SparseDotted,
+                Solid: lightweightCharts.LineStyle.Solid,
+                Dotted: lightweightCharts.LineStyle.Dotted,
+                Dashed: lightweightCharts.LineStyle.Dashed,
+                LargeDashed: lightweightCharts.LineStyle.LargeDashed,
+                SparseDotted: lightweightCharts.LineStyle.SparseDotted,
             };
             // 2) When you handle the dropdown selection:
             this.addDropdown("Vertical Line Style", ["Solid", "Dashed", "Dotted", "LargeDashed"], (selected) => {
@@ -36863,43 +22938,57 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
          * Provides full customization controls for the crosshair:
          * - Mode (Normal, Magnet, Hidden)
          * - Vertical line: width, style, color, label background color
-         * - Horizontal line: style, color, label background color
+         * - Horizontal line: width, style, color, label background color
          */
         buildCrosshairOptionsTab() {
             // Create and append the title element
             const title = document.createElement("div");
             title.innerText = "Crosshair Options";
-            title.style.fontSize = "14px";
+            title.style.fontSize = "16px";
             title.style.fontWeight = "bold";
             title.style.marginBottom = "8px";
             this.contentArea.appendChild(title);
+            // Build a lookup that maps a user-friendly string to the numeric LineStyle enum.
+            const crosshairStyleMapping = {
+                Solid: lightweightCharts.LineStyle.Solid,
+                Dotted: lightweightCharts.LineStyle.Dotted,
+                Dashed: lightweightCharts.LineStyle.Dashed,
+                LargeDashed: lightweightCharts.LineStyle.LargeDashed,
+                SparseDotted: lightweightCharts.LineStyle.SparseDotted,
+            };
+            // Retrieve the current default for vertical and horizontal crosshair styles.
+            const currentCrosshairVertStyle = (this.getCurrentOptionValue("crosshair.vertLine.style") || "Solid");
+            const currentCrosshairHorzStyle = (this.getCurrentOptionValue("crosshair.horzLine.style") || "Solid");
             // -------------------------------
             // Crosshair Mode Dropdown
             // -------------------------------
             const crosshairModes = ["Normal", "Magnet", "Hidden"];
+            const currentMode = (this.getCurrentOptionValue("crosshair.mode") ||
+                "Normal");
             this.addDropdown("Crosshair Mode", crosshairModes, (selected) => {
                 this.handler.chart.applyOptions({
                     crosshair: { mode: selected },
                 });
-            });
+            }, currentMode);
             // -------------------------------
             // Vertical Crosshair Line Options
             // -------------------------------
             // Vertical line width dropdown (values 1–10)
             const widthOptions = Array.from({ length: 10 }, (_, i) => (i + 1).toString());
+            const currentVertWidth = (this.getCurrentOptionValue("crosshair.vertLine.width") || "1").toString();
             this.addDropdown("Vertical Line Width", widthOptions, (selected) => {
                 const newWidth = parseInt(selected, 10);
                 this.handler.chart.applyOptions({
                     crosshair: { vertLine: { width: newWidth } },
                 });
-            });
-            // Vertical line style dropdown.
-            const lineStyleOptions = ["Solid", "Dotted", "Dashed", "LargeDashed", "SparseDotted"];
-            this.addDropdown("Vertical Line Style", lineStyleOptions, (selected) => {
+            }, currentVertWidth);
+            // Vertical Crosshair Line Style Dropdown
+            this.addDropdown("Vertical Crosshair Line Style", ["Solid", "Dashed", "Dotted", "LargeDashed"], (selected) => {
+                const lineStyle = crosshairStyleMapping[selected];
                 this.handler.chart.applyOptions({
-                    crosshair: { vertLine: { style: selected } },
+                    crosshair: { vertLine: { style: lineStyle } },
                 });
-            });
+            }, currentCrosshairVertStyle);
             // Vertical line color picker.
             const vertLineColor = this.getCurrentOptionValue("crosshair.vertLine.color") || "#C3BCDB44";
             this.addColorPicker("Vertical Line Color", vertLineColor, (newColor) => {
@@ -36908,7 +22997,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 });
             });
             // Vertical line label background color picker.
-            const vertLabelBg = this.getCurrentOptionValue("crosshair.vertLine.labelBackgroundColor") || "#9B7DFF";
+            const vertLabelBg = this.getCurrentOptionValue("crosshair.vertLine.labelBackgroundColor") ||
+                "#9B7DFF";
             this.addColorPicker("Vertical Label Background", vertLabelBg, (newColor) => {
                 this.handler.chart.applyOptions({
                     crosshair: { vertLine: { labelBackgroundColor: newColor } },
@@ -36918,18 +23008,20 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             // Horizontal Crosshair Line Options
             // -------------------------------
             // Horizontal line width dropdown (values 1–10)
+            (this.getCurrentOptionValue("crosshair.horzLine.width") || "1").toString();
             this.addDropdown("Horizontal Line Width", widthOptions, (selected) => {
                 const newWidth = parseInt(selected, 10);
                 this.handler.chart.applyOptions({
                     crosshair: { horzLine: { width: newWidth } },
                 });
             });
-            // Horizontal line style dropdown.
-            this.addDropdown("Horizontal Line Style", lineStyleOptions, (selected) => {
+            // Horizontal Crosshair Line Style Dropdown
+            this.addDropdown("Horizontal Crosshair Line Style", ["Solid", "Dashed", "Dotted", "LargeDashed"], (selected) => {
+                const lineStyle = crosshairStyleMapping[selected];
                 this.handler.chart.applyOptions({
-                    crosshair: { horzLine: { style: selected } },
+                    crosshair: { horzLine: { style: lineStyle } },
                 });
-            });
+            }, currentCrosshairHorzStyle);
             // Horizontal line color picker.
             const horzLineColor = this.getCurrentOptionValue("crosshair.horzLine.color") || "#9B7DFF";
             this.addColorPicker("Horizontal Line Color", horzLineColor, (newColor) => {
@@ -36938,7 +23030,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 });
             });
             // Horizontal line label background color picker.
-            const horzLabelBg = this.getCurrentOptionValue("crosshair.horzLine.labelBackgroundColor") || "#9B7DFF";
+            const horzLabelBg = this.getCurrentOptionValue("crosshair.horzLine.labelBackgroundColor") ||
+                "#9B7DFF";
             this.addColorPicker("Horizontal Label Background", horzLabelBg, (newColor) => {
                 this.handler.chart.applyOptions({
                     crosshair: { horzLine: { labelBackgroundColor: newColor } },
@@ -36952,7 +23045,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         buildTimeScaleOptionsTab() {
             const title = document.createElement("div");
             title.innerText = "Time Scale Options";
-            title.style.fontSize = "14px";
+            title.style.fontSize = "16px";
             title.style.fontWeight = "bold";
             title.style.marginBottom = "8px";
             this.contentArea.appendChild(title);
@@ -36980,9 +23073,12 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.addCheckbox("Fix Right Edge", fixRightEdge, (val) => {
                 this.handler.chart.applyOptions({ timeScale: { fixRightEdge: val } });
             });
-            const lockVisibleRange = this.getCurrentOptionValue("timeScale.lockVisibleTimeRangeOnResize") || false;
+            const lockVisibleRange = this.getCurrentOptionValue("timeScale.lockVisibleTimeRangeOnResize") ||
+                false;
             this.addCheckbox("Lock Visible Range on Resize", lockVisibleRange, (val) => {
-                this.handler.chart.applyOptions({ timeScale: { lockVisibleTimeRangeOnResize: val } });
+                this.handler.chart.applyOptions({
+                    timeScale: { lockVisibleTimeRangeOnResize: val },
+                });
             });
             const visible = this.getCurrentOptionValue("timeScale.visible");
             this.addCheckbox("Time Scale Visible", visible !== false, (val) => {
@@ -36998,13 +23094,13 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             });
         }
         /**
-           * Price Scale Options Tab
-           * Provides a dropdown for mode and checkboxes for additional options.
-           */
+         * Price Scale Options Tab
+         * Provides a dropdown for mode and checkboxes for additional options.
+         */
         buildPriceScaleOptionsTab() {
             const title = document.createElement("div");
             title.innerText = "Price Scale Options";
-            title.style.fontSize = "14px";
+            title.style.fontSize = "16px";
             title.style.fontWeight = "bold";
             title.style.marginBottom = "8px";
             this.contentArea.appendChild(title);
@@ -37059,7 +23155,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.contentArea.innerHTML = "";
             const title = document.createElement("div");
             title.innerText = `Clone Series - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+            Object.assign(title.style, {
+                fontSize: "16px",
+                fontWeight: "bold",
+                marginBottom: "12px",
+            });
             this.contentArea.appendChild(title);
             // TODO: Real logic for cloning the series
             // E.g., ask user for a name, create a new series with same config, etc.
@@ -37077,7 +23177,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.contentArea.innerHTML = "";
             const title = document.createElement("div");
             title.innerText = `Visibility Options - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+            Object.assign(title.style, {
+                fontSize: "16px",
+                fontWeight: "bold",
+                marginBottom: "12px",
+            });
             this.contentArea.appendChild(title);
             // TODO: e.g., checkboxes for “visible”, “markers visible”, etc.
             const msg = document.createElement("div");
@@ -37095,7 +23199,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.contentArea.innerHTML = "";
             const title = document.createElement("div");
             title.innerText = `Style Options - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+            Object.assign(title.style, {
+                fontSize: "16px",
+                fontWeight: "bold",
+                marginBottom: "12px",
+            });
             this.contentArea.appendChild(title);
             // TODO: real style config controls
             const msg = document.createElement("div");
@@ -37111,7 +23219,11 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.contentArea.innerHTML = "";
             const title = document.createElement("div");
             title.innerText = `Width Options - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+            Object.assign(title.style, {
+                fontSize: "16px",
+                fontWeight: "bold",
+                marginBottom: "12px",
+            });
             this.contentArea.appendChild(title);
             // TODO: e.g., numeric field for line width, bar width, etc.
             const msg = document.createElement("div");
@@ -37123,45 +23235,109 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 backgroundColor: "#444",
             });
         }
-        // We can reuse your existing “Series Colors” logic or open that here
-        buildColorOptionsTab(series) {
+        /**
+         * Builds the "Primitives" tab.
+         * Iterates through each primitive in handler.primitives and, if a primitive
+         * exposes an options object (via a function, _options, or direct property),
+         * uses buildPrimitiveColorOptions to display its color controls.
+         * The changes are applied using primitive.applyOptions(newOpts).
+         */
+        /**
+         * Builds the "Primitives" tab.
+         * For each series in handler._seriesList that has a primitives array,
+         * creates a container labeled with the series title (from series.options().title)
+         * and then iterates through each primitive to build color controls.
+         * Changes are applied via primitive.applyOptions(newOpts).
+         */
+        buildPrimitivesTab() {
             this.contentArea.innerHTML = "";
+            // Main title for the tab.
             const title = document.createElement("div");
-            title.innerText = `Color Options - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
-            this.contentArea.appendChild(title);
-            // Because you already have a dedicated approach for color pickers,
-            // you could replicate or integrate that logic here
-            const msg = document.createElement("div");
-            msg.innerText = "(Color Options logic not yet implemented.)";
-            msg.style.color = "#ccc";
-            msg.style.marginBottom = "12px";
-            this.contentArea.appendChild(msg);
-            this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
-                backgroundColor: "#444",
+            title.innerText = "Primitives";
+            Object.assign(title.style, {
+                fontSize: "16px",
+                fontWeight: "bold",
+                marginBottom: "12px"
             });
-        }
-        buildPrimitivesTab(series) {
-            this.contentArea.innerHTML = "";
-            const title = document.createElement("div");
-            title.innerText = `Primitives - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
             this.contentArea.appendChild(title);
-            // e.g., shapes or overlays
-            const msg = document.createElement("div");
-            msg.innerText = "(Primitives logic not yet implemented.)";
-            msg.style.color = "#ccc";
-            msg.style.marginBottom = "12px";
-            this.contentArea.appendChild(msg);
-            this.addButton("⤝ Back", () => this.buildSeriesMenuTab(series), {
-                backgroundColor: "#444",
+            // Iterate over each series in the handler's series list.
+            this.handler._seriesList.forEach((series) => {
+                // Only process series that have a primitives array with at least one primitive.
+                if (series.primitives && Array.isArray(series.primitives) && series.primitives.length > 0) {
+                    // Get series title from series.options(). If not defined, default to "Unnamed Series".
+                    let seriesTitle = "Unnamed Series";
+                    const seriesOpts = series.options();
+                    if (seriesOpts && seriesOpts.title) {
+                        seriesTitle = seriesOpts.title;
+                    }
+                    // Create a container for this series.
+                    const seriesContainer = document.createElement("div");
+                    Object.assign(seriesContainer.style, {
+                        border: "2px solid #666",
+                        marginBottom: "12px",
+                        padding: "8px",
+                        borderRadius: "4px"
+                    });
+                    // Add a header using the series title.
+                    const seriesHeader = document.createElement("div");
+                    seriesHeader.innerText = `Series: ${seriesTitle}`;
+                    Object.assign(seriesHeader.style, {
+                        fontSize: "18px",
+                        fontWeight: "bold",
+                        marginBottom: "8px"
+                    });
+                    seriesContainer.appendChild(seriesHeader);
+                    // Process each primitive in this series.
+                    series.primitives.forEach((primitive, primitiveIndex) => {
+                        // Attempt to retrieve options from the primitive.
+                        let opts;
+                        if (typeof primitive.options === "function") {
+                            opts = primitive.options();
+                        }
+                        else if (primitive._options) {
+                            opts = primitive._options;
+                        }
+                        else if (primitive.options) {
+                            opts = primitive.options;
+                        }
+                        if (!opts)
+                            return;
+                        // Create a container for this primitive.
+                        const primitiveContainer = document.createElement("div");
+                        Object.assign(primitiveContainer.style, {
+                            border: "1px solid #444",
+                            marginBottom: "8px",
+                            padding: "8px",
+                            borderRadius: "4px"
+                        });
+                        // Header for the primitive.
+                        const primitiveHeader = document.createElement("div");
+                        primitiveHeader.innerText = `Primitive ${primitiveIndex + 1}: ${primitive.name || "Unnamed"}`;
+                        Object.assign(primitiveHeader.style, {
+                            fontSize: "16px",
+                            fontWeight: "bold",
+                            marginBottom: "6px"
+                        });
+                        primitiveContainer.appendChild(primitiveHeader);
+                        // Build color controls for the primitive.
+                        this.buildPrimitiveColorOptions(opts, primitiveContainer, (newOpts) => {
+                            primitive.applyOptions(newOpts);
+                        });
+                        seriesContainer.appendChild(primitiveContainer);
+                    });
+                    this.contentArea.appendChild(seriesContainer);
+                }
             });
         }
         buildIndicatorsTab(series) {
             this.contentArea.innerHTML = "";
             const title = document.createElement("div");
             title.innerText = `Indicators - ${series.options().title || "Untitled"}`;
-            Object.assign(title.style, { fontSize: "16px", fontWeight: "bold", marginBottom: "12px" });
+            Object.assign(title.style, {
+                fontSize: "16px",
+                fontWeight: "bold",
+                marginBottom: "12px",
+            });
             this.contentArea.appendChild(title);
             const msg = document.createElement("div");
             msg.innerText = "(Indicators logic not yet implemented.)";
@@ -37173,85 +23349,69 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             });
         }
         /**
-        * Builds a Source Code tab that displays the complete source code
-        * and provides a button to download it.
-        * Also includes links to the main project's source and your modified PineTS (AGPL) repository.
-        */
+         * Builds a Source Code tab that displays licensing information and provides
+         * links to the repositories used in this build.
+         *
+         * This project is a derivative work that incorporates components from the following repositories:
+         *
+         * Base Source Repositories:
+         *  - Lightweight Charts: <a href="https://github.com/louisnw01/lightweight-charts-python" target="_blank">louisnw01/lightweight-charts-python (MIT)</a>
+         *  - PineTS: <a href="https://github.com/alaa-eddine/PineTS" target="_blank">alaa-eddine/PineTS (AGPL)</a>
+         *
+         * Modified/Forked Repositories (by EsIstJosh):
+         *  - Lightweight Charts: <a href="https://github.com/EsIstJosh/lightweight-charts-python" target="_blank">EsIstJosh/lightweight-charts-python</a>
+         *  - PineTS: <a href="https://github.com/EsIstJosh/PineTS" target="_blank">EsIstJosh/PineTS</a>
+         */
         buildSourceCodeTab() {
             // Clear the content area
             this.contentArea.innerHTML = "";
             // Title for the Source Code tab
             const title = document.createElement("div");
-            title.innerText = "Source Code";
+            title.innerText = "Source Code & Licensing";
             title.style.fontSize = "16px";
             title.style.fontWeight = "bold";
             title.style.marginBottom = "12px";
             this.contentArea.appendChild(title);
-            // Informational text
+            // Informational text explaining the derivative nature of this project.
             const info = document.createElement("div");
-            info.innerText = "Below is the complete source code for this project. You can also view the repositories:";
             info.style.marginBottom = "12px";
+            info.style.fontSize = "16px";
+            info.innerHTML = `
+    <p>
+      This project is a derivative work that incorporates components from the following repositories:
+    </p>
+    <p>
+      <strong>Base Source Repositories:</strong>
+    </p>
+    <ul>
+      <li>
+        <a href="https://github.com/louisnw01/lightweight-charts-python" target="_blank" style="color:#008CBA; text-decoration:underline;">
+          louisnw01/lightweight-charts-python (MIT)
+        </a>
+      </li>
+      <li>
+        <a href="https://github.com/alaa-eddine/PineTS" target="_blank" style="color:#008CBA; text-decoration:underline;">
+          alaa-eddine/PineTS (AGPL)
+        </a>
+      </li>
+    </ul>
+    <p>
+      <strong>Modified/Forked Repositories (by EsIstJosh):</strong>
+    </p>
+    <ul>
+      <li>
+        <a href="https://github.com/EsIstJosh/lightweight-charts-python" target="_blank" style="color:#5eb623; text-decoration:underline;">
+          EsIstJosh/lightweight-charts-python
+        </a>
+      </li>
+      <li>
+        <a href="https://github.com/EsIstJosh/PineTS" target="_blank" style="color:#5eb623; text-decoration:underline;">
+          EsIstJosh/PineTS
+        </a>
+      </li>
+    </ul>
+  `;
             this.contentArea.appendChild(info);
-            // Links container
-            const linksContainer = document.createElement("div");
-            linksContainer.style.marginBottom = "12px";
-            linksContainer.style.fontSize = "14px";
-            // Main project link
-            const mainProjectLink = document.createElement("a");
-            mainProjectLink.href = "https://github.com/EsIstJosh/lightweight-charts-python/tree/main";
-            mainProjectLink.target = "_blank";
-            mainProjectLink.style.color = "#008CBA";
-            mainProjectLink.style.textDecoration = "underline";
-            mainProjectLink.innerText = "Main Project Source";
-            // Separator text
-            const separator = document.createTextNode(" | ");
-            // Modified PineTS link (AGPL)
-            const pineTSLink = document.createElement("a");
-            pineTSLink.href = "https://github.com/EsIstJosh/PineTS";
-            pineTSLink.target = "_blank";
-            pineTSLink.style.color = "#008CBA";
-            pineTSLink.style.textDecoration = "underline";
-            pineTSLink.innerText = "Modified PineTS Source (AGPL)";
-            // Append links to the container
-            linksContainer.appendChild(mainProjectLink);
-            linksContainer.appendChild(separator);
-            linksContainer.appendChild(pineTSLink);
-            this.contentArea.appendChild(linksContainer);
-            // Create a textarea for displaying source code (replace placeholder with actual source code if available)
-            const textarea = document.createElement("textarea");
-            textarea.style.width = "100%";
-            textarea.style.height = "400px";
-            textarea.style.backgroundColor = "#444";
-            textarea.style.color = "#fff";
-            textarea.style.border = "1px solid #555";
-            textarea.style.borderRadius = "4px";
-            textarea.style.resize = "vertical";
-            textarea.value = "/* Insert your complete source code here... */";
-            this.contentArea.appendChild(textarea);
-            // Download button to save the source code as a file
-            const downloadBtn = document.createElement("button");
-            downloadBtn.innerText = "Download Source Code";
-            Object.assign(downloadBtn.style, {
-                padding: "8px 12px",
-                backgroundColor: "#008CBA",
-                color: "#fff",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-                marginTop: "12px",
-            });
-            downloadBtn.onclick = () => {
-                const blob = new Blob([textarea.value], { type: "text/plain;charset=utf-8" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "source-code.txt";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            };
-            this.contentArea.appendChild(downloadBtn);
             // Back button to return to the default category (for example, the first category)
             this.addButton("⤝ Back", () => this.switchCategory(this.categories[0].id), {
                 backgroundColor: "#444",
@@ -37286,13 +23446,17 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.addButton("Width Options ▸", () => this.buildWidthOptionsTab(series));
             this.addButton("Color Options ▸", () => this.buildSeriesColorsTabSingle(series));
             this.addButton("Price Scale Options ▸", () => this.buildPriceScaleOptionsTab());
-            this.addButton("Primitives ▸", () => this.buildPrimitivesTab(series));
+            this.addButton("Primitives ▸", () => this.buildPrimitivesTab());
             this.addButton("Indicators ▸", () => this.buildIndicatorsTab(series));
             this.addButton("Export/Import Series Data ▸", () => this.buildDataExportImportTab(series));
         }
         // ─────────────────────────────────────────────────────────────
         // 3) TAB BUILDERS
         // ─────────────────────────────────────────────────────────────
+        /**
+         * "Series Colors" main tab: displays color pickers for *all* series side-by-side.
+         * This is in addition to the per-series color sub-tab accessible in “Series Menu.”
+         */
         /**
          * "Series Colors" main tab: displays color pickers for *all* series side-by-side.
          * This is in addition to the per-series color sub-tab accessible in “Series Menu.”
@@ -37320,6 +23484,70 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             seriesEntries.forEach(([seriesName, series]) => {
                 this.buildSeriesColorSection(seriesName, series);
             });
+            // If a volume series exists, add a separate section for volume colors.
+            if (this.handler.volumeSeries) {
+                const container = document.createElement("div");
+                Object.assign(container.style, {
+                    border: "1px solid #444",
+                    marginBottom: "8px",
+                    padding: "8px",
+                    borderRadius: "4px",
+                });
+                // Create a header for the volume series section.
+                const header = document.createElement("div");
+                header.innerText = "Series: Volume";
+                Object.assign(header.style, {
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                    marginBottom: "6px",
+                });
+                container.appendChild(header);
+                // Explicitly reference the volume series.
+                const volumeSeries = this.handler.volumeSeries;
+                // Derive fallback colors from the base series options.
+                const defaultUpColor = (this.handler.series.options()).borderUpColor || "#00FF00";
+                const defaultDownColor = (this.handler.series.options()).borderDownColor || "#FF0000";
+                // Copy the current volume series data.
+                // Scan the volume data to find initial up/down colors.
+                let foundUpColor = this.handler.volumeUpColor;
+                let foundDownColor = this.handler.volumeDownColor;
+                const currentUpColor = foundUpColor ?? defaultUpColor;
+                const currentDownColor = foundDownColor ?? defaultDownColor;
+                // Variables to store current colors.
+                let volumeUpColor = currentUpColor;
+                let volumeDownColor = currentDownColor;
+                /**
+                 * Updates the volume series colors.
+                 * For each data point, if its volume is greater than the previous point, assign newUpColor;
+                 * otherwise, assign newDownColor.
+                 */
+                const updateVolumeColors = (newUpColor, newDownColor) => {
+                    const data = [...volumeSeries.data()];
+                    if (!data || data.length === 0) {
+                        console.warn("No volume data available to update colors.");
+                        return;
+                    }
+                    const newData = data.map((item, index) => {
+                        if (index === 0) {
+                            return { ...item, color: newUpColor };
+                        }
+                        const prevVolume = data[index - 1].value;
+                        const updatedColor = item.value > prevVolume ? newUpColor : newDownColor;
+                        return { ...item, color: updatedColor };
+                    });
+                    volumeSeries.setData(newData);
+                    this.handler.volumeUpColor = newUpColor;
+                    this.handler.volumeDownColor = newDownColor;
+                };
+                // Use addSideBySideColors to create the volume color pickers.
+                this.addSideBySideColors("Volume Colors", volumeUpColor, volumeDownColor, (upColor, downColor) => {
+                    volumeUpColor = upColor;
+                    volumeDownColor = downColor;
+                    updateVolumeColors(upColor, downColor);
+                }, container);
+                // Finally, attach container to content area
+                this.contentArea.appendChild(container);
+            }
         }
         buildSeriesColorSection(seriesName, series) {
             const container = document.createElement("div");
@@ -37332,21 +23560,23 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             const header = document.createElement("div");
             header.innerText = `Series: ${seriesName}`;
             Object.assign(header.style, {
-                fontSize: "14px",
+                fontSize: "16px",
                 fontWeight: "bold",
                 marginBottom: "6px",
             });
             container.appendChild(header);
             const seriesType = series.seriesType?.();
             // For OHLC or Candlestick-like data
-            if (seriesType === "Candlestick" || seriesType === "Bar" || seriesType === "Custom") {
+            if (seriesType === "Candlestick" ||
+                seriesType === "Bar" ||
+                seriesType === "Custom") {
                 if ("upColor" in series.options()) {
                     // Body
                     this.addSideBySideColors("Body", series.options().upColor, series.options().downColor, (upColor, downColor) => {
                         series.applyOptions({ upColor, downColor });
                     }, container);
                 }
-                if ('borderUpColor' in series.options()) {
+                if ("borderUpColor" in series.options()) {
                     // Borders
                     this.addSideBySideColors("Borders", series.options().borderUpColor, series.options().borderDownColor, (upColor, downColor) => {
                         series.applyOptions({
@@ -37414,14 +23644,16 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             });
             container.appendChild(title);
             const seriesType = series.type?.();
-            if (seriesType === "Candlestick" || seriesType === "Bar" || seriesType === "Custom") {
+            if (seriesType === "Candlestick" ||
+                seriesType === "Bar" ||
+                seriesType === "Custom") {
                 if ("upColor" in series.options()) {
                     // Body
                     this.addSideBySideColors("Body", series.options().upColor, series.options().downColor, (upColor, downColor) => {
                         series.applyOptions({ upColor, downColor });
                     }, container);
                 }
-                if ('borderUpColor' in series.options()) {
+                if ("borderUpColor" in series.options()) {
                     this.addSideBySideColors("Borders", series.options().borderUpColor, series.options().borderDownColor, (upColor, downColor) => {
                         series.applyOptions({
                             borderUpColor: upColor,
@@ -37554,7 +23786,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 this.addButton(`Edit "${key}" Defaults`, () => {
                     // We assume there's a dataMenu in your handler with openDefaultOptions(key)
                     if (this.handler.ContextMenu?.dataMenu &&
-                        typeof this.handler.ContextMenu.dataMenu.openDefaultOptions === "function") {
+                        typeof this.handler.ContextMenu.dataMenu.openDefaultOptions ===
+                            "function") {
                         this.handler.ContextMenu.dataMenu.openDefaultOptions(key);
                     }
                     else {
@@ -37583,7 +23816,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 justifyContent: "space-between",
                 marginBottom: "8px",
                 fontFamily: "sans-serif",
-                fontSize: "14px",
+                fontSize: "16px",
             });
             // Label
             const lbl = document.createElement("span");
@@ -37619,12 +23852,15 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         }
         /**
          * Adds a dropdown (select) control.
+         * @param label The label to display.
+         * @param options An array of option strings.
+         * @param onChange Callback function when the selected option changes.
+         * @param initial (Optional) The initial value to pre-select.
          */
-        addDropdown(label, options, onChange) {
+        addDropdown(label, options, onChange, initial) {
             const container = document.createElement("div");
             container.style.display = "flex";
             container.style.alignItems = "center";
-            container.style.marginBottom = "8px";
             container.style.justifyContent = "space-between";
             container.style.marginBottom = "8px";
             const lbl = document.createElement("span");
@@ -37640,8 +23876,14 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 const option = document.createElement("option");
                 option.value = opt;
                 option.innerText = opt;
+                if (initial && opt === initial) {
+                    option.selected = true;
+                }
                 select.appendChild(option);
             });
+            if (initial) {
+                select.value = initial;
+            }
             select.onchange = () => onChange(select.value);
             container.appendChild(select);
             this.contentArea.appendChild(container);
@@ -37658,7 +23900,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 borderRadius: "8px",
                 cursor: "pointer",
                 fontFamily: "sans-serif",
-                fontSize: "14px",
+                fontSize: "16px",
             });
             if (customStyle) {
                 Object.assign(button.style, customStyle);
@@ -37730,8 +23972,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             return options;
         }
         /**
-        * Toggles the chart’s background type between solid and vertical-gradient.
-        */
+         * Toggles the chart’s background type between solid and vertical-gradient.
+         */
         toggleBackgroundType() {
             // Get the current background settings
             const currentBg = this.handler.chart.options().layout?.background;
@@ -37796,8 +24038,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.buildLayoutOptionsTab();
         }
         /***********************************************************
-          * 4. Helper Methods for UI Controls
-          ***********************************************************/
+         * 4. Helper Methods for UI Controls
+         ***********************************************************/
         /** Simple function to create a text input row. */
         addTextInput(label, defaultValue, onChange) {
             const container = document.createElement("div");
@@ -37807,7 +24049,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 justifyContent: "space-between",
                 marginBottom: "8px",
                 fontFamily: "sans-serif",
-                fontSize: "14px",
+                fontSize: "16px",
             });
             const lbl = document.createElement("span");
             lbl.innerText = label;
@@ -37827,9 +24069,13 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             container.appendChild(input);
             this.contentArea.appendChild(container);
         }
+        // At the top of your class, add a record to store original opacities by label.
         /**
          * Adds two color swatches for “Up” and “Down” colors, plus a checkbox
-         * that toggles both to alpha=0. Uses the single ColorPicker instance.
+         * that toggles both to alpha=0 when disabled and restores the original opacity
+         * when enabled. Uses the single ColorPicker instance.
+         *
+         * The original opacity settings are stored in a class-level record, keyed by the label.
          */
         addSideBySideColors(label, defaultUpColor, defaultDownColor, onChange, parent = this.contentArea) {
             // 1) Create row container for checkbox, label, and swatches
@@ -37843,7 +24089,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             // 2) Checkbox to enable/disable alpha=0
             const enabledCheck = document.createElement("input");
             enabledCheck.type = "checkbox";
-            enabledCheck.checked = true; // Start “enabled”
+            enabledCheck.checked = !(getAlphaFromColor(defaultUpColor) === 0 && getAlphaFromColor(defaultDownColor) === 0);
             row.appendChild(enabledCheck);
             // 3) Label
             const lbl = document.createElement("span");
@@ -37860,9 +24106,13 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             // Track the “current” colors
             let currentUpColor = defaultUpColor;
             let currentDownColor = defaultDownColor;
-            // Track the “saved” real colors (we restore these if user re-checks)
-            let savedUpColor = defaultUpColor;
-            let savedDownColor = defaultDownColor;
+            // If not already stored, record the original opacities for this label.
+            if (!(label in this._originalOpacities)) {
+                this._originalOpacities[label] = {
+                    up: getAlphaFromColor(defaultUpColor) ?? 1,
+                    down: getAlphaFromColor(defaultDownColor) ?? 1,
+                };
+            }
             // 5) Create the two swatches (Up and Down)
             const upSwatch = document.createElement("div");
             Object.assign(upSwatch.style, {
@@ -37888,69 +24138,101 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             const fireChange = () => {
                 onChange(currentUpColor, currentDownColor);
             };
-            // 6) Checkbox logic: alpha=0 when unchecked, restore when checked
+            // 6) Checkbox logic: when toggled, update the colors' opacity and adjust the checkbox state.
             enabledCheck.addEventListener("change", () => {
                 if (enabledCheck.checked) {
-                    // Re-enabling -> restore saved colors
-                    currentUpColor = savedUpColor;
-                    currentDownColor = savedDownColor;
+                    // Re-enabling: restore saved colors with original opacity from our record.
+                    currentUpColor = setOpacity(currentUpColor, this._originalOpacities[label].up ?? getAlphaFromColor(defaultUpColor));
+                    currentDownColor = setOpacity(currentDownColor, this._originalOpacities[label].down ?? getAlphaFromColor(defaultDownColor));
+                    upSwatch.style.border = "1px solid #999";
+                    downSwatch.style.border = "1px solid #999";
                 }
                 else {
-                    // Disabling -> remember real colors, set alpha=0
-                    savedUpColor = currentUpColor;
-                    savedDownColor = currentDownColor;
-                    // If you want to use your setOpacity(...) function:
+                    // Disabling: save current colors, then set opacity to 0.
+                    this._originalOpacities[label].up = getAlphaFromColor(currentUpColor);
+                    this._originalOpacities[label].down = getAlphaFromColor(currentDownColor);
                     currentUpColor = setOpacity(currentUpColor, 0);
                     currentDownColor = setOpacity(currentDownColor, 0);
-                    // Or if you'd prefer to use the colorPicker's logic, you'd replicate it here.
+                    // Remove borders when disabled.
+                    upSwatch.style.border = "0px";
+                    downSwatch.style.border = "0px";
                 }
                 upSwatch.style.backgroundColor = currentUpColor;
                 downSwatch.style.backgroundColor = currentDownColor;
+                // After the change, adjust the checkbox state based on the new opacity.
+                enabledCheck.checked = !(getAlphaFromColor(currentUpColor) === 0 &&
+                    getAlphaFromColor(currentDownColor) === 0);
                 fireChange();
             });
-            // 7) Using the single ColorPicker each time user clicks a swatch
-            //    We'll show an example for the "Up" swatch
+            // 7) Up swatch event: open color picker for up color.
             upSwatch.addEventListener("click", (evt) => {
-                // If user clicks while disabled, let's re-enable first
                 if (!enabledCheck.checked) {
                     enabledCheck.checked = true;
                     enabledCheck.dispatchEvent(new Event("change"));
-                    // triggers the logic above to restore alpha
                 }
-                // Now open the color picker with the current color
-                this.colorPicker.update(currentUpColor, (newColor) => {
-                    // Called as the user picks a color
-                    currentUpColor = newColor;
-                    upSwatch.style.backgroundColor = newColor;
-                    fireChange();
-                });
-                // Position the color picker near the swatch
-                this.colorPicker.openMenu(evt, upSwatch.offsetWidth, (finalColor) => {
-                    // "applySelection" final callback
+                this.colorPicker.openMenu(evt, upSwatch.offsetWidth + downSwatch.offsetWidth, (finalColor) => {
                     currentUpColor = finalColor;
                     upSwatch.style.backgroundColor = finalColor;
                     fireChange();
                 });
             });
-            // 8) Similarly for the "Down" swatch
+            // 8) Down swatch event: open color picker for down color.
             downSwatch.addEventListener("click", (evt) => {
                 if (!enabledCheck.checked) {
                     enabledCheck.checked = true;
                     enabledCheck.dispatchEvent(new Event("change"));
                 }
-                this.colorPicker.update(currentDownColor, (newColor) => {
-                    currentDownColor = newColor;
-                    downSwatch.style.backgroundColor = newColor;
-                    fireChange();
-                });
                 this.colorPicker.openMenu(evt, downSwatch.offsetWidth, (finalColor) => {
                     currentDownColor = finalColor;
                     downSwatch.style.backgroundColor = finalColor;
                     fireChange();
                 });
             });
-            // 9) Finally, append the row to the parent
+            // 9) Finally, append the row to the parent element.
             parent.appendChild(row);
+        }
+        /**
+         * Builds color controls for a primitive's options.
+         * It groups related color options if both keys (e.g. upColor/downColor) exist;
+         * for remaining keys that include "color", it creates a single color picker.
+         * After any change, it calls updateFn with the new options so that
+         * primitive.applyOptions() can be invoked.
+         *
+         * @param options The options object to process.
+         * @param parent The container element to which the controls are appended.
+         * @param updateFn A callback to update the primitive (typically, primitive.applyOptions(newOpts)).
+         */
+        buildPrimitiveColorOptions(options, parent, updateFn) {
+            // Define groups of related color keys.
+            const groups = {
+                "Body": ["upColor", "downColor"],
+                "Borders": ["borderUpColor", "borderDownColor"],
+                "Wick": ["wickUpColor", "wickDownColor"]
+            };
+            // Track which keys have been processed.
+            const processedKeys = new Set();
+            // Process each defined group.
+            for (const groupLabel in groups) {
+                const [key1, key2] = groups[groupLabel];
+                if (key1 in options && key2 in options) {
+                    processedKeys.add(key1);
+                    processedKeys.add(key2);
+                    this.addSideBySideColors(groupLabel, options[key1], options[key2], (upColor, downColor) => {
+                        options[key1] = upColor;
+                        options[key2] = downColor;
+                        updateFn(options);
+                    }, parent);
+                }
+            }
+            // For any remaining keys that include "color" and weren't grouped:
+            Object.keys(options).forEach((key) => {
+                if (key.toLowerCase().includes("color") && !processedKeys.has(key)) {
+                    this.addColorPicker(key, options[key], (newColor) => {
+                        options[key] = newColor;
+                        updateFn(options);
+                    }, parent);
+                }
+            });
         }
     }
     /*
@@ -37983,7 +24265,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         div;
         hoverItem;
         items = [];
-        colorPicker = new ColorPicker("#ff0000", () => null);
+        colorPicker;
         saveDrawings = null;
         drawingTool = null;
         recentSeries = null;
@@ -38002,6 +24284,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.hoverItem = null;
             document.body.addEventListener("contextmenu", this._onRightClick.bind(this));
             document.body.addEventListener("click", this._onClick.bind(this));
+            const defaultColors = Array.isArray(this.handler.defaultsManager.get('colors')) ? [...this.handler.defaultsManager.get('colors')] : [];
+            this.colorPicker = new ColorPicker("#ff0000", () => null, defaultColors && defaultColors.length !== 0 ? defaultColors : undefined);
             //this.handler.chart.subscribeCrosshairMove((param: MouseEventParams) => {
             //  this.handleCrosshairMove(param);
             //});
@@ -38075,12 +24359,9 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         }
         _onClick(ev) {
             const target = ev.target;
-            const menus = [this.colorPicker];
-            menus.forEach((menu) => {
-                if (!menu.getElement().contains(target)) {
-                    menu.closeMenu();
-                }
-            });
+            if (this.colorPicker && !this.colorPicker.getElement().contains(target)) {
+                this.colorPicker.closeMenu();
+            }
         }
         // series-context-menu.ts
         _onRightClick(event) {
@@ -39346,7 +25627,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             //);
             this.addMenuItem("Settings...", () => {
                 this.SettingsModal.open();
-            }, false);
+            }, true);
             this.showMenu(event);
         }
         populateLayoutMenu(event) {
@@ -41732,12 +28013,12 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.defaults = new Map();
         }
         /**
-          * Sets the default options for the given key.
-          * If the provided data is a JSON string, it will be parsed into an object.
-          *
-          * @param key - A string identifying the default options (e.g., "area", "line").
-          * @param data - The default options to store, either as an object or a JSON string.
-          */
+           * Sets the default options for the given key.
+           * If the provided data is a JSON string, it will be parsed into an object.
+           *
+           * @param key - A string identifying the default options (e.g., "area", "line").
+           * @param data - The default options to store, either as an object or a JSON string.
+           */
         set(key, data) {
             let parsedData;
             if (typeof data === 'string') {
@@ -41757,14 +28038,13 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             console.log(`Default options for key "${key}" set successfully.`);
             console.log(parsedData);
         }
-        /**
-         * Retrieves the default options for the given key.
-         *
-         * @param key - The key identifying the default options.
-         * @returns The default options, or undefined if not found.
-         */
         get(key) {
-            return this.defaults.get(key);
+            if (this.defaults.has(key)) {
+                return this.defaults.get(key);
+            }
+            else {
+                return null;
+            }
         }
         /**
          * Returns all stored defaults.
@@ -41789,6 +28069,8 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         precision = 2;
         series;
         volumeSeries;
+        volumeUpColor = null;
+        volumeDownColor = null;
         legend;
         _topBar;
         toolBox;
@@ -41796,6 +28078,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
         _seriesList = [];
         seriesMap = new Map();
         seriesMetadata;
+        colorPicker = null;
         // Series context menu
         ContextMenu;
         currentMouseEventParams = null;
@@ -41929,7 +28212,6 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             decorated.applyOptions({ title: "OHLC" });
             this._seriesList.push(decorated);
             this.seriesMap.set("OHLC", decorated);
-            [mergedOptions.upColor, mergedOptions.downColor];
             const legendItem = {
                 name: "OHLC",
                 series: decorated,
@@ -41941,7 +28223,7 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             this.legend.addLegendItem(legendItem);
             return decorated;
         }
-        createVolumeSeries() {
+        createVolumeSeries(pane) {
             const volumeSeries = this.chart.addSeries(lightweightCharts.HistogramSeries, {
                 color: "#26a69a",
                 priceFormat: { type: "volume" },
@@ -41950,15 +28232,21 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
             volumeSeries.priceScale().applyOptions({
                 scaleMargins: { top: 0, bottom: 0.2 },
             });
-            //volumeSeries.moveToPane(1)
+            // Optionally, move the series to the desired pane.
+            if (pane !== undefined) {
+                volumeSeries.moveToPane(pane);
+            }
             const decorated = decorateSeries(volumeSeries, this.legend);
             decorated.applyOptions({ title: "Volume" });
             return decorated;
         }
         /**
          * Creates a line series using merged options.
+         * @param name The series title.
+         * @param options Optional line series options.
+         * @param pane Optional pane index to move the series to.
          */
-        createLineSeries(name, options) {
+        createLineSeries(name, options, pane) {
             const mergedOptions = this.mergeSeriesOptions("Line", options ?? {});
             const symbol = (() => {
                 switch (mergedOptions.lineStyle) {
@@ -41982,17 +28270,23 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 name,
                 series: decorated,
                 colors: [solidColor],
-                legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
+                legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
                 seriesType: "Line",
                 group,
             };
             this.legend.addLegendItem(legendItem);
+            if (pane !== undefined) {
+                decorated.moveToPane(pane);
+            }
             return { name, series: decorated };
         }
         /**
          * Creates a histogram series using merged options.
+         * @param name The series title.
+         * @param options Optional histogram series options.
+         * @param pane Optional pane index to move the series to.
          */
-        createHistogramSeries(name, options) {
+        createHistogramSeries(name, options, pane) {
             const mergedOptions = this.mergeSeriesOptions("Histogram", options ?? {});
             const { group, legendSymbol = "▨", ...histogramOptions } = mergedOptions;
             const histogram = this.chart.addSeries(lightweightCharts.HistogramSeries, histogramOptions);
@@ -42011,12 +28305,18 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 group,
             };
             this.legend.addLegendItem(legendItem);
+            if (pane !== undefined) {
+                decorated.moveToPane(pane);
+            }
             return { name, series: decorated };
         }
         /**
          * Creates an area series using merged options.
+         * @param name The series title.
+         * @param options Optional area series options.
+         * @param pane Optional pane index to move the series to.
          */
-        createAreaSeries(name, options) {
+        createAreaSeries(name, options, pane) {
             const mergedOptions = this.mergeSeriesOptions("Area", options ?? {});
             const { group, legendSymbol = "▨", ...areaOptions } = mergedOptions;
             const area = this.chart.addSeries(lightweightCharts.AreaSeries, areaOptions);
@@ -42029,17 +28329,23 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 name,
                 series: decorated,
                 colors: [solidColor],
-                legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
+                legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
                 seriesType: "Area",
                 group,
             };
             this.legend.addLegendItem(legendItem);
+            if (pane !== undefined) {
+                decorated.moveToPane(pane);
+            }
             return { name, series: decorated };
         }
         /**
          * Creates a bar series using merged options.
+         * @param name The series title.
+         * @param options Optional bar series options.
+         * @param pane Optional pane index to move the series to.
          */
-        createBarSeries(name, options) {
+        createBarSeries(name, options, pane) {
             const mergedOptions = this.mergeSeriesOptions("Bar", options ?? {});
             const { group, legendSymbol = ['┌', '└'], ...barOptions } = mergedOptions;
             const bar = this.chart.addSeries(lightweightCharts.BarSeries, barOptions);
@@ -42053,17 +28359,23 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 name,
                 series: decorated,
                 colors: [upColor, downColor],
-                legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
+                legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
                 seriesType: "Bar",
                 group,
             };
             this.legend.addLegendItem(legendItem);
+            if (pane !== undefined) {
+                decorated.moveToPane(pane);
+            }
             return { name, series: decorated };
         }
         /**
          * Creates a custom OHLC series using merged options.
+         * @param name The series title.
+         * @param options Optional OHLC series options.
+         * @param pane Optional pane index to move the series to.
          */
-        createCustomOHLCSeries(name, options) {
+        createCustomOHLCSeries(name, options, pane) {
             // Merge built–in defaults, file defaults, and explicit options for "Ohlc"
             const base = ohlcdefaultOptions;
             const fileDefaults = this.defaultsManager.defaults.get("ohlc") || {};
@@ -42095,12 +28407,15 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
                 group,
             };
             this.legend.addLegendItem(legendItem);
-            return { name, series: ohlcCustomSeries };
+            if (pane !== undefined) {
+                decorated.moveToPane(pane);
+            }
+            return { name, series: decorated };
         }
         // /**
         //  * Creates a trade series using merged options.
         //  */
-        // createTradeSeries(name: string, options?: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
+        // createTradeSeries(name: string, options?: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApiExtended  } {
         //     const mergedoptions?: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
         //         ...tradeDefaultOptions,
         //         ...this.defaultsManager.defaults.get("trade"),
@@ -42628,5 +28943,5 @@ var Lib = (function (exports, lightweightCharts, monaco, url) {
 
     return exports;
 
-})({}, LightweightCharts, monaco, url);
+})({}, LightweightCharts, monaco);
 //# sourceMappingURL=bundle.js.map

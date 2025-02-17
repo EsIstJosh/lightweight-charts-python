@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>lightweight-charts-python</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="./lightweight-charts.js"></script>
+  <script src="./pinets.dev.es.js"></script>
   <style>
     body {
       margin: 0;
@@ -18,26 +20,19 @@
 </head>
 <body>
   <div id="container"></div>
-  <!-- Load Monaco Editor's AMD loader from the CDN -->
+  <!-- Load Monaco Editor's AMD loader -->
   <script src="https://unpkg.com/monaco-editor@latest/min/vs/loader.js"></script>
   <script>
-    // Configure the AMD loader for Monaco Editor
     require.config({ paths: { 'vs': 'https://unpkg.com/monaco-editor@latest/min/vs' }});
-    // Load Monaco's main module to ensure the global "monaco" is defined
     require(['vs/editor/editor.main'], function () {
-      var pineTSScript = document.createElement('script');
-      pineTSScript.src = './pinets.dev.es.js';
-      pineTSScript.onload = function() {
-        var bundleScript = document.createElement('script');
-        bundleScript.src = './bundle.js';
-        bundleScript.onload = function() {
-          // Optionally, signal readiness (for example, set a flag on window)
-          window.LibReady = true;
-        };
-        document.body.appendChild(bundleScript);
+      var bundleScript = document.createElement('script');
+      bundleScript.src = './bundle.js';
+      bundleScript.onload = function() {
+        window.LibReady = true;
       };
-      document.body.appendChild(pineTSScript);
+      document.body.appendChild(bundleScript);
     });
   </script>
+
 </body>
 </html>

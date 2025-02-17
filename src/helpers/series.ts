@@ -1,4 +1,4 @@
-import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData, SeriesOptions } from "lightweight-charts";
+import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData, SeriesOptions, SeriesOptionsMap } from "lightweight-charts";
 import {CandleShape } from "../ohlc-series/data";
 import { isOHLCData, isSingleValueData, isWhitespaceData } from "./typeguards";
 import { TradeData, tradeDefaultOptions, TradeSeries, TradeSeriesOptions } from "../tx-series/renderer";
@@ -6,6 +6,7 @@ import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
 import { Handler, Legend } from "../general";
 import { IndicatorDefinition } from "../indicators/indicators";
 import { DataPoint } from "../trend-trace/sequence";
+import { findColorOptions } from "./colors";
 
 
 export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
@@ -25,6 +26,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     fromJSON(json: { options?: SeriesOptions<any>; data?: [] }): void;
     _type: string;
     title: string;
+    
   }
   export function decorateSeries<T extends ISeriesApi<SeriesType>>(
     original: T,
@@ -62,6 +64,9 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
    */
   const _type: string = original.seriesType();
   const title = original.options().title;
+   // Implement a pane function that moves the series to a specified pane.
+  // We add it as a property on the decorated object.
+
 
   function sync(series: ISeriesApi<SeriesType>): void {
     // 1) Determine the type from the series’ own options
@@ -271,7 +276,7 @@ export interface SeriesOptionsExtended {
   
   export interface OhlcSeriesOptions
     extends ohlcSeriesOptions,
-        DeepPartial<SeriesOptionsExtended> {}
+        DeepPartial<SeriesOptionsExtended & SeriesOptionsExtended>  {}
     
 
 export function determineAvailableFields(series: ISeriesApi<any>|TradeSeries<any>|ohlcSeries<any>): {
@@ -359,6 +364,7 @@ export function getDefaultSeriesOptions(
         wickUpColor: "#006721",
         wickDownColor: "#6E0000",
         }
+    
     case "Ohlc":
         return {
         ...common,
@@ -565,11 +571,35 @@ export function convertDataItem(
 }
 export type SupportedSeriesType = keyof typeof SeriesTypeEnum;
 
+/**
+ * Returns true if the given dot-separated key path exists in the defaults.
+ * Special case: if the key is "color" or "lineColor", and either exists in defaults,
+ * the function returns true.
+ *
+ * @param path The dot-separated key path.
+ * @param defaults The defaults object.
+ */
+function isOptionInDefaults(path: string, defaults: Record<string, any>): boolean {
+  const keys = path.split(".");
+  let obj = defaults;
+  for (const key of keys) {
+    if (!(key in obj)) {
+      // Check the interchangeable case for color vs lineColor.
+      if ((key === "color" || key === "lineColor") && ("color" in obj || "lineColor" in obj)) {
+        return true;
+      }
+      return false;
+    }
+    obj = obj[key];
+  }
+  return true;
+}
 
 /**
  * Clones an existing series into a new series of a specified type.
  *
  * @param series - The series to clone.
+ * @param handler - The chart handler.
  * @param type - The target type for the cloned series.
  * @param options - Additional options to merge with default options.
  * @returns The cloned series, or null if cloning fails.
@@ -581,77 +611,119 @@ export function cloneSeriesAsType(
   options: any
 ): ISeriesApi<SeriesType> | null {
   try {
-      const defaultOptions = getDefaultSeriesOptions(type);
-      const mergedOptions = { ...defaultOptions, ...options };
+    // Get current series options.
+    const seriesOptions = series.options();
+    // Get default options for the specified type.
+    const defaultOptions = getDefaultSeriesOptions(type);
+    // Merge with any extra provided options.
+    const mergedOptions = { ...defaultOptions, ...options };
+    const name = series.options().title ?? type;
+    let clonedSeries: { name: string; series: ISeriesApiExtended };
+    console.log(`Cloning ${series.seriesType()} as ${type}...`);
 
-      let clonedSeries: { name: string; series: ISeriesApi<SeriesType> };
-      console.log(`Cloning ${series.seriesType()} as ${type}...`);
+    // Create the new series using the handler.
+    switch (type) {
+      case 'Line':
+        clonedSeries = handler.createLineSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        break;
+      case 'Histogram':
+        clonedSeries = handler.createHistogramSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        break;
+      case 'Area':
+        clonedSeries = handler.createAreaSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        break;
+      case 'Bar':
+        clonedSeries = handler.createBarSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        break;
+      case 'Candlestick':
+        clonedSeries = {
+          name: `${name}<${type}>`,
+          series: handler.createCandlestickSeries(),
+        };
+        break;
+      case 'Ohlc':
+        clonedSeries = handler.createCustomOHLCSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        break;
+      default:
+        console.error(`Unsupported series type: ${type}`);
+        return null;
+    }
 
-      // Create the new series using a handler pattern you already have
-      switch (type) {
-          case 'Line':
-              clonedSeries = handler.createLineSeries(type, mergedOptions);
-              break;
-          case 'Histogram':
-              clonedSeries = handler.createHistogramSeries(type, mergedOptions);
-              break;
-          case 'Area':
-              clonedSeries = handler.createAreaSeries(type, mergedOptions);
-              break;
-          case 'Bar':
-              clonedSeries = handler.createBarSeries(type, mergedOptions);
-              break;
-          case 'Candlestick':
-              clonedSeries = {
-                  name: options.name,
-                  series: handler.createCandlestickSeries(),
-              };
-              break;
-          case 'Ohlc':
-              clonedSeries = handler.createCustomOHLCSeries(type, mergedOptions);
-              break;
-          default:
-              console.error(`Unsupported series type: ${type}`);
-              return null;
+    // Convert and set data on the cloned series.
+    const originalData = series.data();
+    let transformedData = originalData
+      .map((_, i) => convertDataItem(series, type, i))
+      .filter((item) => item !== null) as any[];
+    clonedSeries.series.setData(transformedData);
+
+// Transfer color options iteratively.
+findColorOptions(seriesOptions, (fullPath, value) => {
+  // Only update the cloned series if the default options contain this key.
+  if (isOptionInDefaults(fullPath, defaultOptions)) {
+    if (fullPath === "lineColor" || fullPath === "color") {
+      // Handle the interchangeable case.
+      const hasLineColor = "lineColor" in defaultOptions || "lineColor" in mergedOptions;
+      const hasColor = "color" in defaultOptions || "color" in mergedOptions;
+      if (hasLineColor && hasColor) {
+        setOptionByPath(clonedSeries.series, "lineColor", value);
+        setOptionByPath(clonedSeries.series, "color", value);
+      } else if (hasLineColor) {
+        setOptionByPath(clonedSeries.series, "lineColor", value);
+      } else if (hasColor) {
+        setOptionByPath(clonedSeries.series, "color", value);
       }
+    } else {
+      // For any other color option, simply update the cloned series.
+      setOptionByPath(clonedSeries.series, fullPath, value);
+    }
+  }
+});
+// Iterate over all keys of mergedOptions
+(Object.keys(mergedOptions) as (keyof typeof mergedOptions)[]).forEach((key) => {
+  // Only process keys that include "color"
+  if (key.toString().toLowerCase().includes("color")) {
+    // Create a small object containing only this key/value pair
+    const optionObj = { [key]: mergedOptions[key] };
+    // Use findColorOptions to process this object
+    findColorOptions(optionObj, (fullPath, value) => {
+      console.log(`Found color option: ${fullPath} = ${value}`);
+      // Here you could call setOptionByPath or any other function as needed.
+    });
+  }
+});
 
-      // ---------------------------
-      // Use convertDataItem() to transform the existing data
-      // ---------------------------
-      const originalData = series.data();
+  
 
-      // Convert each bar in the original series
-      let transformedData = originalData
-          .map((_, i) => convertDataItem(series, type, i))
-          .filter((item) => item !== null) as any[];
+    // Subscribe to data changes on the original series to keep the clone updated.
+    series.subscribeDataChanged(() => {
+      const updatedData = series.data();
+      const newTransformed = updatedData
+        .map((_, i) => convertDataItem(series, type, i))
+        .filter((item) => item !== null) as any[];
+      clonedSeries.series.setData(newTransformed);
+      console.log(`Updated synced series of type ${type}`);
+    });
 
-      // Apply the transformed data to the newly created series
-      clonedSeries.series.setData(transformedData);
-
-      // Hide the original series
-      series.applyOptions({ visible: false });
-
-      // ---------------------------
-      // Subscribe to data changes on the original to keep the clone updated
-      // ---------------------------
-      series.subscribeDataChanged(() => {
-          const updatedData = series.data();
-
-          const newTransformed = updatedData
-              .map((_, i) => convertDataItem(series, type, i))
-              .filter((item) => item !== null) as any[];
-
-          clonedSeries.series.setData(newTransformed);
-          console.log(`Updated synced series of type ${type}`);
-      });
-
-      return clonedSeries.series;
-
+    return clonedSeries.series;
   } catch (error) {
-      console.error('Error cloning series:', error);
-      return null;
+    console.error("Error cloning series:", error);
+    return null;
   }
 }
+function setOptionByPath(target: ISeriesApi<SeriesType>, path: string, value: any): void {
+  const currentOptions = target.options();
+  const keys = path.split(".");
+  let obj: any = currentOptions; // cast to any so we can index by string
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (!(keys[i] in obj)) {
+      obj[keys[i]] = {};
+    }
+    obj = obj[keys[i]];
+  }
+  obj[keys[keys.length - 1]] = value;
+  target.applyOptions(currentOptions);
+}
+
 // series-types.ts
 export enum SeriesTypeEnum {
   Line = "Line",

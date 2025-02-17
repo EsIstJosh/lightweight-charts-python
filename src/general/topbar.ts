@@ -10,7 +10,7 @@
 import { CodeEditor } from "../pineTS/code-editor";
 import { GlobalParams } from "./global-params";
 import { Handler } from "./handler";
-import { Menu } from "./menu";
+import { ChartMenu, Menu, MenuItem } from "./menu";
 
 declare const window: GlobalParams
 
@@ -47,9 +47,20 @@ export class TopBar {
 
 
         this.codeEditor = new CodeEditor(this._handler); // ✅ Instantiate the Monaco Editor
+    
 
+        this.makeChartMenu(
+            [
+              { label: "Add Series", callback: () => this.openCSVFile("add") } as MenuItem,
+              { label: "Edit Series", callback: () => this.openCSVFile("edit") } as MenuItem
+            ],
+            "Add Series",
+            true,
+            "left",
+        )
+          
         // ✅ Add a button to open the editor
-        this.makeButton("()=> ƒ", true, true, "right", false,undefined,() =>
+        this.makeButton("{}=> ƒ", true, true, "right", false,undefined,() =>
             this.codeEditor.open()
         );
     }
@@ -132,6 +143,15 @@ export class TopBar {
     makeMenu(items: string[], activeItem: string, separator: boolean, align: 'right'|'left',callbackName?: string|null) {
         return new Menu(this.makeButton.bind(this), items, activeItem, separator, align, callbackName)
     }
+    makeChartMenu(  
+          items: MenuItem[],
+          activeItem: string,
+          separator: boolean,
+          align: 'right' | 'left',
+          callbackName?: string | null,
+          globalCallback?: (selected: string) => void) {
+            return new ChartMenu(this.makeButton.bind(this), items, activeItem, separator, align, callbackName,globalCallback)
+          }
     makeButton(
         defaultText: string,
         separator: boolean,
@@ -238,13 +258,129 @@ export class TopBar {
         } else div.appendChild(widget)
         this._handler.reSize();
     }
+    /**
+     * Opens a file explorer dialog to select a CSV file, parses it as JSON,
+     * verifies that it contains the required OHLCV columns, and if so, updates the chart.
+     * 
+     * If mode is "edit", it updates the current series.
+     * If mode is "add", it creates a new series using createCustomOHLCSeries.
+     *
+     * @param mode "edit" or "add"
+     */
+    openCSVFile(mode: "edit" | "add"): void {
+        // Create an invisible file input element for CSV files.
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".csv";
+        input.style.display = "none";
+    
+        input.addEventListener("change", (event: Event) => {
+        const target = event.target as HTMLInputElement;
+        if (target.files && target.files.length > 0) {
+            const file = target.files[0];
+            const reader = new FileReader();
+            reader.onload = (e: ProgressEvent<FileReader>) => {
+            const csvText = e.target?.result as string;
+            // Parse CSV text using our simple parser.
+            const data = this.parseCSV(csvText);
+            if (data.length === 0) {
+                alert("The CSV file is empty.");
+                return;
+            }
+            // Validate required OHLCV columns.
+            const requiredColumns = ["time", "open", "high", "low", "close"];
+            const headers = Object.keys(data[0]);
+            const valid = requiredColumns.every((col) => headers.includes(col));
+            if (!valid) {
+                alert(
+                "The selected CSV does not contain all required OHLCV columns: " +
+                    requiredColumns.join(", ")
+                );
+                return;
+            }
+            try {
+                if (mode === "edit") {
+                // Update existing series.
+                this._handler.series.setData(data);
+                console.log("Series data updated successfully.");
+                } else if (mode === "add") {
+                // Use the file's name (without extension) as the new series title.
+                const name = file.name.replace(/\.[^/.]+$/, "");
+                // Create a new custom OHLC series.
+                const newSeries = this._handler.createCustomOHLCSeries(name, {});
+                newSeries.series.setData(data);
+                console.log("New series added successfully.");
+                }
+            } catch (error) {
+                console.error("Error updating chart data:", error);
+            }
+            };
+            reader.readAsText(file);
+        }
+        });
+        document.body.appendChild(input);
+        input.click();
+        document.body.removeChild(input);
+    }
 
+    /**
+     * A minimal CSV parser that converts CSV text into an array of objects.
+     * - Assumes the first line contains headers.
+     * - If a header named "time" exists (case-insensitive), it is used as is.
+     * - Otherwise, if a header named "date" exists, it is renamed to "time".
+     * - If neither exists, the first column is assumed to be the datetime index and renamed to "time".
+     *
+     * This parser does NOT handle quoted values or embedded commas.
+     *
+     * @param csvText The CSV text to parse.
+     * @returns An array of objects representing the CSV rows.
+     */
+    private parseCSV(csvText: string): Array<any> {
+        // Split into lines, filtering out any blank lines.
+        const lines = csvText.split(/\r?\n/).filter(line => line.trim().length > 0);
+        if (lines.length === 0) return [];
+    
+        // Extract header row.
+        let headers = lines[0].split(",").map(header => header.trim());
+    
+        // Convert headers to lowercase for comparison.
+        const lowerHeaders = headers.map(h => h.toLowerCase());
+    
+        if (!lowerHeaders.includes("time")) {
+        if (lowerHeaders.includes("date")) {
+            // Replace the header "date" with "time"
+            const dateIndex = lowerHeaders.indexOf("date");
+            headers[dateIndex] = "time";
+        } else {
+            // If neither "time" nor "date" exists, assume the first column is the datetime index.
+            headers[0] = "time";
+        }
+        }
+    
+        // Map each remaining line to an object.
+        const data = lines.slice(1).map(line => {
+        const values = line.split(",").map(value => value.trim());
+        const obj: any = {};
+        headers.forEach((header, index) => {
+            // Attempt to convert numeric values.
+            const num = Number(values[index]);
+            obj[header] = isNaN(num) ? values[index] : num;
+        });
+        return obj;
+        });
+    
+        return data;
+    }
+    
     private static getClientWidth(element: HTMLElement) {
         document.body.appendChild(element);
         const width = element.clientWidth;
         document.body.removeChild(element);
         return width;
     }
+
+  
+
 }
 
 
