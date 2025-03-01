@@ -104,7 +104,7 @@ export const defaultSequenceOptions: SequenceOptions = {
     radius: 100,
     shape: 'Rounded' as CandleShape,
     chandelierSize: 1,
-    barSpacing: 0.7,
+    barSpacing: 0.8,
     lineStyle: 0,
     lineColor: '#ffffff',
     width: 1,
@@ -180,7 +180,7 @@ export class Sequence {
         this._originalData = this.series.data().map((data, index) => ({
             ...data,
             x1: index,
-            x2: index
+            x2: index+1
         }))
         } else {
             this.series =  this.handler.series || this.handler._seriesList[0];
@@ -429,7 +429,7 @@ export class Sequence {
                     low: lowPrice,
                     isUp,
                     x1: barX   + this.offset,
-                    x2: barX   + this.offset,
+                    x2: barX+ 1    + this.offset,
                     isInProgress: false,
                     originalData: {...orig, x1: index},
                     barSpacing: this._barWidth,
@@ -449,7 +449,7 @@ export class Sequence {
                     value: valuePrice,
                     isUp: undefined,
                     x1: barX  + this.offset,
-                    x2: barX  + this.offset,
+                    x2: barX +1  + this.offset,
                     isInProgress: false,
                     originalData: orig,
                     barSpacing: this._options.barSpacing ?? 0.8
@@ -485,7 +485,7 @@ export class Sequence {
             throw new Error('Bucket cannot be empty in _chandelier method.');
         }
         const aggregatedx1 = bucket[0].x1;
-        const aggregatedx2 = bucket[bucket.length -1].x2 ;
+        const aggregatedx2 =aggregatedx1 + bucket.length;
 
         // If it's an OHLC bucket:
         if (bucket[0].originalData?.open !== undefined) {

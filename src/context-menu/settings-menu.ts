@@ -50,138 +50,180 @@ export class SettingsModal {
    */
   constructor(handler: any) {
     this.handler = handler;
-    const defaultColors: string[] = Array.isArray(this.handler.defaultsManager.get('colors'))? [...this.handler.defaultsManager.get('colors')]: [];        
+    const defaultColors: string[] = Array.isArray(this.handler.defaultsManager.get('colors'))
+      ? [...this.handler.defaultsManager.get('colors')]
+      : [];
+      
     this.colorPicker = new ColorPicker(
-    "#ff0000",
-    () => null,
-    defaultColors && defaultColors.length !== 0? defaultColors:undefined 
-  );
-    // Create the backdrop
+      "#ff0000",
+      () => null,
+      defaultColors && defaultColors.length !== 0 ? defaultColors : undefined 
+    );
+
+    // BACKDROP
     this.backdrop = document.createElement("div");
-    this.backdrop.style.position = "fixed";
-    this.backdrop.style.top = "0";
-    this.backdrop.style.left = "0";
-    this.backdrop.style.width = "100%";
-    this.backdrop.style.height = "100%";
-    this.backdrop.style.backgroundColor = "rgba(0,0,0,0.5)";
-    this.backdrop.style.opacity = "0";
-    this.backdrop.style.transition = "opacity 0.3s ease";
-    this.backdrop.style.zIndex = "9998"; // behind the modal
-    this.backdrop.style.display = "none";
+    Object.assign(this.backdrop.style, {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
+      backgroundColor: "rgba(0,0,0,0.5)",
+      opacity: "0",
+      transition: "opacity 0.3s ease",
+      zIndex: "9998", // behind the modal
+      display: "none",
+    });
     this.backdrop.addEventListener("click", (e) => {
-      // If clicked outside the modal, we can close or ignore
+      // Close if user clicks outside modal
       if (e.target === this.backdrop) {
         this.close(false);
       }
     });
     document.body.appendChild(this.backdrop);
 
-    // Create the main container (the modal itself)
+    // MAIN CONTAINER (MODAL)
     this.container = document.createElement("div");
-    this.container.style.position = "fixed";
-    this.container.style.top = "50%";
-    this.container.style.left = "50%";
-    this.container.style.transform = "translate(-50%, -50%)";
-    this.container.style.width = "700px";
-    this.container.style.maxWidth = "90%";
-    this.container.style.height = "500px";
-    this.container.style.maxHeight = "90%";
-    this.container.style.backgroundColor = "#2B2B2B";
-    this.container.style.color = "#FFF";
-    this.container.style.borderRadius = "6px";
-    this.container.style.boxShadow = "0 2px 10px rgba(0,0,0,0.8)";
-    this.container.style.zIndex = "9999";
-    this.container.style.opacity = "0";
-    this.container.style.display = "none";
-    this.container.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+    Object.assign(this.container.style, {
+      position: "fixed",
+      top: "50%",
+      left: "50%",
+      transform: "translate(-50%, -50%)",
+      width: "700px",
+      maxWidth: "90%",
+      height: "500px",
+      maxHeight: "90%",
+      backgroundColor: "#1E1E1E",    // Darker background for a modern look
+      color: "#FFF",
+      borderRadius: "6px",
+      boxShadow: "0 2px 10px rgba(0,0,0,0.8)",
+      zIndex: "9999",
+      opacity: "0",
+      display: "none",
+      transition: "opacity 0.3s ease, transform 0.3s ease",
+    });
     document.body.appendChild(this.container);
 
-    // Title bar with "Settings" and a close (×) button
+    // TITLE BAR
     const titleBar = document.createElement("div");
-    titleBar.style.display = "flex";
-    titleBar.style.alignItems = "center";
-    titleBar.style.justifyContent = "space-between";
-    titleBar.style.padding = "12px 16px";
-    titleBar.style.borderBottom = "1px solid #3C3C3C";
-
+    Object.assign(titleBar.style, {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "12px 16px",
+      borderBottom: "1px solid #3C3C3C",
+      backgroundColor: "#2B2B2B", // Slightly lighter strip at the top
+    });
     const titleText = document.createElement("div");
+    Object.assign(titleText.style, {
+      fontSize: "16px",
+      fontWeight: "bold",
+    });
     titleText.innerText = "Settings";
-    titleText.style.fontSize = "16px";
-    titleText.style.fontWeight = "bold";
     titleBar.appendChild(titleText);
 
-    // “X” close button
+    // “X” CLOSE BUTTON
     const closeBtn = document.createElement("div");
+    Object.assign(closeBtn.style, {
+      fontSize: "20px",
+      cursor: "pointer",
+      userSelect: "none",
+    });
     closeBtn.innerText = "×";
-    closeBtn.style.fontSize = "20px";
-    closeBtn.style.cursor = "pointer";
     closeBtn.onclick = () => this.close(false);
     titleBar.appendChild(closeBtn);
 
     this.container.appendChild(titleBar);
 
-    // Main content area: left nav and right content panel.
+    // MAIN CONTENT (Split into left nav + right panel)
     const mainContent = document.createElement("div");
-    mainContent.style.display = "flex";
-    mainContent.style.flex = "1 1 auto";
-    mainContent.style.height = "calc(100% - 50px)"; // subtract title and bottom bar
+    Object.assign(mainContent.style, {
+      display: "flex",
+      flex: "1 1 auto",
+      height: "calc(100% - 50px)", // subtract title and bottom bar
+      backgroundColor: "#1E1E1E",
+    });
     this.container.appendChild(mainContent);
 
-    // Left navigation panel
+    // LEFT NAVIGATION
     const leftNav = document.createElement("div");
-    leftNav.style.width = "150px";
-    leftNav.style.borderRight = "1px solid #3C3C3C";
-    leftNav.style.display = "flex";
-    leftNav.style.flexDirection = "column";
+    Object.assign(leftNav.style, {
+      width: "180px",
+      borderRight: "1px solid #3C3C3C",
+      display: "flex",
+      flexDirection: "column",
+      backgroundColor: "#2B2B2B",
+    });
     mainContent.appendChild(leftNav);
 
-    // Right content panel
+    // RIGHT CONTENT PANEL
     this.contentArea = document.createElement("div");
-    this.contentArea.style.flex = "1";
-    this.contentArea.style.padding = "16px";
-    this.contentArea.style.overflowY = "auto";
+    Object.assign(this.contentArea.style, {
+      flex: "1",
+      padding: "16px",
+      overflowY: "auto",
+    });
     mainContent.appendChild(this.contentArea);
 
-    // Bottom bar with Template, Cancel, and Ok buttons.
+    // BOTTOM BAR
     const bottomBar = document.createElement("div");
-    bottomBar.style.borderTop = "1px solid #3C3C3C";
-    bottomBar.style.display = "flex";
-    bottomBar.style.alignItems = "center";
-    bottomBar.style.justifyContent = "space-between";
-    bottomBar.style.padding = "8px 12px";
+    Object.assign(bottomBar.style, {
+      borderTop: "1px solid #3C3C3C",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "8px 12px",
+      backgroundColor: "#2B2B2B",
+    });
 
+    // TEMPLATE BUTTON
     const templateBtn = document.createElement("button");
+    Object.assign(templateBtn.style, {
+      backgroundColor: "#444",
+      color: "#FFF",
+      border: "none",
+      borderRadius: "4px",
+      padding: "6px 12px",
+      cursor: "pointer",
+      fontSize: "14px",
+    });
     templateBtn.innerText = "Template ▾";
-    templateBtn.style.backgroundColor = "#444";
-    templateBtn.style.color = "#FFF";
-    templateBtn.style.border = "none";
-    templateBtn.style.borderRadius = "4px";
-    templateBtn.style.padding = "6px 12px";
     bottomBar.appendChild(templateBtn);
 
+    // RIGHT BUTTON CONTAINER
     const rightBtnContainer = document.createElement("div");
-    rightBtnContainer.style.display = "flex";
-    rightBtnContainer.style.gap = "8px";
+    Object.assign(rightBtnContainer.style, {
+      display: "flex",
+      gap: "8px",
+    });
 
+    // CANCEL BUTTON
     const cancelBtn = document.createElement("button");
+    Object.assign(cancelBtn.style, {
+      backgroundColor: "#444",
+      color: "#FFF",
+      border: "none",
+      borderRadius: "4px",
+      padding: "6px 12px",
+      cursor: "pointer",
+      fontSize: "14px",
+    });
     cancelBtn.innerText = "Cancel";
-    cancelBtn.style.backgroundColor = "#444";
-    cancelBtn.style.color = "#FFF";
-    cancelBtn.style.border = "none";
-    cancelBtn.style.borderRadius = "4px";
-    cancelBtn.style.padding = "6px 12px";
-    cancelBtn.style.cursor = "pointer";
     cancelBtn.onclick = () => this.close(false);
     rightBtnContainer.appendChild(cancelBtn);
 
+    // OK BUTTON
     const okBtn = document.createElement("button");
+    Object.assign(okBtn.style, {
+      backgroundColor: "#008CBA",
+      color: "#FFF",
+      border: "none",
+      borderRadius: "4px",
+      padding: "6px 12px",
+      cursor: "pointer",
+      fontSize: "14px",
+    });
     okBtn.innerText = "Ok";
-    okBtn.style.backgroundColor = "#008CBA";
-    okBtn.style.color = "#FFF";
-    okBtn.style.border = "none";
-    okBtn.style.borderRadius = "4px";
-    okBtn.style.padding = "6px 12px";
-    okBtn.style.cursor = "pointer";
     okBtn.onclick = () => this.close(true);
     rightBtnContainer.appendChild(okBtn);
 
@@ -193,17 +235,15 @@ export class SettingsModal {
      ***************************************/
     this.categories = [
       {
-        id: "series-colors", // The main tab for color editing across *all* series
+        id: "series-colors",
         label: "Series Colors",
         buildContent: () => this.buildSeriesColorsTab(),
       },
       {
-        id: "primitive-colors", // The main tab for color editing across *all* series
+        id: "primitive-colors",
         label: "Primitives Colors",
         buildContent: () => this.buildPrimitivesTab(),
       },
-      
-      // Your other tabs ...
       {
         id: "layout-options",
         label: "Layout Options",
@@ -241,25 +281,34 @@ export class SettingsModal {
       },
     ];
 
-    // Build the left-nav buttons
+    // Build the left-nav buttons with hover effects
     this.categories.forEach((cat) => {
       const catBtn = document.createElement("div");
       catBtn.innerText = cat.label;
       Object.assign(catBtn.style, {
-        padding: "8px 16px",
+        padding: "12px 16px",
         cursor: "pointer",
         borderBottom: "1px solid #3C3C3C",
+        userSelect: "none",
+        transition: "background-color 0.2s",
       });
-      this.buildSeriesColorsTab();
+      // Simple hover effect
+      catBtn.addEventListener("mouseenter", () => {
+        catBtn.style.backgroundColor = "#3A3A3A";
+      });
+      catBtn.addEventListener("mouseleave", () => {
+        catBtn.style.backgroundColor = "";
+      });
       catBtn.addEventListener("click", () => this.switchCategory(cat.id));
       leftNav.appendChild(catBtn);
     });
 
-    // Start with the first category active
+    // Build the first category right away
     if (this.categories.length > 0) {
+      this.buildSeriesColorsTab(); // ensure something is loaded
       this.switchCategory(this.categories[0].id);
     }
-  }
+}
 
   // ─────────────────────────────────────────────────────────────
   // 1) Show / Hide Modal

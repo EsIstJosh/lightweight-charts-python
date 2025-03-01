@@ -941,7 +941,10 @@ class Candlestick(SeriesCommon):
             top: {scale_margin_top},
             bottom: {scale_margin_bottom},
             }}
-        }})''')
+        }})
+        {self.id}.volumeUpColor = "{self._volume_up_color}";
+        {self.id}.volumeDownColor = "{self._volume_down_color}";
+         ''')
 
 class PositionPlot(SeriesCommon):
     def __init__(
@@ -1104,37 +1107,85 @@ class PositionPlot(SeriesCommon):
         return self._convert_time(last_bar_time)
 
 
-
 class AbstractChart(Candlestick, Pane):
     def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False,
-                 autosize: bool = True, position: FLOAT = 'left', defaults: str = ''):
+                 autosize: bool = True, position: FLOAT = 'left',
+                 defaults: str = './defaults', scripts: str = './scripts'):
         Pane.__init__(self, window)
 
         self._lines = []
         self._scale_candles_only = scale_candles_only
         self._width = width
         self._height = height
-        self.events: Events = Events(self)        
+        self.events: Events = Events(self)
 
         from lightweight_charts.polygon import PolygonAPI
         self.polygon: PolygonAPI = PolygonAPI(self)
 
         self.run_script(
-            f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})')
-        
+            f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})'
+        )
+
         Candlestick.__init__(self, self)
 
         self.topbar: TopBar = TopBar(self)
         if toolbox:
             self.toolbox: ToolBox = ToolBox(self)
-        if defaults != '':
+
+        # Ensure the defaults folder exists.
+        if defaults:
+            if not os.path.exists(defaults):
+                os.makedirs(defaults, exist_ok=True)
             self.defaults = defaults 
             self.set_defaults(defaults)
-            # Register the save defaults callback. (Note: using "save_defaults" instead of "save_drawings")
-            self.win.handlers[f'save_defaults'] = self._save_defaults
+            self.win.handlers['save_defaults'] = self._save_defaults
             self.events.save_defaults += self._save_defaults
 
+        # Ensure the scripts folder exists.
+        if scripts:
+            if not os.path.exists(scripts):
+                os.makedirs(scripts, exist_ok=True)
+            self.scripts = scripts
+            self.set_scripts(scripts)
+            self.win.handlers['save_script'] = self._save_script
+            self.events.save_script += self._save_script
+    def _save_script(self, key: str, options: str) -> None:
+        """
+        Callback method that receives a key and a JSON string of script options.
+        It parses the JSON and saves the resulting object in self.exportedScripts.
+        Then writes it to disk in the scripts folder. If a file named `<key>.json` already exists,
+        it is overwritten; otherwise, a new file is created.
+        
+        This method can be invoked via a JS callback similar to:
+            window.callbackFunction("save_script_<key>_~_<json_options>")
+        
+        :param key: The key under which to store the script.
+        :param options: A JSON string containing the script options.
+        """
+        try:
+            # Parse the options JSON string.
+            parsed_options = json.loads(options)
+            # Save to memory.
+            if not hasattr(self, 'exportedScripts'):
+                self.exportedScripts = {}
+            self.exportedScripts[key] = parsed_options
+            print(f"Saved script for key '{key}' in memory: {parsed_options}")
+
+            # Determine the folder to save scripts.
+            # Use self.scripts if provided; otherwise, default to a folder named "./scripts".
+            scripts_folder = self.scripts if isinstance(self.scripts, str) and self.scripts != '' else "./scripts"
+            # Ensure the folder exists.
+            if not os.path.exists(scripts_folder):
+                os.makedirs(scripts_folder)
+            # Build the file path.
+            file_path = os.path.join(scripts_folder, f"{key}.json")
+            # Write the parsed options to the file (pretty-printed).
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(parsed_options, f, indent=2)
+            print(f"Script for key '{key}' written to disk at: {file_path}")
+        except Exception as e:
+            print(f"Error saving script for key '{key}': {e}")
 
     def _save_defaults(self, key: str, options: str) -> None:
             """
@@ -1174,7 +1225,48 @@ class AbstractChart(Candlestick, Pane):
             except Exception as e:
                 print(f"Error saving defaults for key '{key}': {e}")
 
-            
+    def set_scripts(self, scripts_dir: str) -> None:
+        """
+        Recursively loads all JSON script files from the provided directory and applies them
+        to the chart's scriptsManager via run_script. In addition, if a file with key "chart"
+        is encountered, its options are applied to the chart via chart.applyOptions.
+
+        Assumes that:
+        - self has an 'id' property that is used in JS.
+        - self has a method 'run_script' that executes JS code.
+        - In the JS environment, the handler instance (referenced by self.id)
+            already has a 'scriptsManager' property with a set method,
+            and a 'chart' property with an applyOptions method.
+
+        :param scripts_dir: The directory where JSON script files reside.
+        """
+        # Recursively walk through the directory.
+        for root, dirs, files in os.walk(scripts_dir):
+            for filename in files:
+                if filename.endswith('.json'):
+                    # Use the filename (without extension) as the key.
+                    key = os.path.splitext(filename)[0]
+                    file_path = os.path.join(root, filename)
+                    try:
+                        with open(file_path, 'r', encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        print(f"Error loading {file_path}: {e}")
+                        continue
+
+                    # Convert the Python dict to a JSON string.
+                    json_data = json.dumps(data)
+                    # Construct a JS snippet to call scriptsManager.set on the chart's id.
+                    js_code = f'''
+                    {self.id}.scriptsManager.set("{key}", {json_data});
+                    '''
+                    try:
+                        # Execute the JS code in the browser/webview.
+                        self.run_script(js_code)
+                        print(f"Set script for key '{key}' successfully.")
+                    except Exception as e:
+                        print(f"Error running script for key '{key}': {e}")
+
     def set_defaults(self, defaults_dir: str) -> None:
         """
         Recursively loads all JSON default files from the provided directory and applies them

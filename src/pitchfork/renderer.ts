@@ -23,7 +23,7 @@ import { Coordinate, LineStyle } from "lightweight-charts";
 export class PitchForkPaneRenderer extends ThreePointDrawingPaneRenderer {
   private options: PitchForkOptions;
   private variant: "standard" | "schiff" | "modifiedSchiff" | "inside";
-
+  private width: number
   /**
    * Constructs a new PitchForkPaneRenderer instance.
    *
@@ -39,10 +39,12 @@ export class PitchForkPaneRenderer extends ThreePointDrawingPaneRenderer {
     p3: ViewPoint,
     options: PitchForkOptions,
     hovered: boolean,
+    width:number
   ) {
     super(p1, p2, p3, options, hovered);
     this.options = options;
     this.variant = options.variant ?? "standard";
+    this.width = width
   }
 
   /**
@@ -76,7 +78,7 @@ export class PitchForkPaneRenderer extends ThreePointDrawingPaneRenderer {
       let vx: number, vy: number; // median vector
 
       // The horizontal extension is 2× the difference between p2.x and p1.x.
-      const dxExtension: number = ((this._options as PitchForkOptions).length??1) * (x2 - x1);
+      const dxExtension: number = this.width - Math.max(this._p1.x,this._p2.x)//((this._options as PitchForkOptions).length??1) * (x2 - x1);
 
       if (this.variant === "inside") {
         // For the "inside" variant:

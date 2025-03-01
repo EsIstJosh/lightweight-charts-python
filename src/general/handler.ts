@@ -46,6 +46,7 @@ import { DefaultOptionsManager } from "./defaults";
 // Import our helper to get built–in defaults for each series type
 import { SupportedSeriesType, getDefaultSeriesOptions } from "../helpers/series";
 import { ColorPicker } from "../context-menu/color-picker_";
+import { PineScriptManager } from "./scripts";
 
 globalParamInit();
 declare const window: GlobalParams;
@@ -77,7 +78,8 @@ export class Handler {
     private _topBar: TopBar | undefined;
     public toolBox: ToolBox | undefined;
     public spinner: HTMLDivElement | undefined;
-
+    public width : number | null = null
+    public height : number | null = null
     public _seriesList: ISeriesApiExtended[] = [];
     public seriesMap: Map<string, ISeriesApiExtended> = new Map();
     public seriesMetadata: WeakMap<ISeriesApi<any>, { name: string; type: string }>;
@@ -88,7 +90,7 @@ export class Handler {
     public currentMouseEventParams: MouseEventParams<any> | null = null;
 
     public defaultsManager: DefaultOptionsManager;
-
+    public scriptsManager: PineScriptManager;
     // TODO find a better solution rather than the 'position' parameter
     constructor(
         chartId: string,
@@ -107,6 +109,7 @@ export class Handler {
         };        
         
         this.defaultsManager = new DefaultOptionsManager();
+        this.scriptsManager = new PineScriptManager()
         Handler.handlers.set(chartId, this);
 
         this.wrapper = document.createElement('div');
@@ -153,7 +156,7 @@ export class Handler {
         this.reSize();
         if (!autoSize) return;
         window.addEventListener("resize", () => this.reSize());
-
+        window.monaco = false
         // Additional MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {
             this.currentMouseEventParams = param;
@@ -164,10 +167,11 @@ export class Handler {
     reSize() {
         let topBarOffset =
             this.scale.height !== 0 ? this._topBar?._div.offsetHeight || 0 : 0;
-        this.chart.resize(
-            window.innerWidth * this.scale.width,
-            window.innerHeight * this.scale.height - topBarOffset
-        );
+        this.width =             window.innerWidth * this.scale.width
+
+        this.height =             window.innerHeight * this.scale.height - topBarOffset
+
+        this.chart.resize(this.width,this.height,true);
         this.wrapper.style.width = `${100 * this.scale.width}%`;
         this.wrapper.style.height = `${100 * this.scale.height}%`;
 
@@ -762,44 +766,51 @@ createVolumeSeries(pane?: number): ISeriesApiExtended {
     }
 
     public static makeSearchBox(chart: Handler) {
-        const searchWindow = document.createElement('div')
+        const searchWindow = document.createElement('div');
         searchWindow.classList.add('searchbox');
         searchWindow.style.display = 'none';
-
+      
         const magnifyingGlass = document.createElement('div');
-        magnifyingGlass.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24px" height="24px" viewBox="0 0 24 24" version="1.1"><path style="fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke:lightgray;stroke-opacity:1;stroke-miterlimit:4;" d="M 15 15 L 21 21 M 10 17 C 6.132812 17 3 13.867188 3 10 C 3 6.132812 6.132812 3 10 3 C 13.867188 3 17 6.132812 17 10 C 17 13.867188 13.867188 17 10 17 Z M 10 17 "/></svg>`
-
+        magnifyingGlass.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24px" height="24px" viewBox="0 0 24 24" version="1.1"><path style="fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke:lightgray;stroke-opacity:1;stroke-miterlimit:4;" d="M 15 15 L 21 21 M 10 17 C 6.132812 17 3 13.867188 3 10 C 3 6.132812 6.132812 3 10 3 C 13.867188 3 17 6.132812 17 10 C 17 13.867188 13.867188 17 10 17 Z M 10 17 "/></svg>`;
+      
         const sBox = document.createElement('input');
         sBox.type = 'text';
-
-        searchWindow.appendChild(magnifyingGlass)
-        searchWindow.appendChild(sBox)
+      
+        searchWindow.appendChild(magnifyingGlass);
+        searchWindow.appendChild(sBox);
         chart.div.appendChild(searchWindow);
-
+      
         chart.commandFunctions.push((event: KeyboardEvent) => {
-            if (window.handlerInFocus !== chart.id || window.textBoxFocused) return false
-            if (searchWindow.style.display === 'none') {
-                if (/^[a-zA-Z0-9]$/.test(event.key)) {
-                    searchWindow.style.display = 'flex';
-                    sBox.focus();
-                    return true
-                }
-                else return false
+          // Only allow if window.monaco is explicitly false.
+          if (window.monaco !== false) return false;
+          if (window.handlerInFocus !== chart.id || window.textBoxFocused) return false;
+          if (searchWindow.style.display === 'none') {
+            if (/^[a-zA-Z0-9]$/.test(event.key)) {
+              searchWindow.style.display = 'flex';
+              sBox.focus();
+              return true;
+            } else {
+              return false;
             }
-            else if (event.key === 'Enter' || event.key === 'Escape') {
-                if (event.key === 'Enter') window.callbackFunction(`search${chart.id}_~_${sBox.value}`)
-                searchWindow.style.display = 'none'
-                sBox.value = ''
-                return true
+          } else if (event.key === 'Enter' || event.key === 'Escape') {
+            if (event.key === 'Enter') {
+              window.callbackFunction(`search${chart.id}_~_${sBox.value}`);
             }
-            else return false
-        })
-        sBox.addEventListener('input', () => sBox.value = sBox.value.toUpperCase())
+            searchWindow.style.display = 'none';
+            sBox.value = '';
+            return true;
+          } else {
+            return false;
+          }
+        });
+      
+        sBox.addEventListener('input', () => sBox.value = sBox.value.toUpperCase());
         return {
-            window: searchWindow,
-            box: sBox,
-        }
-    }
+          window: searchWindow,
+          box: sBox,
+        };
+      }
+      
 
     public static makeSpinner(chart: Handler) {
         chart.spinner = document.createElement('div');
