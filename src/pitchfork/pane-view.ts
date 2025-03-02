@@ -22,13 +22,8 @@ export class PitchForkPaneView extends ThreePointDrawingPaneView {
             this._p2,
             this._p3,
             this._source._options as PitchForkOptions,
-            this._source.hovered
-
-          
-        
-            
+            this._source.hovered,
+            this._source.chart.timeScale().width()  
         )
-        
-        
-    }
+      }
     }

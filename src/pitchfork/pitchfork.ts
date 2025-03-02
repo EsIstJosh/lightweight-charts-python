@@ -108,7 +108,6 @@ export class PitchFork extends ThreePointDrawing {
   ) {
     super(p1, p2, p3, { ...defaultPitchForkOptions, ...options });
     this.variant = options?.variant || "standard";
-
     this._paneViews = [new PitchForkPaneView(this)];
   }
 

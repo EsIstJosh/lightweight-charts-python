@@ -21,10 +21,10 @@ import {
 
 import { ohlcSeriesData, BarItem, CandleShape, parseCandleShape } from './data';
 
-import { setOpacity } from '../helpers/colors';
+import { getAlphaFromColor, setOpacity } from '../helpers/colors';
 import { setLineStyle } from '../helpers/canvas-rendering';
 import { gridAndCrosshairMediaWidth } from '../helpers/dimensions/crosshair-width';
-import { ohlcRectangle, ohlcRounded, ohlcEllipse, ohlcArrow, ohlc3d, ohlcPolygon, ohlcBar } from './shapes';
+import { ohlcRectangle, ohlcRounded, ohlcEllipse, ohlcArrow, ohlc3d, ohlcPolygon, ohlcBar, ohlcSlanted } from './shapes';
 
 // -------------------------------------
 // Constants
@@ -111,53 +111,93 @@ public staticAggregate(
 	  );
 	  aggregatedBars.push(aggregatedBar);
 	}
-	// -------------------------------------
-	// Volume-based opacity adjustment
-	// -------------------------------------
-	if (this._options?.enableVolumeOpacity) {
-		// Ensure that every aggregated bar has a volume property.
-		const hasVolumeData = aggregatedBars.every(
-		(bar) => bar.volume !== undefined && typeof bar.volume === 'number'
-		);
-		if (!hasVolumeData) {
-		console.warn(
-			"Volume opacity enabled but not all aggregated bars have volume data. Skipping volume-based opacity adjustment."
-		);
-		} else {
+
+  
+  if (this._options?.enableVolumeOpacity) {
+	// Ensure every aggregated bar has a volume property
+	const hasVolumeData = aggregatedBars.every(
+	  (bar) => bar.volume !== undefined && typeof bar.volume === 'number'
+	);
+  
+	if (!hasVolumeData) {
+	  console.warn(
+		"Volume opacity enabled but not all aggregated bars have volume data. Skipping volume-based opacity adjustment."
+	  );
+	} else {
+	  // Check alpha of upColor and downColor
+	  const upColor: string = this._options?.upColor || 'rgba(0,255,0,0.333)';
+	  const downColor: string = this._options?.downColor || 'rgba(255,0,0,0.333)';
+  
+	  const upAlpha = getAlphaFromColor(upColor);
+	  const downAlpha = getAlphaFromColor(downColor);
+  
+	  // Proceed only if both alpha values are non-zero
+	  if (upAlpha !== 0 && downAlpha !== 0) {
 		// Use a base period from options or default to 20.
 		const basePeriod = this._options.volumeOpacityPeriod ?? 20;
 		// Multiply the base period by the chandelier size (groupSize).
 		const period = basePeriod * groupSize;
-
+  
 		aggregatedBars.forEach((bar, i, arr) => {
-			// Only process bars that have volume data.
-			if (bar.volume == null) { 
-			  return;
-			}
-		  
-			// Define the sliding window: the last `period` aggregated bars (or fewer if at the start).
-			const windowStart = Math.max(0, i - period + 1);
-			const windowBars = arr.slice(windowStart, i + 1);
-		  
-			// Determine the maximum volume among the bars in the window.
+		  if (bar.volume == null) {
+			return;
+		  }
+  
+		  // Define the sliding window (the last `period` bars or fewer)
+		  const windowStart = Math.max(0, i - period + 1);
+		  const windowBars = arr.slice(windowStart, i + 1);
+  
+		  // Retrieve maxOpacity from options, defaulting to 0.3 if not set
+		  const maxOpacity = this._options?.maxOpacity ?? 0.3;
+		  let opacity = 1; // Default
+  
+		  // Determine opacity based on the selected volumeOpacityMode
+		  if (this._options?.volumeOpacityMode === '/ max' || !this._options?.volumeOpacityMode) {
+			// "/ max" mode
 			const maxVolume = windowBars.reduce((max, current) => {
-			  return current.volume !== undefined && current.volume > max ? current.volume : max;
+			  return current.volume !== undefined && current.volume > max
+				? current.volume
+				: max;
 			}, 0);
-		  
-			const opacity = (maxVolume > 0 ? bar.volume / maxVolume : 1) * (this._options?.maxOpacity??0.3 / 1);
-
-			// Set the bar's color using upColor or downColor from options, applying the computed opacity.
-			if (bar.isUp) {
-			bar.color = setOpacity(this._options?.upColor || 'rgba(0,255,0,0.333)', opacity);
+			opacity = (maxVolume > 0 ? bar.volume / maxVolume : 1) * maxOpacity;
+		  } else if (this._options?.volumeOpacityMode === '> previous') {
+			// "> previous" mode
+			if (i === 0 || !arr[i - 1].volume || arr[i - 1].volume === 0) {
+			  opacity = maxOpacity;
 			} else {
-			bar.color = setOpacity(this._options?.downColor || 'rgba(255,0,0,0.333)', opacity);
+			  const previousVolume: number = arr[i - 1].volume ?? 0;
+			  opacity = bar.volume > previousVolume ? maxOpacity : 0;
 			}
+		  } else if (this._options?.volumeOpacityMode === '> average') {
+			// "> average" mode
+			const totalVolume = windowBars.reduce((sum, current) => {
+			  return sum + (current.volume !== undefined ? current.volume : 0);
+			}, 0);
+			const averageVolume =
+			  windowBars.length > 0 ? totalVolume / windowBars.length : 0;
+			opacity = averageVolume > 0 && bar.volume > averageVolume ? maxOpacity : 0;
+		  } else {
+			// Unrecognized mode => default opacity to 0
+			opacity = 0;
+		  }
+  
+		  // Set the bar's color using upColor or downColor, applying the computed opacity
+		  if (bar.isUp) {
+			bar.color = setOpacity(upColor, opacity);
+		  } else {
+			bar.color = setOpacity(downColor, opacity);
+		  }
 		});
-		}
+	  } else {
+		console.warn(
+		  "Volume opacity enabled but upColor/downColor alpha is zero. Skipping volume-based opacity adjustment."
+		);
+	  }
 	}
-
-	return aggregatedBars;
-	}
+  }
+  
+  return aggregatedBars;
+}
 	
 	public dynamicAggregate(data: BarItem[], priceToCoordinate: PriceToCoordinateConverter): BarItem[] {
 		if (
@@ -743,13 +783,23 @@ export class ohlcSeriesRenderer<
 				case "Bar":
 		ohlcBar(ctx, leftSide, rightSide, bar.high * verticalPixelRatio ,bar.low * verticalPixelRatio ,bar.open * verticalPixelRatio ,bar.close * verticalPixelRatio);
 				break;  
-				default:
+				
+				case "Slanted":
+		ohlcSlanted(
+			  ctx,
+			  leftSide,
+			  rightSide,
+			  barY,              // yCenter
+			  barVerticalSpan,   // candleHeight
+			  bar.isUp
+			);
+			break;
+
+			default:
 					// Fallback to rectangle shape if unknown shape is specified.
 					ohlcRectangle(ctx, leftSide, rightSide, barY, barVerticalSpan);
 					break;
-			}
-		}
-
+			}}
 		// Restore the canvas state after drawing.
 		ctx.restore();
 	}

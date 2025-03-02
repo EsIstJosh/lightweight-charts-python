@@ -16,7 +16,6 @@ import {
     SeriesType,
     Time,
     createChart,
-    createSeriesMarkers,
     ChartOptions
 } from "lightweight-charts";
 import { FillArea } from "../fill-area/fill-area";
@@ -42,11 +41,12 @@ import {
 
 } from "../helpers/series";
 import { ohlcSeriesOptions, ohlcdefaultOptions, ohlcSeries } from "../ohlc-series/ohlc-series";
-import { TradeSeriesOptions, tradeDefaultOptions, TradeSeries } from "../tx-series/renderer";
 import { isISeriesApi } from "../helpers/typeguards";
 import { DefaultOptionsManager } from "./defaults";
 // Import our helper to get built–in defaults for each series type
 import { SupportedSeriesType, getDefaultSeriesOptions } from "../helpers/series";
+import { ColorPicker } from "../context-menu/color-picker_";
+import { PineScriptManager } from "./scripts";
 
 globalParamInit();
 declare const window: GlobalParams;
@@ -72,23 +72,25 @@ export class Handler {
 
     public series: ISeriesApiExtended;
     public volumeSeries: ISeriesApiExtended;
-
+    public volumeUpColor: string | null = null
+    public volumeDownColor: string| null = null
     public legend: Legend;
     private _topBar: TopBar | undefined;
     public toolBox: ToolBox | undefined;
     public spinner: HTMLDivElement | undefined;
-
-    public _seriesList: ISeriesApi<SeriesType>[] = [];
+    public width : number | null = null
+    public height : number | null = null
+    public _seriesList: ISeriesApiExtended[] = [];
     public seriesMap: Map<string, ISeriesApiExtended> = new Map();
     public seriesMetadata: WeakMap<ISeriesApi<any>, { name: string; type: string }>;
-
+    public colorPicker: ColorPicker|null = null  
     // Series context menu
     public ContextMenu!: ContextMenu;
 
     public currentMouseEventParams: MouseEventParams<any> | null = null;
 
     public defaultsManager: DefaultOptionsManager;
-
+    public scriptsManager: PineScriptManager;
     // TODO find a better solution rather than the 'position' parameter
     constructor(
         chartId: string,
@@ -107,6 +109,7 @@ export class Handler {
         };        
         
         this.defaultsManager = new DefaultOptionsManager();
+        this.scriptsManager = new PineScriptManager()
         Handler.handlers.set(chartId, this);
 
         this.wrapper = document.createElement('div');
@@ -153,20 +156,22 @@ export class Handler {
         this.reSize();
         if (!autoSize) return;
         window.addEventListener("resize", () => this.reSize());
-
+        window.monaco = false
         // Additional MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {
             this.currentMouseEventParams = param;
         });
+        
+        
     }
-
     reSize() {
         let topBarOffset =
             this.scale.height !== 0 ? this._topBar?._div.offsetHeight || 0 : 0;
-        this.chart.resize(
-            window.innerWidth * this.scale.width,
-            window.innerHeight * this.scale.height - topBarOffset
-        );
+        this.width =             window.innerWidth * this.scale.width
+
+        this.height =             window.innerHeight * this.scale.height - topBarOffset
+
+        this.chart.resize(this.width,this.height,true);
         this.wrapper.style.width = `${100 * this.scale.width}%`;
         this.wrapper.style.height = `${100 * this.scale.height}%`;
 
@@ -248,8 +253,7 @@ export class Handler {
         this._seriesList.push(decorated);
         this.seriesMap.set("OHLC", decorated);
 
-        const colorsArray = [mergedOptions.upColor, mergedOptions.downColor];
-        const legendSymbol = ['⋰', '⋱'];
+
         const legendItem: LegendItem = {
             name: "OHLC",
             series: decorated,
@@ -263,236 +267,267 @@ export class Handler {
         return decorated;
     }
 
-    createVolumeSeries() {
-        const volumeSeries = this.chart.addSeries(HistogramSeries,{
-            color: "#26a69a",
-            priceFormat: { type: "volume" },
-            priceScaleId: "volume_scale",
-        });
-        volumeSeries.priceScale().applyOptions({
-            scaleMargins: { top: 0.2, bottom: 0 },
-        });
-        volumeSeries.moveToPane(1)
-
-        const decorated = decorateSeries(volumeSeries, this.legend);
-        decorated.applyOptions({ title: "Volume" });
-        return decorated;
+  
+createVolumeSeries(pane?: number): ISeriesApiExtended {
+    const volumeSeries = this.chart.addSeries(HistogramSeries, {
+      color: "#26a69a",
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume_scale",
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0, bottom: 0.2 },
+    });
+    // Optionally, move the series to the desired pane.
+    if (pane !== undefined) {
+      volumeSeries.moveToPane(pane);
     }
-    /**
-     * Creates a line series using merged options.
-     */
-    createLineSeries(name: string, options: LineSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<LineSeriesOptions>("Line", options);
-
-        const symbol = (() => {
-            switch (mergedOptions.lineStyle) {
-                case 0: return '―';
-                case 1: return ':··';
-                case 2: return '--';
-                case 3: return '- -';
-                case 4: return '· ·';
-                default: return '~';
-            }
-        })();
-
-        const { group, legendSymbol = symbol, ...lineOptions } = mergedOptions;
-        const line = this.chart.addSeries(LineSeries, lineOptions);
-
-        const decorated = decorateSeries(line, this.legend);
-        decorated.applyOptions({ title: name });
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name, decorated);
-
-        const color = decorated.options().color || "rgba(255,0,0,1)";
-        const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: [solidColor],
-            legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
-            seriesType: "Line",
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-
-        return { name, series: decorated };
+  
+    const decorated = decorateSeries(volumeSeries, this.legend);
+    decorated.applyOptions({ title: "Volume" });
+    return decorated;
+  }
+  
+  /**
+   * Creates a line series using merged options.
+   * @param name The series title.
+   * @param options Optional line series options.
+   * @param pane Optional pane index to move the series to.
+   */
+  createLineSeries(name: string, options?: Partial<LineSeriesOptions>, pane?: number): { name: string; series: ISeriesApiExtended } {
+    const mergedOptions = this.mergeSeriesOptions<LineSeriesOptions>("Line", options ?? {});
+    
+    const symbol = (() => {
+      switch (mergedOptions.lineStyle) {
+        case 0: return '―';
+        case 1: return ':··';
+        case 2: return '--';
+        case 3: return '- -';
+        case 4: return '· ·';
+        default: return '~';
+      }
+    })();
+  
+    const { group, legendSymbol = symbol, ...lineOptions } = mergedOptions;
+    const line = this.chart.addSeries(LineSeries, lineOptions);
+  
+    const decorated = decorateSeries(line, this.legend);
+    decorated.applyOptions({ title: name });
+    this._seriesList.push(decorated);
+    this.seriesMap.set(name, decorated);
+  
+    const color = decorated.options().color || "rgba(255,0,0,1)";
+    const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
+  
+    const legendItem: LegendItem = {
+      name,
+      series: decorated,
+      colors: [solidColor],
+      legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
+      seriesType: "Line",
+      group,
+    };
+  
+    this.legend.addLegendItem(legendItem);
+    if (pane !== undefined) {
+      decorated.moveToPane(pane);
     }
-
-    /**
-     * Creates a histogram series using merged options.
-     */
-    createHistogramSeries(name: string, options: HistogramSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<HistogramSeriesOptions>("Histogram", options);
-        const { group, legendSymbol = "▨", ...histogramOptions } = mergedOptions;
-        const histogram = this.chart.addSeries(HistogramSeries, histogramOptions);
-
-        const decorated = decorateSeries(histogram, this.legend);
-        decorated.applyOptions({ title: name });
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name, decorated);
-
-        const color = decorated.options().color || "rgba(255,0,0,1)";
-        const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: [solidColor],
-            legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
-            seriesType: "Histogram",
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-
-        return { name, series: decorated };
+    return { name, series: decorated };
+  }
+  
+  /**
+   * Creates a histogram series using merged options.
+   * @param name The series title.
+   * @param options Optional histogram series options.
+   * @param pane Optional pane index to move the series to.
+   */
+  createHistogramSeries(name: string, options?: Partial<HistogramSeriesOptions>, pane?: number): { name: string; series: ISeriesApiExtended } {
+    const mergedOptions = this.mergeSeriesOptions<HistogramSeriesOptions>("Histogram", options ?? {});
+    const { group, legendSymbol = "▨", ...histogramOptions } = mergedOptions;
+    const histogram = this.chart.addSeries(HistogramSeries, histogramOptions);
+  
+    const decorated = decorateSeries(histogram, this.legend);
+    decorated.applyOptions({ title: name });
+    this._seriesList.push(decorated);
+    this.seriesMap.set(name, decorated);
+  
+    const color = decorated.options().color || "rgba(255,0,0,1)";
+    const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
+  
+    const legendItem: LegendItem = {
+      name,
+      series: decorated,
+      colors: [solidColor],
+      legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
+      seriesType: "Histogram",
+      group,
+    };
+  
+    this.legend.addLegendItem(legendItem);
+    if (pane !== undefined) {
+      decorated.moveToPane(pane);
     }
-
-    /**
-     * Creates an area series using merged options.
-     */
-    createAreaSeries(name: string, options: AreaSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<AreaSeriesOptions>("Area", options);
-        const { group, legendSymbol = "▨", ...areaOptions } = mergedOptions;
-        const area = this.chart.addSeries(AreaSeries, areaOptions);
-
-        const decorated = decorateSeries(area, this.legend);
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name, decorated);
-
-        const color = decorated.options().lineColor || "rgba(255,0,0,1)";
-        const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: [solidColor],
-            legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
-            seriesType: "Area",
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-
-        return { name, series: decorated };
+    return { name, series: decorated };
+  }
+  
+  /**
+   * Creates an area series using merged options.
+   * @param name The series title.
+   * @param options Optional area series options.
+   * @param pane Optional pane index to move the series to.
+   */
+  createAreaSeries(name: string, options?: Partial<AreaSeriesOptions>, pane?: number): { name: string; series: ISeriesApiExtended } {
+    const mergedOptions = this.mergeSeriesOptions<AreaSeriesOptions>("Area", options ?? {});
+    const { group, legendSymbol = "▨", ...areaOptions } = mergedOptions;
+    const area = this.chart.addSeries(AreaSeries, areaOptions);
+  
+    const decorated = decorateSeries(area, this.legend);
+    this._seriesList.push(decorated);
+    this.seriesMap.set(name, decorated);
+  
+    const color = decorated.options().lineColor || "rgba(255,0,0,1)";
+    const solidColor = color.startsWith("rgba") ? color.replace(/[^,]+(?=\))/, "1") : color;
+  
+    const legendItem: LegendItem = {
+      name,
+      series: decorated,
+      colors: [solidColor],
+      legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
+      seriesType: "Area",
+      group,
+    };
+  
+    this.legend.addLegendItem(legendItem);
+    if (pane !== undefined) {
+      decorated.moveToPane(pane);
     }
-
-    /**
-     * Creates a bar series using merged options.
-     */
-    createBarSeries(name: string, options: BarSeriesOptions): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions = this.mergeSeriesOptions<BarSeriesOptions>("Bar", options);
-        const { group, legendSymbol = ['┌', '└'], ...barOptions } = mergedOptions;
-        const bar = this.chart.addSeries(BarSeries, barOptions);
-
-        const decorated = decorateSeries(bar, this.legend);
-        decorated.applyOptions({ title: name });
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name, decorated);
-
-        const upColor = (decorated.options() as any).upColor || "rgba(0,255,0,1)";
-        const downColor = (decorated.options() as any).downColor || "rgba(255,0,0,1)";
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: [upColor, downColor],
-            legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
-            seriesType: "Bar",
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-        return { name, series: decorated };
+    return { name, series: decorated };
+  }
+  
+  /**
+   * Creates a bar series using merged options.
+   * @param name The series title.
+   * @param options Optional bar series options.
+   * @param pane Optional pane index to move the series to.
+   */
+  createBarSeries(name: string, options?: Partial<BarSeriesOptions>, pane?: number): { name: string; series: ISeriesApiExtended } {
+    const mergedOptions = this.mergeSeriesOptions<BarSeriesOptions>("Bar", options ?? {});
+    const { group, legendSymbol = ['┌', '└'], ...barOptions } = mergedOptions;
+    const bar = this.chart.addSeries(BarSeries, barOptions);
+  
+    const decorated = decorateSeries(bar, this.legend);
+    decorated.applyOptions({ title: name });
+    this._seriesList.push(decorated);
+    this.seriesMap.set(name, decorated);
+  
+    const upColor = (decorated.options() as any).upColor || "rgba(0,255,0,1)";
+    const downColor = (decorated.options() as any).downColor || "rgba(255,0,0,1)";
+  
+    const legendItem: LegendItem = {
+      name,
+      series: decorated,
+      colors: [upColor, downColor],
+      legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol],
+      seriesType: "Bar",
+      group,
+    };
+  
+    this.legend.addLegendItem(legendItem);
+    if (pane !== undefined) {
+      decorated.moveToPane(pane);
     }
-
-    /**
-     * Creates a custom OHLC series using merged options.
-     */
-    createCustomOHLCSeries(name: string, options: Partial<ohlcSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
-        // Merge built–in defaults, file defaults, and explicit options for "Ohlc"
-        const base = ohlcdefaultOptions;
-        const fileDefaults = this.defaultsManager.defaults.get("ohlc") || {};
-        const mergedOptions: ohlcSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] } = {
-            ...base,
-            ...fileDefaults,
-            ...options,
-            seriesType: 'Ohlc',
-        };
-
-        const { group, legendSymbol = ['⑃', '⑂'], seriesType: _, chandelierSize = 1, ...filteredOptions } = mergedOptions;
-
-        const Instance = new ohlcSeries();
-        const ohlcCustomSeries = this.chart.addCustomSeries(Instance, {
-            ...filteredOptions,
-            chandelierSize,
-            title: name
-        });
-
-        const decorated = decorateSeries(ohlcCustomSeries, this.legend);
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name, decorated);
-
-        const borderUpColor = mergedOptions.borderUpColor || mergedOptions.upColor;
-        const borderDownColor = mergedOptions.borderDownColor || mergedOptions.downColor;
-
-        const colorsArray = [borderUpColor, borderDownColor];
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: colorsArray,
-            legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
-            seriesType: 'Ohlc',
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-
-        return { name, series: ohlcCustomSeries };
+    return { name, series: decorated };
+  }
+  
+  /**
+   * Creates a custom OHLC series using merged options.
+   * @param name The series title.
+   * @param options Optional OHLC series options.
+   * @param pane Optional pane index to move the series to.
+   */
+  createCustomOHLCSeries(name: string, options?: Partial<ohlcSeriesOptions>, pane?: number): { name: string; series: ISeriesApiExtended } {
+    // Merge built–in defaults, file defaults, and explicit options for "Ohlc"
+    const base = ohlcdefaultOptions;
+    const fileDefaults = this.defaultsManager.defaults.get("ohlc") || {};
+    
+    const mergedOptions: ohlcSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] } = {
+      ...base,
+      ...fileDefaults,
+      ...options,
+      seriesType: 'Ohlc',
+    };
+  
+    const { group, legendSymbol = ['⑃', '⑂'], seriesType: _, chandelierSize, ...filteredOptions } = mergedOptions;
+  
+    const Instance = new ohlcSeries();
+    const ohlcCustomSeries = this.chart.addCustomSeries(Instance, {
+      ...filteredOptions,
+      chandelierSize,
+      title: name
+    });
+  
+    const decorated = decorateSeries(ohlcCustomSeries, this.legend);
+    this._seriesList.push(decorated);
+    this.seriesMap.set(name, decorated);
+  
+    const borderUpColor = mergedOptions.borderUpColor || mergedOptions.upColor;
+    const borderDownColor = mergedOptions.borderDownColor || mergedOptions.downColor;
+  
+    const colorsArray = [borderUpColor, borderDownColor];
+  
+    const legendItem: LegendItem = {
+      name,
+      series: decorated,
+      colors: colorsArray,
+      legendSymbol: Array.isArray(legendSymbol) ? legendSymbol : legendSymbol ? [legendSymbol] : [],
+      seriesType: 'Ohlc',
+      group,
+    };
+  
+    this.legend.addLegendItem(legendItem);
+    if (pane !== undefined) {
+      decorated.moveToPane(pane);
     }
-
-    /**
-     * Creates a trade series using merged options.
-     */
-    createTradeSeries(name: string, options: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApi<SeriesType> } {
-        const mergedOptions: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
-            ...tradeDefaultOptions,
-            ...this.defaultsManager.defaults.get("trade"),
-            ...options,
-            seriesType: 'Trade',
-        };
-
-        const { group, legendSymbol = ['$'], seriesType: _, ...filteredOptions } = mergedOptions;
-
-        const instance = new TradeSeries();
-        const tradeCustomSeries = this.chart.addCustomSeries(instance, filteredOptions);
-
-        const decorated = decorateSeries(tradeCustomSeries, this.legend);
-        this._seriesList.push(decorated);
-        this.seriesMap.set(name ?? 'Trade', decorated);
-
-        const colorsArray = [
-            mergedOptions.backgroundColorStop,
-            mergedOptions.backgroundColorTarget
-        ];
-        const finalLegendSymbol = Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol];
-
-        const legendItem: LegendItem = {
-            name,
-            series: decorated,
-            colors: colorsArray,
-            legendSymbol: finalLegendSymbol,
-            seriesType: 'Trade',
-            group,
-        };
-
-        this.legend.addLegendItem(legendItem);
-
-        return { name, series: tradeCustomSeries };
-    }
+    return { name, series: decorated };
+  }
+   // /**
+   //  * Creates a trade series using merged options.
+   //  */
+   // createTradeSeries(name: string, options?: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApiExtended  } {
+   //     const mergedoptions?: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
+   //         ...tradeDefaultOptions,
+   //         ...this.defaultsManager.defaults.get("trade"),
+   //         ...options,
+   //         seriesType: 'Trade',
+   //     };
+//
+   //     const { group, legendSymbol = ['$'], seriesType: _, ...filteredOptions } = mergedOptions;
+//
+   //     const instance = new TradeSeries();
+   //     const tradeCustomSeries = this.chart.addCustomSeries(instance, filteredOptions);
+//
+   //     const decorated = decorateSeries(tradeCustomSeries, this.legend);
+   //     this._seriesList.push(decorated);
+   //     this.seriesMap.set(name ?? 'Trade', decorated);
+//
+   //     const colorsArray = [
+   //         mergedOptions.backgroundColorStop,
+   //         mergedOptions.backgroundColorTarget
+   //     ];
+   //     const finalLegendSymbol = Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol];
+//
+   //     const legendItem: LegendItem = {
+   //         name,
+   //         series: decorated,
+   //         colors: colorsArray,
+   //         legendSymbol: finalLegendSymbol,
+   //         seriesType: 'Trade',
+   //         group,
+   //     };
+//
+   //     this.legend.addLegendItem(legendItem);
+//
+   //     return { name, series: tradeCustomSeries };
+   // }
 
     /**
      * Creates a fill area between two series.
@@ -631,7 +666,7 @@ export class Handler {
      * @param series - The series to extract data from.
      * @returns An array of arrays containing `time` and `close` values.
      */
-    public extractSeriesData(series: ISeriesApi<SeriesType>): any[][] {
+    public extractSeriesData(series: ISeriesApiExtended ): any[][] {
         const seriesData = series.data(); // Ensure this retrieves the data from the series.
         if (!Array.isArray(seriesData)) {
             console.warn(
@@ -664,7 +699,7 @@ export class Handler {
             chart.legend.legendHandler(point, true)
         }
 
-        function getPoint(series: ISeriesApi<SeriesType>, param: MouseEventParams) {
+        function getPoint(series: ISeriesApiExtended , param: MouseEventParams) {
             if (!param.time) return null;
             return param.seriesData.get(series) || null;
         }
@@ -731,44 +766,51 @@ export class Handler {
     }
 
     public static makeSearchBox(chart: Handler) {
-        const searchWindow = document.createElement('div')
+        const searchWindow = document.createElement('div');
         searchWindow.classList.add('searchbox');
         searchWindow.style.display = 'none';
-
+      
         const magnifyingGlass = document.createElement('div');
-        magnifyingGlass.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24px" height="24px" viewBox="0 0 24 24" version="1.1"><path style="fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke:lightgray;stroke-opacity:1;stroke-miterlimit:4;" d="M 15 15 L 21 21 M 10 17 C 6.132812 17 3 13.867188 3 10 C 3 6.132812 6.132812 3 10 3 C 13.867188 3 17 6.132812 17 10 C 17 13.867188 13.867188 17 10 17 Z M 10 17 "/></svg>`
-
+        magnifyingGlass.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24px" height="24px" viewBox="0 0 24 24" version="1.1"><path style="fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke:lightgray;stroke-opacity:1;stroke-miterlimit:4;" d="M 15 15 L 21 21 M 10 17 C 6.132812 17 3 13.867188 3 10 C 3 6.132812 6.132812 3 10 3 C 13.867188 3 17 6.132812 17 10 C 17 13.867188 13.867188 17 10 17 Z M 10 17 "/></svg>`;
+      
         const sBox = document.createElement('input');
         sBox.type = 'text';
-
-        searchWindow.appendChild(magnifyingGlass)
-        searchWindow.appendChild(sBox)
+      
+        searchWindow.appendChild(magnifyingGlass);
+        searchWindow.appendChild(sBox);
         chart.div.appendChild(searchWindow);
-
+      
         chart.commandFunctions.push((event: KeyboardEvent) => {
-            if (window.handlerInFocus !== chart.id || window.textBoxFocused) return false
-            if (searchWindow.style.display === 'none') {
-                if (/^[a-zA-Z0-9]$/.test(event.key)) {
-                    searchWindow.style.display = 'flex';
-                    sBox.focus();
-                    return true
-                }
-                else return false
+          // Only allow if window.monaco is explicitly false.
+          if (window.monaco !== false) return false;
+          if (window.handlerInFocus !== chart.id || window.textBoxFocused) return false;
+          if (searchWindow.style.display === 'none') {
+            if (/^[a-zA-Z0-9]$/.test(event.key)) {
+              searchWindow.style.display = 'flex';
+              sBox.focus();
+              return true;
+            } else {
+              return false;
             }
-            else if (event.key === 'Enter' || event.key === 'Escape') {
-                if (event.key === 'Enter') window.callbackFunction(`search${chart.id}_~_${sBox.value}`)
-                searchWindow.style.display = 'none'
-                sBox.value = ''
-                return true
+          } else if (event.key === 'Enter' || event.key === 'Escape') {
+            if (event.key === 'Enter') {
+              window.callbackFunction(`search${chart.id}_~_${sBox.value}`);
             }
-            else return false
-        })
-        sBox.addEventListener('input', () => sBox.value = sBox.value.toUpperCase())
+            searchWindow.style.display = 'none';
+            sBox.value = '';
+            return true;
+          } else {
+            return false;
+          }
+        });
+      
+        sBox.addEventListener('input', () => sBox.value = sBox.value.toUpperCase());
         return {
-            window: searchWindow,
-            box: sBox,
-        }
-    }
+          window: searchWindow,
+          box: sBox,
+        };
+      }
+      
 
     public static makeSpinner(chart: Handler) {
         chart.spinner = document.createElement('div');

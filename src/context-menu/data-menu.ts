@@ -1,4 +1,3 @@
-import { glob } from "fs";
 import { Handler } from "../general";
 import { ContextMenu} from "./context-menu";
 import { GlobalParams } from "../general";
@@ -300,15 +299,21 @@ export class DataMenu {
       if (typeof modifiedData !== "object" || !modifiedData.options) {
         throw new Error("Invalid structure: missing 'options'.");
       }
+      // 1) Apply to the chart
       target.fromJSON(modifiedData);
       if (typeof target.updateView === "function") {
         target.updateView();
       }
-      this.showNotification("Options saved successfully.", "success");
-    } catch (error: any) {
+      // 2) Then do the file download
+      const dataString = JSON.stringify(modifiedData, null, 2);
+      // ... (same Blob + <a download> logic)
+  
+      this.showNotification("Options applied and exported successfully.", "success");
+    } catch (error: any) {6
       this.showNotification("Failed to save options: " + error.message, "error");
     }
   };
+  
 
 
 // In your DataMenu's openMenu method (or where you add the Save as Default button)
@@ -483,18 +488,20 @@ public openDefaultOptions(defaultKey: string): void {
 
   // 2) Create the modal overlay
   const modalOverlay = document.createElement("div");
-  modalOverlay.style.position = "fixed";
-  modalOverlay.style.top = "0";
-  modalOverlay.style.left = "0";
-  modalOverlay.style.width = "100%";
-  modalOverlay.style.height = "100%";
-  modalOverlay.style.backgroundColor = "rgba(0,0,0,0.5)";
-  modalOverlay.style.display = "flex";
-  modalOverlay.style.justifyContent = "center";
-  modalOverlay.style.alignItems = "center";
-  modalOverlay.style.zIndex = "1000";
+  Object.assign(modalOverlay.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: "1000",
+  });
 
-  // 3) ESC key closes the modal
+  // ESC key closes the modal
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       this.close(modalOverlay, handleKeyDown);
@@ -502,17 +509,19 @@ public openDefaultOptions(defaultKey: string): void {
   };
   document.addEventListener("keydown", handleKeyDown);
 
-  // 4) Modal content container
+  // 3) Modal content container
   const modalContent = document.createElement("div");
-  modalContent.style.backgroundColor = "#333";
-  modalContent.style.color = "#fff";
-  modalContent.style.padding = "20px";
-  modalContent.style.borderRadius = "8px";
-  modalContent.style.width = "80%";
-  modalContent.style.maxWidth = "800px";
-  modalContent.style.maxHeight = "90%";
-  modalContent.style.overflowY = "auto";
-  modalContent.style.boxShadow = "0 2px 10px rgba(0,0,0,0.5)";
+  Object.assign(modalContent.style, {
+    backgroundColor: "#333",
+    color: "#fff",
+    padding: "20px",
+    borderRadius: "8px",
+    width: "80%",
+    maxWidth: "800px",
+    maxHeight: "90%",
+    overflowY: "auto",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
+  });
   modalContent.setAttribute("tabindex", "-1");
   modalContent.focus();
 
@@ -521,49 +530,57 @@ public openDefaultOptions(defaultKey: string): void {
   titleElem.textContent = `Edit Default Options - "${defaultKey}"`;
   modalContent.appendChild(titleElem);
 
-  // Textarea showing the current defaults JSON
+  // 4) Textarea with the current defaults JSON
   const textarea = document.createElement("textarea");
-  textarea.value = defaultsJson;
-  textarea.style.width = "100%";
-  textarea.style.height = "400px";
-  textarea.style.resize = "vertical";
-  textarea.style.backgroundColor = "#444";
-  textarea.style.color = "#fff";
-  textarea.style.border = "none";
-  textarea.style.margin = "10px 0";
-  textarea.style.padding = "10px";
+  textarea.value = JSON.stringify(currentDefaults, null, 2);
+  Object.assign(textarea.style, {
+    width: "100%",
+    height: "400px",
+    resize: "vertical",
+    backgroundColor: "#444",
+    color: "#fff",
+    border: "none",
+    margin: "10px 0",
+    padding: "10px",
+  });
   modalContent.appendChild(textarea);
 
   // Buttons row
   const buttonRow = document.createElement("div");
-  buttonRow.style.display = "flex";
-  buttonRow.style.flexWrap = "wrap";
-  buttonRow.style.gap = "10px";
-  buttonRow.style.justifyContent = "flex-end";
+  Object.assign(buttonRow.style, {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px",
+    justifyContent: "flex-end",
+  });
 
-  // 5) Export button
+  // Export button
   const exportButton = document.createElement("button");
   exportButton.textContent = "Export";
-  exportButton.style.padding = "8px 12px";
-  exportButton.style.cursor = "pointer";
-  exportButton.style.backgroundColor = "#f44336";
-  exportButton.style.color = "#fff";
-  exportButton.style.border = "none";
-  exportButton.style.borderRadius = "4px";
+  Object.assign(exportButton.style, {
+    padding: "8px 12px",
+    cursor: "pointer",
+    backgroundColor: "#f44336",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+  });
   exportButton.onclick = () => {
     this.downloadJson(textarea.value, `${defaultKey}_defaults.json`);
   };
   buttonRow.appendChild(exportButton);
 
-  // 6) Import button
+  // Import button
   const importButton = document.createElement("button");
   importButton.textContent = "Import";
-  importButton.style.padding = "8px 12px";
-  importButton.style.cursor = "pointer";
-  importButton.style.backgroundColor = "#4CAF50";
-  importButton.style.color = "#fff";
-  importButton.style.border = "none";
-  importButton.style.borderRadius = "4px";
+  Object.assign(importButton.style, {
+    padding: "8px 12px",
+    cursor: "pointer",
+    backgroundColor: "#4CAF50",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+  });
   importButton.onclick = () => {
     const fileInput = document.createElement("input");
     fileInput.type = "file";
@@ -594,37 +611,57 @@ public openDefaultOptions(defaultKey: string): void {
   };
   buttonRow.appendChild(importButton);
 
-  // 7) Save button
+  // ─── SAVE BUTTON (Updated) ───────────────────────────────────────────
+  // Instead of calling defaultsManager.set(...),
+  // we replicate the "save as default" approach: build a 'save_defaults_...' message.
   const saveButton = document.createElement("button");
   saveButton.textContent = "Save";
-  saveButton.style.padding = "8px 12px";
-  saveButton.style.cursor = "pointer";
-  saveButton.style.backgroundColor = "#008CBA";
-  saveButton.style.color = "#fff";
-  saveButton.style.border = "none";
-  saveButton.style.borderRadius = "4px";
+  Object.assign(saveButton.style, {
+    padding: "8px 12px",
+    cursor: "pointer",
+    backgroundColor: "#008CBA",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+  });
   saveButton.onclick = () => {
-    // Parse the JSON from the textarea
     try {
+      // Parse the user-edited JSON
       const newData = JSON.parse(textarea.value);
-      // Update the manager
-      defaultsManager.set(defaultKey, newData);
-      this.showNotification(`Defaults for "${defaultKey}" saved successfully.`, "success");
+
+      // Convert to a string for the message
+      const dataString = JSON.stringify(newData, null, 2);
+
+      // We'll attempt to build a key from defaultKey. If the user wants a different one,
+      // they can specify it here, or we can just rely on defaultKey.
+      let key = defaultKey;
+      // If you want to handle custom logic for "custom/custom" or a user prompt, do so here.
+
+      // Build the message same as your normal "Save as Default" approach
+      // e.g. "save_defaults_area_~_{...json...}" or if you'd prefer "save_defaults_~_{key};;;{json}"
+      const message = `save_defaults_${key}_~_${dataString}`;
+
+      // Call the callback
+      window.callbackFunction(message);
+
+      this.showNotification(`Defaults for "${key}" saved successfully.`, "success");
     } catch (error: any) {
       this.showNotification("Failed to save defaults: " + error.message, "error");
     }
   };
   buttonRow.appendChild(saveButton);
 
-  // 8) Cancel/Close button
+  // Cancel button
   const cancelButton = document.createElement("button");
   cancelButton.textContent = "Cancel";
-  cancelButton.style.padding = "8px 12px";
-  cancelButton.style.cursor = "pointer";
-  cancelButton.style.backgroundColor = "#444";
-  cancelButton.style.color = "#fff";
-  cancelButton.style.border = "none";
-  cancelButton.style.borderRadius = "4px";
+  Object.assign(cancelButton.style, {
+    padding: "8px 12px",
+    cursor: "pointer",
+    backgroundColor: "#444",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+  });
   cancelButton.onclick = () => {
     this.close(modalOverlay, handleKeyDown);
   };
@@ -633,7 +670,4 @@ public openDefaultOptions(defaultKey: string): void {
   modalContent.appendChild(buttonRow);
   modalOverlay.appendChild(modalContent);
   this.container.appendChild(modalOverlay);
-}
-
-}
-
+}}

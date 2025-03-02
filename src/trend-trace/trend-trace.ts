@@ -42,6 +42,7 @@ import {
   ohlc3d,
   ohlcPolygon,
   ohlcBar,
+  ohlcSlanted,
 } from "../ohlc-series/shapes";
 import { InteractionState } from "../drawing/drawing";
 import {
@@ -753,18 +754,21 @@ export class TrendTracePaneRenderer
               this._source._sequence.p1.logical);
         const scaledBars = data
           .map((bar, index) => {
+
+
+
             const scaledX1 =
               _firstX +
               (inverted ? 1 : -1) *
-                (index *
-                  ((_lastX - _firstX) / data.length) *
+                  (((index *
+                  ((_lastX - _firstX) / data.length ))) *
                   this._source._sequence.spatial.scale.x);
             const scaledX2 =
-              _firstX +
+              scaledX1 +
               (inverted ? 1 : -1) *
-                ((index + 1) *
-                  ((_lastX  - _firstX) / data.length) *
-                  this._source._sequence.spatial.scale.x);
+                (( bar.x2-bar.x1 -1) *
+                ((((_lastX - _firstX) / data.length )) *
+                this._source._sequence.spatial.scale.x));
             const color = !bar.isUp
               ? inverted
                 ? this._options.downColor
@@ -914,10 +918,11 @@ export class TrendTracePaneRenderer
         this._source._sequence.p2.price < this._source._sequence.p1.price);
     bars.forEach((bar) => {
       const candleWidth = barSpace ;
-      const candleBodyWidth = (this._options.barSpacing??0.8)*(bar.scaledX2 - bar.scaledX1);
-
-      const leftSide = bar.scaledX1 //-  Math.abs((( candleWidth) * ((this._options.barSpacing ?? 0.8)))/2);
-      const rightSide = leftSide + candleBodyWidth
+      const candleBodyWidth = (this._options.barSpacing??0.8)*(bar.scaledX2 - bar.scaledX1 );
+      const candleGap = (bar.scaledX2 - bar.scaledX1 ) -candleBodyWidth 
+      const offset = .5
+      const leftSide = bar.scaledX1-(0.5*candleBodyWidth)
+      const rightSide =  bar.scaledX2  + (0.5*candleBodyWidth) - (bar.x2-bar.x1 >1 ? candleBodyWidth:0)
       const middle = (leftSide + rightSide) / 2;      //const scaledHigh =
       //  (this._source.series.priceToCoordinate( (inverted? bar.high??0:bar.low??0)) ?? 0) *
       //  verticalPixelRatio;
@@ -978,8 +983,8 @@ export class TrendTracePaneRenderer
 
     bars.forEach((bar) => {
       const candleWidth = barSpace ;
-      const candleBodyWidth = (this._options.barSpacing??0.8)*(bar.scaledX2 - bar.scaledX1);
-
+      const candleBodyWidth = (this._options.barSpacing??0.8)*(bar.scaledX2 - bar.scaledX1 );
+      const candleGap = (bar.scaledX2 - bar.scaledX1  ) -candleBodyWidth 
       if (!bar) {
         return;
       }
@@ -1001,8 +1006,9 @@ export class TrendTracePaneRenderer
       const barVerticalMin = Math.max(scaledOpen, scaledClose);
       const barVerticalSpan = barVerticalMax - barVerticalMin;
       const barY = (barVerticalMax + barVerticalMin) / 2;
-      const leftSide = bar.scaledX1 //-  Math.abs((( candleWidth) * ((this._options.barSpacing ?? 0.8)))/2);
-      const rightSide = leftSide + candleBodyWidth// this._options.chandelierSize??1  > 1? 
+      const offset = .5
+      const leftSide = bar.scaledX1-(0.5*candleGap)
+      const rightSide =  bar.scaledX2  + (0.5*candleGap) - (bar.x2-bar.x1 >1 ? candleBodyWidth:0)
       //leftSide +   (candleWidth*(this._options.chandelierSize??1 )) - Math.abs((((this._options.barSpacing ?? 0.8))*(candleWidth)))  : leftSide +  Math.abs(1-((this._options.barSpacing??0.8 * candleWidth)/2));
       const middle = (leftSide + rightSide) / 2;      //const scaledHigh =
       ctx.fillStyle = this._options.visible
@@ -1039,6 +1045,12 @@ export class TrendTracePaneRenderer
     case CandleShape.Bar:
       ohlcBar(ctx, leftSide, rightSide, scaledHigh, scaledLow, scaledOpen, scaledClose);
       break;  
+
+    case CandleShape.Slanted:
+    // Add your newly created slanted candle.
+    ohlcSlanted(ctx, leftSide, rightSide, barY, barVerticalSpan,isUp);
+    break;
+
     default:
       console.warn(`Unknown shape '${shape}', using default Rectangle`);
       ohlcRectangle(ctx, leftSide, rightSide, barY, barVerticalSpan);

@@ -3,18 +3,18 @@
  * A simple DefaultOptionsManager to store default options in memory.
  *
  * This class provides a single method, `set`, to update the default options for a given key.
- * The defaults are stored in an in-memory Map.
+ * The scripts are stored in an in-memory Map.
  *
  * Usage:
  *   const manager = new DefaultOptionsManager();
  *   manager.set("area", { title: "Area", lineColor: "#021698", topColor: "rgba(9,32,210,0.4)", bottomColor: "rgba(0,0,0,0.5)" });
  *   const areaDefaults = manager.get("area");
  */
-export class DefaultOptionsManager {
+export class PineScriptManager {
     // In-memory storage for default options.
-    public defaults: Map<string, any>;
+    public scripts: Map<string, any>;
     constructor() {
-      this.defaults = new Map<string, any>();
+      this.scripts = new Map<string, any>();
       }
     
   /**
@@ -37,26 +37,45 @@ export class DefaultOptionsManager {
     } else {
       parsedData = data;
     }
-    this.defaults.set(key, parsedData);
+    this.scripts.set(key, parsedData);
     console.log(`Default options for key "${key}" set successfully.`);
     console.log(parsedData)
   }
 
   public get(key: string): any | null {
-    if (this.defaults.has(key)) {
-      return this.defaults.get(key);
+    if (this.scripts.has(key)) {
+      return this.scripts.get(key);
     } else {
       return null;
     }
   }
 
     /**
-     * Returns all stored defaults.
+     * Returns all stored scripts.
      *
      * @returns A Map containing all default options.
      */
     public getAll(): Map<string, any> {
-      return this.defaults;
+      return this.scripts;
     }
+
+
+
+     
+  /**
+   * Retrieves the most recent script that was added.
+   * Since Map preserves insertion order, this returns the last inserted value.
+   *
+   * @returns The most recent script object, or null if none exist.
+   */
+  public getLast(): any | null {
+    if (this.scripts.size === 0) {
+      return null;
+    }
+    // Convert the values to an array and return the last element.
+    const allScripts = Array.from(this.scripts.values());
+    return allScripts[allScripts.length - 1];
   }
+}
+  
   

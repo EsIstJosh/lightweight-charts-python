@@ -1,5 +1,6 @@
 import { MouseEventParams,  ISeriesPrimitive } from "lightweight-charts";
 import { ISeriesApiExtended } from "../helpers/series";
+import { PineTS } from "pinets";
 export interface GlobalParams extends Window {
     pane: paneStyle;    // TODO shouldnt need this cause of css variables
     handlerInFocus: string;
@@ -9,6 +10,9 @@ export interface GlobalParams extends Window {
     setCursor: Function;
     cursor: string;
     MouseEventParams?: MouseEventParams| null; // Allow null values
+    _pineTSInstance?: PineTS;
+    monaco?: boolean 
+
 }
 
 interface paneStyle {

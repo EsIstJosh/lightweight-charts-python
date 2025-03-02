@@ -1,24 +1,40 @@
 <!DOCTYPE html>
 <html lang="">
 <head>
-    <title>lightweight-charts-python</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="./lightweight-charts.js"></script>
-    <meta name="viewport" content ="width=device-width, initial-scale=1">
-    <meta charset="UTF-8">
-    <style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lightweight-charts-python</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- jQuery and other dependencies -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="./lightweight-charts.js"></script>
+  <script src="./pinets.dev.browser.js"></script>
+  <style>
     body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
-            Cantarell, "Helvetica Neue", sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+        Cantarell, "Helvetica Neue", sans-serif;
     }
-    </style>
+  </style>
 </head>
 <body>
-    <div id="container"></div>
-    <script src="./bundle.js"></script>
+  <div id="container"></div>
+  <!-- Load Monaco Editor's AMD loader -->
+  <script src="https://unpkg.com/monaco-editor@latest/min/vs/loader.js"></script>
+  <script>
+    require.config({ paths: { 'vs': 'https://unpkg.com/monaco-editor@latest/min/vs' }});
+    require(['vs/editor/editor.main'], function () {
+      var bundleScript = document.createElement('script');
+      bundleScript.src = './bundle.js';
+      bundleScript.onload = function() {
+        window.LibReady = true;
+      };
+      document.body.appendChild(bundleScript);
+    });
+  </script>
+
 </body>
 </html>
 

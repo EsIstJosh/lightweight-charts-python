@@ -32,11 +32,33 @@ export function getRound(value: number): number {
   return Math.round(value);
 }
 
-export function getSma(data: number[], period: number): number {
-  if (data.length < period) return NaN;
-  const subset = data.slice(data.length - period);
-  return subset.reduce((sum, val) => sum + val, 0) / period;
+/**
+ * Compute Simple Moving Average (SMA) iteratively
+ * @param data - Array of values
+ * @param length - SMA period
+ * @returns SMA value at the latest index
+ */
+export function getSma(data: number[], length: number): number {
+  if (data.length < length) return NaN;
+
+  let sum = 0;
+
+  // Initialize first SMA window
+  for (let i = 0; i < length; i++) {
+    sum += data[i];
+  }
+
+  let sma = sum / length;
+
+  // Compute SMA iteratively
+  for (let i = length; i < data.length; i++) {
+    sum = sum - data[i - length] + data[i];
+    sma = sum / length;
+  }
+
+  return sma;
 }
+
 
 export function getEma(data: number[], period: number): number {
   if (data.length < period) return NaN;
@@ -69,6 +91,36 @@ export function getWma(data: number[], period: number): number {
   }
   return weightedSum / weightSum;
 }
+/**
+ * Computes the Rolling Moving Average (RMA) for a data array.
+ * @param data Array of values (gains, losses, or prices).
+ * @param period RMA period (e.g., 14 for RSI).
+ * @returns Array of RMA values, same length as `data`.
+ */
+export function getRma(data: number[], period: number): number {
+  if (period <= 0) {
+    // Defensive check
+    return  NaN;
+  }
+
+  const alpha = 1 / period;
+  const rmaArr = new Array<number>(data.length).fill(NaN);
+
+  // We must start the initial average with the first data point (or first "period" average).
+  // A common approach for RSI: use the first "period" items' average.
+  // But for simplicity, let's start from the first item:
+  if (data.length > 0) {
+    let avg = data[0]; // Start with the first data point
+    rmaArr[0] = avg;
+
+    for (let i = 1; i < data.length; i++) {
+      avg = alpha * data[i] + (1 - alpha) * avg;
+      rmaArr[i] = avg;
+    }
+  }
+
+  return rmaArr[rmaArr.length -1];
+}
 
 export function getLinreg(data: number[], period: number, offset: number = 0): number {
   if (data.length < period) return NaN;
@@ -80,7 +132,7 @@ export function getLinreg(data: number[], period: number, offset: number = 0): n
   const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6;
   const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
   const intercept = (sumY - slope * sumX) / n;
-  return slope * (n - 1) / 2 + intercept + offset;
+  return intercept + slope * (n - 1);
 }
 
 export function getAvg(...values: number[]): number {
@@ -88,36 +140,30 @@ export function getAvg(...values: number[]): number {
   const sum = values.reduce((acc, val) => acc + val, 0);
   return sum / values.length;
 }
+/**
+ * Computes the Relative Strength Index (RSI).
+ * @param data - Array of closing prices.
+ * @param length - RSI period.
+ * @returns RSI value at the latest index.
+ */
+export function getRsi(data: number[], length: number): number {
+  if (data.length < length) return NaN;
 
-// Helper export functions
-export function getRsi(data: number[], period: number): number[] {
-  const rsiArr: number[] = [];
-  let gain = 0;
-  let loss = 0;
-  for (let i = 1; i < data.length; i++) {
-    const delta = data[i] - data[i - 1];
-    if (delta > 0) {
-      gain += delta;
-    } else {
-      loss -= delta;
-    }
-    if (i < period) {
-      rsiArr.push(NaN);
-    } else if (i === period) {
-      const avgGain = gain / period;
-      const avgLoss = loss / period;
-      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-      rsiArr.push(100 - (100 / (1 + rs)));
-    } else {
-      const avgGain = (rsiArr[i - 1 - 1] * (period - 1) + (data[i] - data[i - 1] > 0 ? data[i] - data[i - 1] : 0)) / period;
-      const avgLoss = (rsiArr[i - 1 - 1] * (period - 1) + (data[i] - data[i - 1] < 0 ? -(data[i] - data[i - 1]) : 0)) / period;
-      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-      rsiArr.push(100 - (100 / (1 + rs)));
-    }
-  }
-  rsiArr.unshift(NaN); // Align with dataList index
-  return rsiArr;
+  let changeArray = data.map((val, idx) => (idx === 0 ? 0 : val - data[idx - 1]));
+
+  let upMoves = changeArray.map(val => Math.max(val, 0));
+  let downMoves = changeArray.map(val => Math.max(-val, 0));
+
+  let avgGain = getRma(upMoves, length); // Use Rolling Moving Average for smoothing
+  let avgLoss = getRma(downMoves, length);
+
+  if (avgLoss === 0) return 100; // Avoid division by zero
+  if (avgGain === 0) return 0;
+
+  let rs = avgGain / avgLoss;
+  return 100 - 100 / (1 + rs);
 }
+
 
 export function getBarssince(conditionArray: boolean[]): number {
   for (let i = conditionArray.length - 1; i >= 0; i--) {

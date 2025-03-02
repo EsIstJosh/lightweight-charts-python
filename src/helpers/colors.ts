@@ -199,3 +199,62 @@ export function generateShades(count: number): string[] {
   return result;
 }
 
+	/**
+ * Safely extracts the alpha component from an RGBA or HSLA color string.
+ * Returns 1.0 if parsing fails or if no alpha is found (e.g. "rgb(...)").
+ */
+ export  function getAlphaFromColor(color: string): number {
+    // Attempt to parse 'rgba(...)' or 'hsla(...)' format.
+    const rgbaMatch = color.match(/rgba?\(([^)]+)\)/i);
+    const hslaMatch = color.match(/hsla?\(([^)]+)\)/i);
+    
+    let alpha = 1.0; // Default if we fail to parse or if no alpha is present
+    
+    if (rgbaMatch) {
+      // Extract the comma-separated values inside the parentheses
+      const parts = rgbaMatch[1].split(',').map((p) => parseFloat(p.trim()));
+      // If there are 4 parts (r, g, b, a), use the last as alpha
+      if (parts.length === 4) {
+      alpha = parts[3];
+      }
+    } else if (hslaMatch) {
+      // Extract the comma-separated values inside the parentheses
+      const parts = hslaMatch[1].split(',').map((p) => parseFloat(p.trim()));
+      // If there are 4 parts (h, s, l, a), use the last as alpha
+      if (parts.length === 4) {
+      alpha = parts[3];
+      }
+    }
+    
+    return alpha;
+    }
+
+
+    /**
+ * Recursively walk through an object, looking for any key that includes "color".
+ * When found, invoke a callback with the key path and value.
+ *
+ * @param obj The object to inspect (e.g., a series's options object).
+ * @param callback A function to call whenever a property name has "color".
+ * @param parentKey Internal use: tracks the current path (e.g. "candles.border").
+ */
+export function findColorOptions(
+  obj: Record<string, any>,
+  callback: (fullPath: string, value: any) => void,
+  parentKey: string = ""
+): void {
+  for (const key of Object.keys(obj)) {
+    const fullPath = parentKey ? `${parentKey}.${key}` : key;
+    const value = obj[key];
+
+    // If the value is another object, recurse deeper
+    if (typeof value === "object" && value !== null) {
+      findColorOptions(value, callback, fullPath);
+    } else {
+      // If the key itself contains "color", report it
+      if (key.toLowerCase().includes("color")) {
+        callback(fullPath, value);
+      }
+    }
+  }
+};

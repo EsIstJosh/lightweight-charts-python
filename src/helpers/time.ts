@@ -1,11 +1,42 @@
 import { Time, isUTCTimestamp, isBusinessDay } from 'lightweight-charts';
 
-export function convertTime(t: Time): number {
-	if (isUTCTimestamp(t)) return t * 1000;
-	if (isBusinessDay(t)) return new Date(t.year, t.month, t.day).valueOf();
-	const [year, month, day] = t.split('-').map(parseInt);
-	return new Date(year, month, day).valueOf();
-}
+
+/**
+ * Convert a numeric or string timestamp to a Unix timestamp in seconds.
+ * - If t is a string date (e.g. "2023-08-28"), parse it to seconds.
+ * - If t is numeric, check its length/magnitude to decide if it's seconds or milliseconds.
+ */
+export function convertTime(t: number | string): number {
+	let numericTime: number;
+  
+	if (typeof t === 'string') {
+	  // Try to parse as an integer first
+	  numericTime = parseInt(t, 10);
+  
+	  // If parsing fails, parse as a date string
+	  if (isNaN(numericTime)) {
+		const dateObj = new Date(t);
+		return Math.floor(dateObj.getTime() / 1000);
+	  }
+	} else {
+	  // t is already a number
+	  numericTime = t;
+	}
+  
+	// Now decide if numericTime is in seconds or milliseconds
+	// A typical Unix timestamp in seconds is 10 digits (e.g. 1693185600)
+	// In milliseconds, it's 13 digits (e.g. 1693185600000)
+	const length = numericTime.toString().length;
+  
+	// If length >= 13, assume it's milliseconds; convert to seconds
+	// If length <= 10, assume it's seconds
+	if (length >= 13) {
+	  return Math.floor(numericTime / 1000);
+	} else {
+	  return numericTime; // Already in seconds
+	}
+  }
+  
 
 export function displayTime(time: Time): string {
 	if (typeof time == 'string') return time;

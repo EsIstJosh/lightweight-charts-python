@@ -1,4 +1,6 @@
-
+import { getAlphaFromColor } from "../helpers/colors";
+import { GlobalParams } from "../general";
+declare const window: GlobalParams;
 export class ColorPicker {
 
        
@@ -10,33 +12,154 @@ export class ColorPicker {
     private rgba: number[]; // [R, G, B, A]
     private opacity: number;
     private applySelection: (color: string) => void;
-
-constructor(initialValue: string, applySelection: (color: string) => void) {
+    private customColors?: string[];
+  
+    constructor(
+        initialValue: string,
+        applySelection: (color: string) => void,
+        customColors?: string[] | null,
+      ) {
     this.applySelection = applySelection;
     this.rgba = ColorPicker.extractRGBA(initialValue);
     this.opacity = this.rgba[3];
-        this.container = document.createElement("div");
-        this.container.classList.add("color-picker");
-        this.container.style.display = "flex";
-        this.container.style.flexDirection = "column";
-        this.container.style.width = "150px";
-        this.container.style.height = "300px";
-        this.container.style.position = "relative"; // Ensure proper positioning for the exit button.
+    this.container = document.createElement("div");
+    this.container.classList.add("color-picker");
+    this.container.style.display = "flex";
+    this.container.style.flexDirection = "column";
+    this.container.style.width = "200px";
+    this.container.style.height = "350px";
+    this.container.style.position = "relative"; // Ensure proper positioning for the exit button.
 
     // Build UI elements
     const colorGrid = this.createColorGrid();
     const opacityUI = this.createOpacityUI();
     this.exitButton = this.createExitButton(); // Create the exit button.
+    this.customColors = customColors??undefined;
 
     // Append elements to the container
     this.container.appendChild(colorGrid);
     this.container.appendChild(this.createSeparator());
+    if (this.customColors && this.customColors.length !== 0){
+    this.createCustomColorSection()
+    }
     this.container.appendChild(this.createSeparator());
     this.container.appendChild(opacityUI);
     this.container.appendChild(this.exitButton); // Append the exit button last
 }
 
 
+    private createCustomColorSection(): HTMLDivElement | null {
+        // Only build the custom colors section if a custom colors list is provided.
+        if (!this.customColors || this.customColors.length === 0) {
+          return null;
+        }
+        
+        const customContainer = document.createElement("div");
+        customContainer.style.display = "flex";
+        customContainer.style.flexDirection = "column";
+        customContainer.style.alignItems = "center";
+        customContainer.style.margin = "8px 0";
+      
+        const title = document.createElement("div");
+        title.innerText = "Custom Colors";
+        title.style.fontSize = "14px";
+        title.style.color = "white";
+        customContainer.appendChild(title);
+      
+        // Create a container row for custom color swatches.
+        const swatchContainer = document.createElement("div");
+        swatchContainer.style.display = "flex";
+        swatchContainer.style.flexWrap = "wrap";
+        swatchContainer.style.justifyContent = "center";
+        swatchContainer.style.gap = "5px";
+      
+        // Function to create a swatch element.
+        const createSwatch = (color: string): HTMLDivElement => {
+          const swatch = document.createElement("div");
+          swatch.style.width = "20px";
+          swatch.style.height = "20px";
+          swatch.style.borderRadius = "4px";
+          swatch.style.cursor = "pointer";
+          swatch.style.border = "1px solid #999";
+          swatch.style.backgroundColor = color;
+          swatch.title = color;
+          // When clicked, update the target color using this custom color.
+          swatch.addEventListener("click", () => {
+            this.updateTargetColor();
+          });
+          return swatch;
+        };
+      
+        // Append existing custom color swatches.
+        this.customColors.forEach((color) => {
+          swatchContainer.appendChild(createSwatch(color));
+        });
+      
+        // Create an additional swatch for adding a new custom color.
+        const addSwatch = document.createElement("div");
+        addSwatch.style.width = "20px";
+        addSwatch.style.height = "20px";
+        addSwatch.style.borderRadius = "4px";
+        addSwatch.style.cursor = "pointer";
+        addSwatch.style.border = "1px solid #999";
+        addSwatch.style.backgroundColor = "rgba(0,0,0,0)"; // Transparent background
+        addSwatch.style.display = "flex";
+        addSwatch.style.justifyContent = "center";
+        addSwatch.style.alignItems = "center";
+        addSwatch.style.color = "#999";
+        addSwatch.style.fontSize = "16px";
+        addSwatch.innerText = "+";
+        addSwatch.title = "Add custom color";
+      
+        addSwatch.addEventListener("click", (evt: MouseEvent) => {
+          // Create a hidden input of type color (native color picker, often displayed as a gradient wheel)
+          const colorInput = document.createElement("input");
+          colorInput.type = "color";
+          // Optionally, set a default value (using current color)
+          colorInput.value = this.color;
+          // Hide the input element.
+          colorInput.style.position = "absolute";
+          colorInput.style.left = "-9999px";
+          document.body.appendChild(colorInput);
+          
+          // When a color is picked:
+          colorInput.addEventListener("input", () => {
+            this.color = colorInput.value;
+            this.updateTargetColor();
+            if (!this.customColors!.includes(this.color)) {
+              this.customColors!.push(this.color);
+              swatchContainer.appendChild(createSwatch(this.color));
+              this.saveColors()
+            }
+            document.body.removeChild(colorInput);
+          }, { once: true });
+          
+          // Programmatically open the native color picker.
+          colorInput.click();
+        });
+        
+        swatchContainer.appendChild(addSwatch);
+        customContainer.appendChild(swatchContainer);
+        return customContainer;
+      }
+      
+    private saveColors(): void {
+        // Ensure customColors exists.
+        
+        // Convert the updated customColors array to a pretty-printed JSON string.
+        const dataString = JSON.stringify(this.customColors, null, 2);
+        
+        // Define the key for the saved defaults. You can use a default key such as "customColors".
+        const key = "colors";
+        
+        // Build the message using your standard format.
+        const message = `save_defaults_${key}_~_${dataString}`;
+        
+        // Call the global callback function to save the defaults.
+        window.callbackFunction(message);
+    }
+      
+    
     private createExitButton(): HTMLDivElement {
         const button = document.createElement('div');
         button.innerText = '✕'; // Close icon
@@ -196,57 +319,76 @@ constructor(initialValue: string, applySelection: (color: string) => void) {
     public openMenu(
         event: MouseEvent,
         parentMenuWidth: number, // Width of the parent menu
-        applySelection: (color: string) => void
-    ): void {
+        applySelection: (color: string) => void,
+      ): void {
         this.applySelection = applySelection;
-    
-        // Attach menu to the DOM temporarily to calculate dimensions
+        
+        // Attach menu to DOM temporarily to calculate dimensions.
         this.container.style.display = 'block';
         document.body.appendChild(this.container);
-    
-        console.log('Menu attached:', this.container);
-    
-        // Calculate submenu dimensions
-        const submenuWidth = this.container.offsetWidth || 150; // Default submenu width
-        const submenuHeight = this.container.offsetHeight || 250; // Default submenu height
-    
-        console.log('Submenu dimensions:', { submenuWidth, submenuHeight });
-    
-        // Get mouse position
+        
+        // Calculate submenu dimensions.
+        const submenuWidth = this.container.offsetWidth || 150;
+        const submenuHeight = this.container.offsetHeight || 250;
+        
+        // Get mouse position.
         const cursorX = event.clientX;
         const cursorY = event.clientY;
-    
-        console.log('Mouse position:', { cursorX, cursorY });
-    
-        // Get viewport dimensions
+        
+        // Get viewport dimensions.
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
-    
-        // Calculate position relative to the parent menu
-        let left = cursorX + parentMenuWidth; // Offset by parent menu width
+        
+        // Calculate position relative to the parent menu.
+        let left = cursorX + parentMenuWidth;
         let top = cursorY;
-    
-        // Adjust position to avoid overflowing viewport
-        const adjustedLeft =
-            left + submenuWidth > viewportWidth ? cursorX - submenuWidth : left;
-        const adjustedTop =
-            top + submenuHeight > viewportHeight ? viewportHeight - submenuHeight - 10 : top;
-    
-        console.log({ left, top, adjustedLeft, adjustedTop });
-    
-        // Apply calculated position
+        
+        // Adjust position to avoid overflowing viewport.
+        const adjustedLeft = left + submenuWidth > viewportWidth ? cursorX - submenuWidth : left;
+        const adjustedTop = top + submenuHeight > viewportHeight ? viewportHeight - submenuHeight - 10 : top;
+        
         this.container.style.left = `${adjustedLeft}px`;
         this.container.style.top = `${adjustedTop}px`;
         this.container.style.display = 'flex';
-        this.container.style.position = 'absolute'
-        // Ensure the exit button stays within bounds
+        this.container.style.position = 'absolute';
+        
+        // Ensure the exit button stays within bounds.
         this.exitButton.style.bottom = '5px';
         this.exitButton.style.right = '5px';
-    
-        // Close menu when clicking outside
+        
+        // Define the auto-close handler.
+        const onMouseMove = (e: MouseEvent) => {
+          const rect = this.container.getBoundingClientRect();
+          // Extend the container bounds.
+          const extendedRect = {
+            left: rect.left - submenuWidth,
+            right: rect.right + submenuWidth,
+            top: rect.top - submenuHeight,
+            bottom: rect.bottom + submenuHeight,
+          };
+          if (
+            e.clientX < extendedRect.left ||
+            e.clientX > extendedRect.right ||
+            e.clientY < extendedRect.top ||
+            e.clientY > extendedRect.bottom
+          ) {
+            this.closeMenu();
+            document.removeEventListener('mousemove', onMouseMove);
+          }
+        };
+      
+        // Only start auto-close tracking when the mouse is over the container.
+        this.container.addEventListener('mouseenter', () => {
+          document.addEventListener('mousemove', onMouseMove);
+        });
+        this.container.addEventListener('mouseleave', () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          this.closeMenu();
+        });
+        
+        // Also close the menu when clicking outside.
         document.addEventListener('mousedown', this._handleOutsideClick.bind(this), { once: true });
-    }
-    
+      }
     
     public closeMenu(): void {
         this.container.style.display = 'none';

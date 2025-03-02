@@ -420,3 +420,46 @@ export function ohlcBar(
   ctx.lineTo(rightSide, close);
   ctx.stroke();
 }
+
+
+
+export function ohlcSlanted(
+  ctx: CanvasRenderingContext2D,
+  leftSide: number,
+  rightSide: number,
+  yCenter: number,
+  candleHeight: number,
+  isUp: boolean
+): void {
+  // Calculate the top and bottom edges of the candle.
+  const topY: number = yCenter - candleHeight / 2;
+  const bottomY: number = yCenter + candleHeight / 2;
+
+  // Optional: You can tweak the slantOffset to control how "tilted" the parallelogram is.
+  const slantOffset: number = Math.abs(rightSide - leftSide) * 0.9;
+
+  // Save the current canvas state before drawing.
+  ctx.save();
+  ctx.beginPath();
+
+  if (isUp) {
+    // Forward slash (/): top-left to top-right is left-aligned,
+    // bottom-left to bottom-right is right-aligned.
+    ctx.moveTo(leftSide, topY);
+    ctx.lineTo(leftSide + slantOffset, topY);
+    ctx.lineTo(rightSide, bottomY);
+    ctx.lineTo(rightSide - slantOffset, bottomY);
+  } else {
+    // Backslash (\): top-left to top-right is right-aligned,
+    // bottom-left to bottom-right is left-aligned.
+    ctx.moveTo(rightSide - slantOffset, topY);
+    ctx.lineTo(rightSide, topY);
+    ctx.lineTo(leftSide + slantOffset, bottomY);
+    ctx.lineTo(leftSide, bottomY);
+  }
+
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
