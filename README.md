@@ -7,7 +7,8 @@
 ### PineTS integration (original PineTS source: https://github.com/alaa-eddine/PineTS, edited source: https://github.com/EsIstJosh/PineTS) 
     Simple scripting capabilities similar to pinescript 
     
-    https://github.com/user-attachments/assets/a76d2fd6-6277-4ea6-869e-9701d29b0cc7
+![ezgif-62bcf9cd4778cd](https://github.com/user-attachments/assets/9e3540df-2cec-4e91-be5d-b34c65621c33)
+()
 
 
 
