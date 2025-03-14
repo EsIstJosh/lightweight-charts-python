@@ -43,13 +43,15 @@ export class DefaultOptionsManager {
   }
 
   public get(key: string): any | null {
-    if (this.defaults.has(key)) {
-      return this.defaults.get(key);
-    } else {
-      return null;
+    const lowerKey = key.toLowerCase();
+    for (const [mapKey, value] of this.defaults) {
+      if (mapKey.toLowerCase() === lowerKey) {
+        return value;
+      }
     }
+    return null;
   }
-
+  
     /**
      * Returns all stored defaults.
      *

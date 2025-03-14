@@ -12,6 +12,7 @@ export interface GlobalParams extends Window {
     MouseEventParams?: MouseEventParams| null; // Allow null values
     _pineTSInstance?: PineTS;
     monaco?: boolean 
+    menu?: boolean
 
 }
 

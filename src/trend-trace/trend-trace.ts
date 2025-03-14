@@ -477,7 +477,7 @@ public fromJSON(json: {
     );
   }
 
-  protected _mouseIsOverSequence(param: MouseEventParams): boolean {
+  public _mouseIsOverSequence(param: MouseEventParams): boolean {
     // Validate the presence of necessary properties in param
     if (!param.logical || !param.point) {
         console.warn('Invalid MouseEventParams: Missing logical or point.');
@@ -736,7 +736,7 @@ export class TrendTracePaneRenderer
         }
 
         const firstX = data[0].x1 as Logical;
-        const lastX = data[data.length - 1].x1 as Logical;
+        const lastX = data[data.length - 1].x2 as Logical;
         const canvasX1 = chart.timeScale().logicalToCoordinate(firstX) ?? 0;
         const canvasX2 =
           chart.timeScale().logicalToCoordinate(lastX) ?? canvasX1;
@@ -764,11 +764,13 @@ export class TrendTracePaneRenderer
                   ((_lastX - _firstX) / data.length ))) *
                   this._source._sequence.spatial.scale.x);
             const scaledX2 =
-              scaledX1 +
-              (inverted ? 1 : -1) *
-                (( bar.x2-bar.x1 -1) *
-                ((((_lastX - _firstX) / data.length )) *
-                this._source._sequence.spatial.scale.x));
+            ((((index + 1)*
+              ((_lastX - _firstX) / data.length ))) *
+                  (this._source._sequence.spatial.scale.x))
+               - (1 - (this._options.barSpacing??0.8)) * (_lastX - _firstX) / data.length / (this._options.chandelierSize ?? 1)
+
+
+
             const color = !bar.isUp
               ? inverted
                 ? this._options.downColor
@@ -796,8 +798,8 @@ export class TrendTracePaneRenderer
             // Include all required properties in the returned object
             return {
               ...bar,
-              scaledX1:inverted?scaledX1:scaledX2,
-              scaledX2:inverted?scaledX2:scaledX1,
+              scaledX1: scaledX1,//inverted?scaledX1:scaledX2,
+              scaledX2: scaledX2,//inverted?scaledX2:scaledX1,
               color,
               borderColor,
               wickColor,
@@ -916,13 +918,47 @@ export class TrendTracePaneRenderer
       (this._source._sequence._originalP2.price <
         this._source._sequence._originalP1.price &&
         this._source._sequence.p2.price < this._source._sequence.p1.price);
-    bars.forEach((bar) => {
-      const candleWidth = barSpace ;
-      const candleBodyWidth = (this._options.barSpacing??0.8)*(bar.scaledX2 - bar.scaledX1 );
-      const candleGap = (bar.scaledX2 - bar.scaledX1 ) -candleBodyWidth 
+
+      const flipped = 
+      this._source._sequence._originalP2.price < this._source._sequence._originalP1.price && 
+      this._source._sequence.p2.price < this._source._sequence.p1.price 
+      || this._source._sequence._originalP2.price > this._source._sequence._originalP1.logical && 
+      this._source._sequence.p2.price > this._source._sequence.p1.price    
+        const bar0 = bars[0].scaledX1
+        const bar1 = bars[bars.length - 1 ].scaledX2
+    
+        const candleWidth = (bar1 - bar0)  / bars.length 
+        const singleWidth =Math.abs(barSpace)
+        bars.forEach((bar, index) => {
+          const candleBodyWidth = (this._options.barSpacing??0.8)*(singleWidth );
+          const candleGap = singleWidth -candleBodyWidth 
       const offset = .5
-      const leftSide = bar.scaledX1-(0.5*candleBodyWidth)
-      const rightSide =  bar.scaledX2  + (0.5*candleBodyWidth) - (bar.x2-bar.x1 >1 ? candleBodyWidth:0)
+      let leftSide = bar.scaledX1-(0.5*singleWidth)
+      let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
+      if (index < bars.length - 1 && bars[index+1].scaledX1) {
+        const nextBar = bars[index + 1];
+        const currentMid = bar.scaledX1;
+    
+        // If ascending
+        if (currentMid < nextBar.scaledX1) {
+            // e.g. data moves left --> right
+             leftSide = currentMid - (0.5 * singleWidth);
+
+             rightSide = nextBar.scaledX1 - singleWidth  + (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)//(0.5 * singleWidth) + (bar.x2 - bar.x1 > 1? (0.5 * singleWidth): 0) - candleGap;
+    
+ 
+        } else {
+            // Descending
+
+             rightSide = currentMid + (0.5 * singleWidth);
+
+             leftSide = nextBar.scaledX1 + singleWidth  - (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)//(0.5 * singleWidth) + (bar.x2 - bar.x1 > 1? (0.5 * singleWidth): 0) - candleGap;
+    
+
+        }
+      }
+        // Example: compute the "middle" for the wick
+  
       const middle = (leftSide + rightSide) / 2;      //const scaledHigh =
       //  (this._source.series.priceToCoordinate( (inverted? bar.high??0:bar.low??0)) ?? 0) *
       //  verticalPixelRatio;
@@ -948,22 +984,24 @@ export class TrendTracePaneRenderer
       //const bottomWick = inverted
       //  ? Math.max(scaledOpen, scaledClose)
       //  : Math.min(scaledOpen, scaledClose);
-      const topWick = inverted?Math.min(scaledOpen,scaledClose):Math.max(scaledOpen, scaledClose)
-      const bottomWick =inverted?Math.max(scaledOpen,scaledClose):Math.min(scaledOpen, scaledClose) 
+      const topWick = flipped?Math.min(scaledOpen,scaledClose):Math.max(scaledOpen, scaledClose)
+      const top = flipped? Math.min(scaledHigh,scaledLow):Math.max(scaledHigh, scaledLow)
+      const bottomWick =flipped?Math.max(scaledOpen,scaledClose):Math.min(scaledOpen, scaledClose)
+      const bottom = flipped? Math.max(scaledHigh,scaledLow):Math.min(scaledHigh, scaledLow)
       ctx.strokeStyle = this._options.visible
         ? bar.wickColor ?? "#ffffff"
         : "rgba(0,0,0,0)";
 
       // Draw the top wick (high to max(open, close))
       ctx.beginPath();
-      ctx.moveTo(middle, scaledHigh);
+      ctx.moveTo(middle, top);
       ctx.lineTo(middle, topWick);
       ctx.stroke();
 
       // Draw the bottom wick (min(open, close) to low)
       ctx.beginPath();
       ctx.moveTo(middle, bottomWick);
-      ctx.lineTo(middle, scaledLow);
+      ctx.lineTo(middle, bottom);
       ctx.stroke();
     });
   }
@@ -980,14 +1018,19 @@ export class TrendTracePaneRenderer
     const { context: ctx, horizontalPixelRatio, verticalPixelRatio } = scope;
 
     ctx.save();
+    const bar0 = bars[0].scaledX1
+    const bar1 = bars[bars.length - 1 ].scaledX2 
 
-    bars.forEach((bar) => {
-      const candleWidth = barSpace ;
-      const candleBodyWidth = (this._options.barSpacing??0.8)*(bar.scaledX2 - bar.scaledX1 );
-      const candleGap = (bar.scaledX2 - bar.scaledX1  ) -candleBodyWidth 
+    const candleWidth = (bar1 - bar0)  / bars.length 
+    const singleWidth =Math.abs(barSpace)
+    bars.forEach((bar, index) => {
+      const candleBodyWidth = (this._options.barSpacing??0.8)*(singleWidth );
+      const candleGap = singleWidth -candleBodyWidth 
       if (!bar) {
         return;
       }
+
+
       const scaledOpen =
         (this._source.series.priceToCoordinate(bar.open!) ?? 0) *
         verticalPixelRatio;
@@ -1007,8 +1050,28 @@ export class TrendTracePaneRenderer
       const barVerticalSpan = barVerticalMax - barVerticalMin;
       const barY = (barVerticalMax + barVerticalMin) / 2;
       const offset = .5
-      const leftSide = bar.scaledX1-(0.5*candleGap)
-      const rightSide =  bar.scaledX2  + (0.5*candleGap) - (bar.x2-bar.x1 >1 ? candleBodyWidth:0)
+      let leftSide = bar.scaledX1-(0.5*singleWidth)
+      let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
+      if (index < bars.length - 1 && bars[index+1].scaledX1) {
+        const nextBar = bars[index + 1];
+        const currentMid = bar.scaledX1;
+    
+        // If ascending
+        if (currentMid < nextBar.scaledX1) {
+            // e.g. data moves left --> right
+             leftSide = currentMid - (0.5 * singleWidth);
+             rightSide = nextBar.scaledX1 - singleWidth + (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)//(0.5 * singleWidth) - (bar.x2 - bar.x1 > 1? (0.5 * singleWidth): 0) + candleGap;
+    
+ 
+        } else {
+            // Descending
+             rightSide = currentMid + (0.5 * singleWidth);
+             leftSide = nextBar.scaledX1 + singleWidth  - (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)//(0.5 * singleWidth) + (bar.x2 - bar.x1 > 1? (0.5 * singleWidth): 0) - candleGap;
+
+
+        }
+      }
+  
       //leftSide +   (candleWidth*(this._options.chandelierSize??1 )) - Math.abs((((this._options.barSpacing ?? 0.8))*(candleWidth)))  : leftSide +  Math.abs(1-((this._options.barSpacing??0.8 * candleWidth)/2));
       const middle = (leftSide + rightSide) / 2;      //const scaledHigh =
       ctx.fillStyle = this._options.visible

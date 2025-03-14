@@ -194,7 +194,7 @@ export class PitchFork extends ThreePointDrawing {
       this._moveToState(InteractionState.DRAGGING);
     }
   }
-  protected _mouseIsOverDrawing(
+  protected _mouseIsOverTwoPointDrawing(
     param: MouseEventParams,
     tolerance = 4
   ): boolean {

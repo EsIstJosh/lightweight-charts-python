@@ -13,6 +13,6 @@
     "enableVolumeOpacity": true,
 	"volumeOpacityPeriod": 21,
 	"maxOpacity":0.333,
-	"dynamicCandles": false
+	"dynamicCandles": "use Chandelier Size"
   }
   

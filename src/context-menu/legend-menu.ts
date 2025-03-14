@@ -172,9 +172,6 @@ export class LegendMenu {
         );
     }
 
-    // Optionally, add a "Close Menu" option.
-    this.contextMenu.separator();
-    this.contextMenu.addMenuItem("Close Menu", () => this.contextMenu.hideMenu());
 
     // Position and display the menu at the event location.
     this.contextMenu.showMenu(event);
