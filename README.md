@@ -3,6 +3,14 @@
 
 ## Forked to Add Features
 ![Cover Image](https://raw.githubusercontent.com/EsIstJosh/lightweight-charts-python/main/Screenshot2025-02-07114921.png)
+
+### PineTS integration (original PineTS source: https://github.com/alaa-eddine/PineTS, edited source: https://github.com/EsIstJosh/PineTS) 
+    Simple scripting capabilities similar to pinescript 
+    
+    https://github.com/user-attachments/assets/a76d2fd6-6277-4ea6-869e-9701d29b0cc7
+
+
+
 ### Series Types
     - Area
     - Bar
@@ -36,10 +44,6 @@
     - Volume Profile: Displays volume profiles based on the visible range and supports drawing. 
     
     - Trend Trace: A transformable/scalable  replica of a section of series between a drawings points. Similar to 'Bars Pattern' in TradingView (instantiated from and linked to existing drawing: box, trendline etc)
-### PineTS integration (original PineTS source: https://github.com/alaa-eddine/PineTS, edited source: https://github.com/EsIstJosh/PineTS) 
-    Simple scripting capabilities similar to pinescript 
-    
-    https://github.com/user-attachments/assets/a76d2fd6-6277-4ea6-869e-9701d29b0cc7
 
 
 ### Indicators (implemented in typescript, from KLineChart primarily ( https://github.com/klinecharts/KLineChart ))
