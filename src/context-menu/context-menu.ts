@@ -176,7 +176,6 @@ export class ContextMenu {
 
     seriesType: { skip: true },
     chandelierSize: {min:1},// skip: true },
-    dynamicCandles: { skip: true },
     volumeMALength: { skip: true },
     volumeMultiplier: { skip: true },
     volumeOpacityPeriod : {skip: true}
@@ -435,6 +434,7 @@ export class ContextMenu {
       this.hideMenuOnOutsideClick.bind(this),
       { once: true }
     );
+    window.menu = true
   }
 
   private hideMenuOnOutsideClick(event: MouseEvent): void {
@@ -447,6 +447,8 @@ export class ContextMenu {
     this.div.style.display = "none";
     if (activeMenu === this.div) {
       activeMenu = null;
+      window.menu = false
+
     }
   }
 
@@ -1432,7 +1434,30 @@ export class ContextMenu {
       }
     );
   }
+  // Inside your populateSeriesMenu method, after you've created your other menu items...
+if (seriesOptions.dynamicCandles !== undefined) {
+  const allowedModes: Array<"false" | "trend" | "trigger" | "volume_trend"> = [
+    "false",
+    "trend",
+    "trigger",
+    "volume_trend"
+  ];
+  const currentMode = seriesOptions.dynamicCandles as "false" | "trend" | "trigger" | "volume_trend";
   
+  this.addSelectInput(
+    "Dynamic Candles",         // Label for the menu item
+    currentMode,               // Current value
+    allowedModes,              // Allowed values
+    (newValue: string) => {    // Callback when the user selects a new mode
+      const options = { dynamicCandles: newValue as "false" | "trend" | "trigger" | "volume_trend" };
+      series.applyOptions(options as Partial<OhlcSeriesOptions>);
+      console.log(`Updated dynamicCandles to: ${newValue}`);
+      // Optionally, repopulate the menu to reflect changes
+      this.populateSeriesMenu(series, event);
+    }
+  );
+}
+
 
     otherOptions.forEach((option) => {
       const optionLabel = camelToTitle(option.label); // Human-readable label

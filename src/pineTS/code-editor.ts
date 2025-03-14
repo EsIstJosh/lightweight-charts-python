@@ -11,20 +11,13 @@
 
 
 import * as monaco from "monaco-editor";
-import {PineTS, Context} from "pinets"
+import { PineTS } from "pinets";
 import { Handler } from "../general/handler";
-import { ISeriesApi, OhlcData, SeriesType, Time } from "lightweight-charts";
+import { ISeriesApi,  SeriesType  } from "lightweight-charts";
 
 import { GlobalParams } from "../general";
-import {  addPlotToHandler, convertDataItem, updatePlotOnHandler } from "../helpers/series";
-import { ohlcSeriesData } from "../ohlc-series/data";
-import { ohlcSeries } from "../ohlc-series/ohlc-series";
-import { base } from "acorn-walk";
-import { convertTime } from "../helpers/time";
-interface ScriptData {
-  code: string;
-  // other properties as needed...
-}
+import {  addPlotToHandler} from "../helpers/series";
+
 declare const window: GlobalParams;
 
 /**
@@ -41,7 +34,7 @@ const baseButtonStyle = {
   border: "none",
   padding: "5px 10px",         // same padding as 'Close' button
   cursor: "pointer",
-  borderRadius: "8px",         // same round corners as 'Close' button
+  borderRadius: "12px",         // same round corners as 'Close' button
   boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
   transition: "transform 0.2s ease-in-out",
 };
@@ -503,13 +496,18 @@ const baseButtonStyle = {
   // 
   const ema1 = ta.ema(close,16)
   const ema2 = ta.ema(close,32)
-  const ema3 = ta.ema(close,64)
-  const ema4 = ta.ema(close,128)
-  
+  const ema3 = ta.ema(close,48)
+  const ema4 = ta.ema(close,64)
+  const ema5 = ta.ema(close,96)
+  const ema6 = ta.ema(close,128)
   plot(ema1,'EMA1',{ style: 'line', color: '#ff0000', linewidth: 2 })
-  plot(ema2,'EMA2',{ style: 'line', color: '#ff7700', linewidth: 2 })
-  plot(ema3,'EMA3',{ style: 'line', color: '#ffee00', linewidth: 2 })
-  plot(ema4,'EMA4',{ style: 'line', color: '#00ff00', linewidth: 2 })
+  plot(ema2,'EMA2',{ style: 'cross', color: '#ff7700', linewidth: 2 })
+  plot(ema3,'EMA3',{ style: 'circles', color: '#ffee00', linewidth: 2 })
+  plot(ema4,'EMA4',{ style: '<>', color: '#00ff00', linewidth: 2 })
+  plot(ema5,'EMA5',{ style: 'triangleUp', color: '#0050ff', linewidth: 2 })
+  plot(ema6,'EMA6',{ style: 'arrowDown', color: '#ffffff', linewidth: 2 })
+
+
       `;
     }
     
@@ -616,7 +614,7 @@ const input = context.input;
 ${code}
         }`;
 
-      const { plots, candles, bars } = await pineTS.run(script, undefined, true);
+      const { plots, candles, bars } = await pineTS.run(script, undefined, false);
       console.log("Plots:", plots);
       console.log("Candles:", candles);
       console.log("Bars:", bars);
@@ -685,11 +683,7 @@ ${code}
         volSeries ? [...volSeries.data()] : []
       );
             // Retrieve the series titles from options.
-      // We assume each series has an options() method returning an object with a "title" property.
-      const main = (this.selectedSeries ?? this.handler.series).options().title;
-      const volume = (this.selectedVolumeSeries ?? this.handler.volumeSeries)?.options?.()?.title || "";
-  
-      // Instantiate or reuse PineTS.
+
       const pineTS = new PineTS(
         transformedData,
         this.handler.series.options().title,
@@ -715,7 +709,7 @@ ${code}
     if (plots) {
       for (const plotName in plots) {
         if (plots.hasOwnProperty(plotName)) {
-          addPlotToHandler(this.handler, plotName, plots[plotName]);
+          addPlotToHandler(this.handler, plotName, plots[plotName],undefined, true);
         }
       }
     }
@@ -736,17 +730,7 @@ ${code}
       }
     }
   
-    // Save the PineTS instance along with the series titles.
-    this.scripts[scriptKey] = {
-      code,
-      series:main ,
-      volumeSeries: volume,
-    };
-  
-    // Subscribe to data changes on the main series.
-    mainSeries.subscribeDataChanged(() => {
-      this.executeSavedScript(scriptKey);
-    });
+
   } catch (error) {
     console.error("Error executing PineTS code:", error);
   }}

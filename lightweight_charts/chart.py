@@ -167,7 +167,8 @@ class Chart(abstract.AbstractChart):
         inner_height: float = 1.0,
         scale_candles_only: bool = False,
         position: FLOAT = 'left',
-        defaults: str = None
+        defaults: str = None,
+        scripts: str = None
     ):
         Chart.WV.debug = debug
         self._i = Chart.WV.create_window(

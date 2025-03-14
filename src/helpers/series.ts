@@ -1,7 +1,6 @@
 import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData, SeriesOptions, SeriesOptionsMap, SeriesDataItemTypeMap } from "lightweight-charts";
 import {CandleShape } from "../ohlc-series/data";
 import { isOHLCData, isSingleValueData, isWhitespaceData, SeriesTypeToDataMap } from "./typeguards";
-import { TradeData, tradeDefaultOptions, TradeSeries, TradeSeriesOptions } from "../tx-series/renderer";
 import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
 import { Handler, Legend } from "../general";
 import { IndicatorDefinition, IndicatorFigure } from "../indicators/indicators";
@@ -11,7 +10,10 @@ import { PineTS } from "pinets";
 import { convertTime, formattedDateAndTime } from "./time";
 import { DefaultOptionsManager } from "../general/defaults";
 import { IsExternal } from "rollup";
- 
+import { defaultSymbolSeriesOptions, SymbolSeriesOptions } from "../symbol-series/options";
+import { SymbolSeries } from "../symbol-series/symbol-series";
+import { tradeDefaultOptions, TradeData } from "../tx-series/renderer";
+import { SymbolSeriesData } from "../symbol-series/data";
 export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     primitives: {
         [key: string]: any; // Dictionary for attached primitives
@@ -269,7 +271,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     const targetType = original.seriesType() as SupportedSeriesType;
   
     // For single-value series: if the target type is one of these and the first data item has a "value" property...
-    if ((targetType === "Line" || targetType === "Histogram" || targetType === "Area") && "value" in data[0]) {
+    if ((targetType === "Line" || targetType === "Histogram" || targetType === "Area" || targetType == "Symbol" || targetType == "Custom") && "value" in data[0]) {
       // ...and if every data item is already SingleValueData, then no conversion is needed.
       if (data.every(item => isSingleValueData(item))) {
         originalSetData(data);
@@ -287,7 +289,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
   
     // Otherwise, we need to convert the data.
     let convertedData: SingleValueData[] | OhlcData[];
-    if ((targetType === "Line" || targetType === "Histogram" || targetType === "Area") && "open" in data[0]) {
+    if ((targetType === "Line" || targetType === "Histogram" || targetType === "Area" || targetType === "Symbol") && "open" in data[0]) {
       // Data appears to be OHLC but target is single-value;
       // conversion will use the close value.
       convertedData = data.map((_, index) => convertDataItem(data, targetType, index)) as SingleValueData[];
@@ -380,7 +382,7 @@ export interface SeriesOptionsExtended {
         DeepPartial<SeriesOptionsExtended & SeriesOptionsExtended>  {}
     
 
-export function determineAvailableFields(series: ISeriesApi<any>|TradeSeries<any>|ohlcSeries<any>): {
+export function determineAvailableFields(series: ISeriesApi<any>|SymbolSeries<any>|ohlcSeries<any>): {
 ohlc: boolean;
 volume: boolean;
 } {
@@ -414,7 +416,7 @@ export function getDefaultSeriesOptions(
         | AreaSeriesOptions
         | BarSeriesOptions
         | OhlcSeriesOptions
-        | TradeSeriesOptions 
+        | SymbolSeriesOptions 
     )
     > {
     const common: DeepPartial<SeriesOptionsCommon> = {
@@ -482,10 +484,10 @@ export function getDefaultSeriesOptions(
         lineStyle: 0 as LineStyle,
         lineWidth: 1 as LineWidth,
         };
-    case "Trade": 
+    case "Symbol": 
         return {
             ...common,
-            ...tradeDefaultOptions,
+            ...defaultSymbolSeriesOptions,
             
         }
     default:
@@ -511,7 +513,8 @@ type ConvertableData<T extends Time = Time> =
 | AreaData<T>
 | BarData<T>
 | CandlestickData<T>
-| { time: T }  // for e.g. "Trade" if you had that, or minimal shapes
+| SymbolSeriesData<T>
+| WhitespaceData<T>  
 | null;
 
 
@@ -688,17 +691,33 @@ export function convertDataItem(
       break;
     }
     
-    case "Trade": {
-      return {
-        time: item.time,
-        action: (item as any).action ?? undefined,
-      } as TradeData;
+    case "Symbol": {
+      if (isOHLCData(item)) {
+        return {
+          time: item.time,
+          value: item.close
+      } as SymbolSeriesData
+    }else if (isSingleValueData(item)) {
+        return {
+          time: item.time,
+          value: item.value
+
+        } as SymbolSeriesData;
+      } else if (isWhitespaceData(item)) {
+        return {
+          time: item.time,
+        } as WhitespaceData<Time>;
+      }
+      break;
     }
     
     default:
       console.error(`Unsupported target type: ${targetType}`);
-      return null;
-  }
+      return {
+        time: item.time,
+      } as WhitespaceData<Time>;
+    }
+  
 
   // If we reach here, no conversion was possible
   console.warn("Could not convert data to the target type.");
@@ -867,7 +886,7 @@ export enum SeriesTypeEnum {
   Bar = "Bar",
   Candlestick = "Candlestick",
   Ohlc = "Ohlc",
-  Trade = "Trade",
+  Symbol = "Symbol",
   Custom = "Custom",
 
 }
@@ -1470,10 +1489,12 @@ export function addPlotToHandler(
   if (plotName) {
     extractedOptions.title = plotName;
   }
-
-  let baseOptions = handler.defaultsManager.get(type);
+  const plotType = (extractedOptions.style === 'circles' || extractedOptions.style === 'cross')?'Symbol':type
+  const defaultOptions = getDefaultSeriesOptions(plotType as SeriesTypeEnum) || {};
+  const fileDefaults = handler.defaultsManager.get(plotType) || {};
+  let baseOptions = { ...defaultOptions, ...fileDefaults, ...extractedOptions};
+  
   baseOptions = { ...baseOptions, ...extractedOptions };
-
   // Format the time value for each data item.
   const formattedData = data.map((item: any) => ({
     ...item,
@@ -1497,8 +1518,18 @@ export function addPlotToHandler(
   let createdSeries: { name: string; series: ISeriesApiExtended } | null = null;
 
   // Choose the correct series factory based on the provided type.
-  if (type === "Line") {
+if (type === "Line") {
+  // If the style is anything other than 'line', use the symbol series factory.
+  if (extractedOptions.style !== 'line') {
+    createdSeries = handler.createSymbolSeries(
+      plotName,
+      { ...baseOptions, shape: extractedOptions.style },
+      pane
+    );
+  } else {
     createdSeries = handler.createLineSeries(plotName, baseOptions, pane);
+  }
+
   } else if (type === "Bar") {
     createdSeries = handler.createBarSeries(plotName, baseOptions, pane);
   } else if (type === "Candlestick" || type === "Ohlc" || (type === "Custom" && data[0]?.open !== undefined)) {
@@ -1521,13 +1552,17 @@ export function addPlotToHandler(
   handler.seriesMap.set(plotName, createdSeries!.series);
 }
 
-/**
- * Helper function to extract options.
- */
 export function extractPlotOptions(options: any): any {
   const _options: any = {};
   for (const key in options) {
-    _options[key] = Array.isArray(options[key]) ? options[key][0] : options[key];
+    // Use the first element if the option value is an array.
+    const value = Array.isArray(options[key]) ? options[key][0] : options[key];
+    // Check if the key (in lowercase) is 'linewidth'
+    if (key.toLowerCase() === 'linewidth') {
+      _options.lineWidth = value;
+    } else {
+      _options[key] = value;
+    }
   }
   return _options;
 }

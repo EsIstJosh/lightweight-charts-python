@@ -21,7 +21,6 @@ export interface ohlcSeriesOptions
 		> {
 	radius: number;
 	shape:CandleShape;
-	chandelierSize: number; 
 	barSpacing: number;
 	lineStyle: LineStyle;
 	lineWidth: LineWidth;
@@ -29,7 +28,8 @@ export interface ohlcSeriesOptions
 	volumeOpacityMode: "/ max"|"> previous"| "> average";
 	volumeOpacityPeriod:number;
 	maxOpacity:number;
-	dynamicCandles:boolean;
+	dynamicCandles :"use Chandelier Size" | "trend" | "trigger" | "volume_trend";
+	chandelierSize: number; 
 	volumeMALength?: number;    // e.g. 20 (default if not provided)
 	volumeMultiplier?: number;  // e.g. 1.0 (default if not provided)
 	dynamicTrigger?: () => { newBar: boolean }; // Corrected function signature
@@ -61,7 +61,7 @@ export const ohlcdefaultOptions: ohlcSeriesOptions = {
 	volumeOpacityMode: '> previous',
 	volumeOpacityPeriod: 21,
 	maxOpacity:0.3,
-	dynamicCandles: false,
+	dynamicCandles:"use Chandelier Size",
 	dynamicTrigger: () => ({ newBar: true }) // Corrected function implementation
 } as const;
 	//upperUpColor: undefined,

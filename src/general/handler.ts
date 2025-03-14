@@ -47,6 +47,11 @@ import { DefaultOptionsManager } from "./defaults";
 import { SupportedSeriesType, getDefaultSeriesOptions } from "../helpers/series";
 import { ColorPicker } from "../context-menu/color-picker_";
 import { PineScriptManager } from "./scripts";
+import { defaultSymbolSeriesOptions, SymbolSeriesOptions } from "../symbol-series/options";
+import { group } from "console";
+import { title } from "process";
+import { json } from "stream/consumers";
+import { SymbolSeries } from "../symbol-series/symbol-series";
 
 globalParamInit();
 declare const window: GlobalParams;
@@ -152,26 +157,25 @@ export class Handler {
             window.MouseEventParams = this.currentMouseEventParams || null;
         });
         this.seriesMetadata = new WeakMap();
-
-        this.reSize();
-        if (!autoSize) return;
-        window.addEventListener("resize", () => this.reSize());
+        this.createTopBar()
         window.monaco = false
         // Additional MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {
             this.currentMouseEventParams = param;
         });
         
-        
+
+        this.reSize();
+        if (!autoSize) return;
+        window.addEventListener("resize", () => this.reSize());
     }
     reSize() {
         let topBarOffset =
             this.scale.height !== 0 ? this._topBar?._div.offsetHeight || 0 : 0;
-        this.width =             window.innerWidth * this.scale.width
-
-        this.height =             window.innerHeight * this.scale.height - topBarOffset
-
-        this.chart.resize(this.width,this.height,true);
+        this.chart.resize(
+            window.innerWidth * this.scale.width,
+            window.innerHeight * this.scale.height - topBarOffset
+        );
         this.wrapper.style.width = `${100 * this.scale.width}%`;
         this.wrapper.style.height = `${100 * this.scale.height}%`;
 
@@ -489,6 +493,94 @@ createVolumeSeries(pane?: number): ISeriesApiExtended {
     }
     return { name, series: decorated };
   }
+
+
+/**
+ * Creates a custom Symbol series using merged options.
+ * @param name The series title.
+ * @param options Optional OHLC series options (shared with Symbol).
+ * @param pane Optional pane index to move the series to.
+ */
+createSymbolSeries(
+	name: string,
+	options?: Partial<ohlcSeriesOptions>,
+	pane?: number
+): { name: string; series: ISeriesApiExtended } {
+	// Merge built-in defaults, file defaults, and user-supplied options for "Symbol"
+	const base = defaultSymbolSeriesOptions;
+	const fileDefaults = this.defaultsManager.defaults.get('symbol') || {};
+
+	const mergedOptions: SymbolSeriesOptions & {
+		seriesType?: string;
+		group?: string;
+		legendSymbol?: string[];
+	} = {
+		...base,
+		...fileDefaults,
+		...options,
+		seriesType: 'Symbol',
+	};
+    const symbol = (() => {
+        switch (mergedOptions.shape) {
+            // Unicode circle
+            case 'circle':
+            case 'circles':       return '●'; // or '○'
+            // A cross-like symbol
+            case 'cross':        return '✚';
+            // Filled upward triangle
+            case 'triangleUp':   return '▲';
+            // Filled downward triangle
+            case 'triangleDown': return '▼';
+            // Up arrow
+            case 'arrowUp':      return '↑';
+            // Down arrow
+            case 'arrowDown':    return '↓';
+            default:             return mergedOptions.shape;
+        }
+    })();
+    
+
+	// Pull out relevant fields so we can pass the rest to addCustomSeries(...)
+	const { group, legendSymbol = symbol, ...filteredOptions } = mergedOptions;
+
+	// Create the underlying series instance
+	const Instance = new SymbolSeries();  // or whatever class is appropriate
+	const symbolSeries = this.chart.addCustomSeries(Instance, {
+		...filteredOptions,
+		title: name,
+	});
+
+	// Decorate the series if desired
+	const decorated = decorateSeries(symbolSeries, this.legend);
+	this._seriesList.push(decorated);
+	this.seriesMap.set(name, decorated);
+
+	
+
+	// Build the legend item
+	const legendItem: LegendItem = {
+		name,
+		series: decorated,
+		colors: [mergedOptions.color],
+		legendSymbol: Array.isArray(legendSymbol)
+			? legendSymbol
+			: legendSymbol
+			? [legendSymbol]
+			: [],
+		seriesType: 'Symbol', 
+		group,
+	};
+
+	this.legend.addLegendItem(legendItem);
+
+	// Move to specified pane if provided
+	if (pane !== undefined) {
+		decorated.moveToPane(pane);
+	}
+
+	return { name, series: decorated };
+}
+
    // /**
    //  * Creates a trade series using merged options.
    //  */
@@ -782,7 +874,7 @@ createVolumeSeries(pane?: number): ISeriesApiExtended {
       
         chart.commandFunctions.push((event: KeyboardEvent) => {
           // Only allow if window.monaco is explicitly false.
-          if (window.monaco !== false) return false;
+          if (window.monaco !== false || window.menu !== false) return false;
           if (window.handlerInFocus !== chart.id || window.textBoxFocused) return false;
           if (searchWindow.style.display === 'none') {
             if (/^[a-zA-Z0-9]$/.test(event.key)) {
