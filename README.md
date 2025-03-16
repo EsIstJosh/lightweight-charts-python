@@ -5,7 +5,11 @@
 ![Cover Image](https://raw.githubusercontent.com/EsIstJosh/lightweight-charts-python/main/Screenshot2025-02-07114921.png)
 
 ### PineTS integration (original PineTS source: https://github.com/alaa-eddine/PineTS, edited source: https://github.com/EsIstJosh/PineTS) 
-    Simple scripting capabilities similar to pinescript 
+### PineTS related code is licensed seperately using the AGPL3.0 license: [AGPL License](./AGPL_LICENSE) 
+    Simple scripting capabilities similar to pinescript, 
+    see the [PineTS ReadMe](https://github.com/EsIstJosh/PineTS/blob/bd79b7f2d21d15f7470da118eab4f71638ce07da/README.md) 
+    for more information
+
     
 ![ezgif-88d432c58012aa](https://github.com/user-attachments/assets/ffbe2b3d-6be6-4d1f-8b42-86e950800712)
 
@@ -118,7 +122,6 @@ For full details, refer to the [MIT License](./MIT_LICENSE).
 
 [![PyPi Release](https://img.shields.io/pypi/v/lightweight-charts?color=32a852&label=PyPi)](https://pypi.org/project/lightweight-charts/)  
 [![Made with Python](https://img.shields.io/badge/Python-3.8+-c7a002?logo=python&logoColor=white)](https://python.org "Go to Python homepage")  
-[![License](https://img.shields.io/github/license/louisnw01/lightweight-charts-python?color=9c2400)](https://github.com/louisnw01/lightweight-charts-python/blob/main/LICENSE)  
 [![Documentation](https://img.shields.io/badge/documentation-006ee3)](https://lightweight-charts-python.readthedocs.io/en/latest/index.html)
 
 
