@@ -4,11 +4,11 @@ import commonjs from '@rollup/plugin-commonjs';
 import postcss from 'rollup-plugin-postcss';
 import monaco from 'rollup-plugin-monaco-editor';
 import typescript from '@rollup/plugin-typescript';
-//const { terser } = require('@rollup/plugin-terser');
+import terser from '@rollup/plugin-terser';
 import json from '@rollup/plugin-json';
-
 import replace from '@rollup/plugin-replace';
 import { URL } from 'url';
+import { PineTS } from 'pinets';
 export default {
   // Using your provided index.ts as the single entry point.
   input: 'src/index.ts',
@@ -20,7 +20,8 @@ export default {
       globals: {
         'lightweight-charts': 'LightweightCharts',
         'monaco-editor': 'monaco', // Use the global variable "monaco" in the browser.
-        'url': 'URL'
+        'url': 'URL',
+        'pinets': 'PineTS'
       }
     },
   external: ['lightweight-charts', 'monaco-editor','URL'],
@@ -38,5 +39,6 @@ export default {
         'process.env.NODE_ENV': JSON.stringify('development'),
         preventAssignment: true,
       }),
+    terser()
   ],
 };
