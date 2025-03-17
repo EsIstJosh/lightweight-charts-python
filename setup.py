@@ -15,10 +15,10 @@ setup(
     package_data={
         'lightweight_charts': ['js/*'],
     },
-    author='louisnw',
-    license='MIT',
+    author='EsIstJosh',
+    license='MIT/AGPL-3.0',
     description="Python framework for TradingView's Lightweight Charts JavaScript library.",
-    long_description=long_description,
-    long_description_content_type='text/markdown',
-    url='https://github.com/louisnw01/lightweight-charts-python',
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url='https://github.com/EsIstJosh/lightweight-charts-python',
 )
