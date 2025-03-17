@@ -13,12 +13,13 @@
 import * as monaco from "monaco-editor";
 import { PineTS } from "pinets";
 import { Handler } from "../general/handler";
-import { ISeriesApi,  SeriesType  } from "lightweight-charts";
+import { DataChangedScope, ISeriesApi,  SeriesType  } from "lightweight-charts";
 
 import { GlobalParams } from "../general";
-import {  addPlotToHandler} from "../helpers/series";
+import {  addFillAreaToHandler, addPlotToHandler} from "../helpers/series";
 
 declare const window: GlobalParams;
+export type DataChangedHandler = (scope: DataChangedScope) => void;
 
 /**
  * CodeEditor creates a bottom-docked pane-style Monaco Editor.
@@ -58,13 +59,17 @@ const baseButtonStyle = {
    // Store details about the executed scripts.
     private scripts: { 
       [key: string]: { 
-        series:string; 
-        volumeSeries:string | null 
-        code: string; 
+        pineTSInstance: PineTS | null;
+        ohlc:string | null; 
+        volume:string | null;
+        code: string | null;
+        n: number | null
       } 
     } = {};
     // Store the Handler instance passed in the constructor.
     private handler: Handler;
+    private _dataChangeHandlers: Map<string, DataChangedHandler> = new Map();
+
     // Attributes to store the selected series and volume series.
     private selectedSeries: ISeriesApi<SeriesType> | null = null;
     private selectedVolumeSeries: ISeriesApi<SeriesType> | null = null;
@@ -503,9 +508,15 @@ const baseButtonStyle = {
   plot(ema1,'EMA1',{ style: 'line', color: '#ff0000', linewidth: 2 })
   plot(ema2,'EMA2',{ style: 'cross', color: '#ff7700', linewidth: 2 })
   plot(ema3,'EMA3',{ style: 'circles', color: '#ffee00', linewidth: 2 })
-  plot(ema4,'EMA4',{ style: '<>', color: '#00ff00', linewidth: 2 })
+  plot(ema4,'EMA4',{ style: '❖', color: '#00ff00', linewidth: 2 })
   plot(ema5,'EMA5',{ style: 'triangleUp', color: '#0050ff', linewidth: 2 })
   plot(ema6,'EMA6',{ style: 'arrowDown', color: '#ffffff', linewidth: 2 })
+
+  fill('EMA1','EMA2')
+  fill('EMA2','EMA3')
+  fill('EMA3','EMA4')
+  fill('EMA4','EMA5')
+  fill('EMA5','EMA6')
 
 
       `;
@@ -590,7 +601,7 @@ const baseButtonStyle = {
       const volumeSeries = (this.selectedVolumeSeries ?? this.handler.volumeSeries)?.options?.()?.title || "";
   
       // Instantiate a new PineTS instance.
-      const transformedData = transformDataToArray(
+      const transformedData = transformDataArray(
         [...(this.selectedSeries ?? this.handler.series).data()],
         [...(this.selectedVolumeSeries ? this.selectedVolumeSeries.data() : [])]
       );
@@ -606,7 +617,7 @@ const baseButtonStyle = {
         const script = `(context) => { 
           
 const { close, open, high, low, hlc3, volume, hl2, ohlc4 } = context.data;
-const { plotchar, plot, na, indicator, nz, plotcandle, plotbar} = context.core;
+const { plotchar, plot, na, indicator, nz, plotcandle, plotbar, fill} = context.core;
 const ta = context.ta;
 const math = context.math;
 const input = context.input;
@@ -614,7 +625,7 @@ const input = context.input;
 ${code}
         }`;
 
-      const { plots, candles, bars } = await pineTS.run(script, undefined, false);
+      const { plots, candles, bars, fills, max_period } = await pineTS.run(script, undefined, false);
       console.log("Plots:", plots);
       console.log("Candles:", candles);
       console.log("Bars:", bars);
@@ -622,86 +633,131 @@ ${code}
       if (plots) {
         for (const plotName in plots) {
           if (plots.hasOwnProperty(plotName)) {
-            addPlotToHandler(this.handler, plotName, plots[plotName]);
+            addPlotToHandler(this.handler, plotName, plots[plotName], undefined,"overwrite");
           }
         }
       }
     
       if (candles) {
         for (const plotName in candles) {
-          if (plots.hasOwnProperty(plotName)) {
-            addPlotToHandler(this.handler, plotName, plots[plotName], "Candlestick");
+          if (candles.hasOwnProperty(plotName)) {
+            addPlotToHandler(this.handler, plotName, candles[plotName], "Candlestick", "overwrite");
           }
         }
       }
     
       if (bars) {
         for (const plotName in bars) {
-          if (plots.hasOwnProperty(plotName)) {
-            addPlotToHandler(this.handler, plotName, plots[plotName], "Bar");
+          if (bars.hasOwnProperty(plotName)) {
+            addPlotToHandler(this.handler, plotName, bars[plotName], "Bar", "overwrite");
+          }
+        }
+      }
+      if (fills) {
+        for (const fillName in fills) {
+          if (fills.hasOwnProperty(fillName)) {
+            addFillAreaToHandler(this.handler, fills[fillName]);
           }
         }
       }
     
       // Save the PineTS instance along with the series titles.
       this.scripts[scriptKey] = {
-        code,
-        series: mainSeries,
-        volumeSeries: volumeSeries,
-      };
+        pineTSInstance: pineTS,
+        ohlc: mainSeries,
+        volume: volumeSeries,
+        code: code,
+        n: max_period
+      }
+
     
       // Subscribe to data changes on the main series.
-      const series = this.selectedSeries ?? this.handler.series;
-      series.subscribeDataChanged(() => {
-        this.executeSavedScript(scriptKey);
-      });
+      const series = this.handler.seriesMap.get(mainSeries);
+  
+      this.replaceScript(scriptKey)
     } catch (error) {
       console.error("Error executing PineTS code:", error);
     }}
-  
-  public async executeSavedScript(scriptKey: string): Promise<void> {
-    try {
+    public replaceScript(scriptKey: string): void {
+      // Retrieve the saved script details.
       const savedScript = this.scripts[scriptKey];
-      if (!savedScript) {
-        console.warn(`No saved script found for key: ${scriptKey}`);
+      if (!savedScript || !savedScript.ohlc) {
+        console.warn(`No series information found for script key: ${scriptKey}`);
         return;
       }
-  
-      const { code, series, volumeSeries} = savedScript;
-  
+      
+      // Look up the series from the handler's seriesMap using the saved ohlc (main series) title.
+      const seriesTitle: string = savedScript.ohlc;
+      const series = this.handler.seriesMap.get(seriesTitle);
+      if (!series) {
+        console.warn(`Series with title "${seriesTitle}" not found.`);
+        return;
+      }
+      const length = series.data().length 
+      // If a handler for this script key already exists, unsubscribe and remove it.
+      if (this._dataChangeHandlers.has(scriptKey)) {
+        try {
+          const oldHandler = this._dataChangeHandlers.get(scriptKey);
+          series.unsubscribeDataChanged(oldHandler as DataChangedHandler);
+          console.log('Unsubscribing old Data Change Handler.... Data Length:', length)
+          this._dataChangeHandlers.delete(scriptKey);
+        } catch (err) {
+          console.warn(`Error unsubscribing from data changes for script "${scriptKey}":`, err);
+        }
+      }
+    
+      // Define a new data-change handler for this specific script key.
+      const newHandler: DataChangedHandler = (scope) => {
+        try {
+          console.log('Data Changed, updating.... Data Length:', length)
+          // Execute the saved script when data changes.
+          this.executeSavedScript(scriptKey);
+        } catch (error) {
+          console.error(`Error executing saved script for "${scriptKey}":`, error);
+        }
+      };
+    
+      // Store the new handler in the map.
+      this._dataChangeHandlers.set(scriptKey, newHandler);
+    
+      // Subscribe to data changes with the new handler.
+      series.subscribeDataChanged(newHandler);
+    }
+    
+  public async executeSavedScript(scriptKey: string): Promise<void> {
+     try {
+
+    const ohlc = this.scripts[scriptKey]?.ohlc;
+    const volume = this.scripts[scriptKey]?.volume;
+    const n = this.scripts[scriptKey]?.n?? undefined
+    console.log('N:',n)
+    // Run the saved instance.
+    // Passing undefined for the code parameter causes run() to use the cached code.
+      
       // Look up the main series and volume series from the handler's seriesMap.
-      const mainSeries = this.handler.seriesMap.get(series);
-      const volSeries = volumeSeries ? this.handler.seriesMap.get(volumeSeries) : null;
+      const mainSeries = ohlc ? this.handler.seriesMap.get(ohlc) : null;
+      const volSeries = volume ? this.handler.seriesMap.get(volume) : null;
   
       if (!mainSeries) {
         console.warn(`Main series with title "${mainSeries}" not found.`);
         return;
       }
   
-      const transformedData = transformDataToArray(
-        [...mainSeries.data()],
-        volSeries ? [...volSeries.data()] : []
+      const transformedData = transformData(
+        mainSeries.dataByIndex(mainSeries.data().length -1),
+        volSeries ? volSeries.dataByIndex(volSeries.data().length -1) : undefined
       );
             // Retrieve the series titles from options.
+      const newBar = transformedData
 
-      const pineTS = new PineTS(
-        transformedData,
-        this.handler.series.options().title,
-        '1D'
-      );
+      const pineTS = this.scripts[scriptKey]?.pineTSInstance;
+      if (!pineTS) {
+        console.warn(`No saved PineTS instance found for key: ${scriptKey}`);
+        return;
+      }
+    pineTS.updateData(newBar) 
 
-    // Build the dynamic script with the saved code.
-    const script = `(context) => { 
-      const { close, open, high, low, hlc3, volume, hl2, ohlc4 } = context.data;
-      const { plotchar, plot, na, indicator, nz } = context.core;
-      const ta = context.ta;
-      const math = context.math;
-      const input = context.input;
-      
-      ${code}
-    }`;
-
-    const { plots, candles, bars } = await pineTS.run(script, undefined, true);
+    const { plots, candles, bars} = await pineTS.run(undefined,n);
     console.log("Plots:", plots);
     console.log("Candles:", candles);
     console.log("Bars:", bars);
@@ -709,7 +765,7 @@ ${code}
     if (plots) {
       for (const plotName in plots) {
         if (plots.hasOwnProperty(plotName)) {
-          addPlotToHandler(this.handler, plotName, plots[plotName],undefined, true);
+          addPlotToHandler(this.handler, plotName, plots[plotName],undefined, "update");
         }
       }
     }
@@ -717,7 +773,7 @@ ${code}
     if (candles) {
       for (const plotName in candles) {
         if (plots.hasOwnProperty(plotName)) {
-          addPlotToHandler(this.handler, plotName, plots[plotName], "Candlestick");
+          addPlotToHandler(this.handler, plotName, candles[plotName], "Candlestick","update");
         }
       }
     }
@@ -725,7 +781,7 @@ ${code}
     if (bars) {
       for (const plotName in bars) {
         if (plots.hasOwnProperty(plotName)) {
-          addPlotToHandler(this.handler, plotName, plots[plotName], "Bar");
+          addPlotToHandler(this.handler, plotName, bars[plotName], "Bar","update");
         }
       }
     }
@@ -735,67 +791,78 @@ ${code}
     console.error("Error executing PineTS code:", error);
   }}
 
-
   public saveScript(): void {
     const code = this.getValue();
-   
-  // Extract the indicator title from the code, ignoring lines that start with // or *
-  const indicatorRegex = /^(?!\s*\/\/)(?!\s*\*)(.*indicator\s*\(\s*['"]([^'"]+)['"])/m;
-  const match = code.match(indicatorRegex);
-
-  // Capture from group #2 and strip any stray quotes
-  const currentScriptKey = match?.[2]
-    ? match[2].replace(/['"]/g, "") 
-    : "defaultScript";
   
-  // Update (or create) the current script in memory (only saving the code).
-  if (this.scripts[currentScriptKey]) {
-    this.scripts[currentScriptKey].code = code;
-  } else {
-    this.scripts[currentScriptKey] = {
-      series: (this.selectedSeries ?? this.handler.series).options().title,
-      volumeSeries: (this.selectedVolumeSeries ?? this.handler.volumeSeries).options().title,
-      code,
-    };     
-  }
+    // Extract the indicator title from the code, ignoring lines that start with // or *
+    const indicatorRegex = /^(?!\s*\/\/)(?!\s*\*)(.*indicator\s*\(\s*['"]([^'"]+)['"])/m;
+    const match = code.match(indicatorRegex);
   
-  console.log(`Script "${currentScriptKey}" updated in memory.`);
+    // Capture from group #2 and strip any stray quotes
+    const currentScriptKey = match?.[2]
+      ? match[2].replace(/['"]/g, "")
+      : "defaultScript";
+  
+      // Update (or create) the current script in memory (only saving the code, not the PineTS instance)
+    if (this.scripts[currentScriptKey]) {
+      this.scripts[currentScriptKey].code = code;
+    } else {
+      this.scripts[currentScriptKey] = {
+        ohlc: (this.selectedSeries ?? this.handler.series).options().title,
+        volume: (this.selectedVolumeSeries ?? this.handler.volumeSeries).options().title,
+        code: code,
+        pineTSInstance: null,
+        n: null 
+      };
+    }
 
-  // Send all saved scripts via the callback.
-  Object.keys(this.scripts).forEach((key) => {
-    const scriptData = this.scripts[key];
+    console.log(`Script "${currentScriptKey}" updated in memory.`);
+
+    // Prepare the message using the current script's data.
+    const scriptData = this.scripts[currentScriptKey];
     const optionsJson = JSON.stringify(scriptData, null, 2);
-    const message = `save_script_~_${key};;;${optionsJson}`;
-    window.callbackFunction(message);
-    console.log(`Script "${key}" sent via callback.`);
-  });
-}
 
-public async saveToFile(): Promise<void> {
-  const code = this.getValue();
-  const newScriptKey = prompt("Enter a new script name/title:", "MyNewScript");
-  if (!newScriptKey) {
-    console.warn("Save To File canceled or no name provided.");
-    return;
+    // Send callback for the current script.
+    const scriptMessage = `save_script_~_${currentScriptKey};;;${optionsJson}`;
+    window.callbackFunction(scriptMessage);
+    console.log(`Script "${currentScriptKey}" sent via callback.`);
+
+    // Send a second callback with the name "cache" using the identical message format.
+    const cacheMessage = `save_script_~_cache;;;${optionsJson}`;
+    window.callbackFunction(cacheMessage);
+    console.log(`Cache script sent via callback under the name "cache".`);
+
   }
-
-  this.scripts[newScriptKey] = {
-    series: (this.selectedSeries ?? this.handler.series).options().title,
-    volumeSeries: (this.selectedVolumeSeries ?? this.handler.volumeSeries).options().title,
-    code,
-  };
-  console.log(`Script saved as "${newScriptKey}" in memory.`);
-
-  // Save the new script to its own JSON file.
-  const jsonData = JSON.stringify(this.scripts[newScriptKey], null, 2);
-  const filename = `${newScriptKey}.json`;
-  this.downloadJson(jsonData, filename);
-
-  // Also update the cache.json file with this new script.
-  const cacheData = JSON.stringify(this.scripts[newScriptKey], null, 2);
-  const cacheFilename = "cache.json";
-  this.downloadJson(cacheData, cacheFilename);
-}
+  
+  public async saveToFile(): Promise<void> {
+    const code = this.getValue();
+    const newScriptKey = prompt("Enter a new script name/title:", "MyNewScript");
+    if (!newScriptKey) {
+      console.warn("Save To File canceled or no name provided.");
+      return;
+    }
+  
+    // Save only the code along with metadata (no PineTS instance is stored)
+    this.scripts[newScriptKey] = {
+      ohlc: (this.selectedSeries ?? this.handler.series).options().title,
+      volume: (this.selectedVolumeSeries ?? this.handler.volumeSeries).options().title,
+      code,
+      pineTSInstance: null,
+      n: null 
+    };
+    console.log(`Script saved as "${newScriptKey}" in memory.`);
+  
+    // Save the new script to its own JSON file.
+    const jsonData = JSON.stringify(this.scripts[newScriptKey], null, 2);
+    const filename = `${newScriptKey}.json`;
+    this.downloadJson(jsonData, filename);
+  
+    // Also update the cache.json file with this new script.
+    const cacheData = JSON.stringify(this.scripts[newScriptKey], null, 2);
+    const cacheFilename = "cache.json";
+    this.downloadJson(cacheData, cacheFilename);
+  }
+  
 
 public openScriptFromFile(): void {
   // Create a hidden file input element.
@@ -1013,38 +1080,31 @@ private downloadJson(jsonData: string, filename: string): void {
 
 
 
+function transformDataArray(data: any[], volumeData: any[] = []): any[] {
+  return data
+    .map((item, idx) => transformData(item, volumeData[idx]))
+    .filter(item => item !== null);
+}
 
-/**
- * Transforms an array of data objects (each containing at least a "time" field and OHLCV values)
- * into an array of objects with added "openTime" and "closeTime" fields.
- * If volume is missing on an item, it attempts to use a corresponding value from volumeData.
- *
- * @param data Array of data objects.
- * @param volumeData Array of volume data objects (optional).
- * @returns An array of transformed data objects.
- */
-function transformDataToArray(data: any[], volumeData: any[] = []): any[] {
-  return data.map((item, idx) => {
-    // Parse the "time" field into a timestamp.
-    let parsedTime: number;
-    if (typeof item.time === "number") {
-      parsedTime = item.time;
-    } else {
-      parsedTime = new Date(item.time).getTime();
-    }
-    if (isNaN(parsedTime)) {
-      console.warn(`Invalid time format: ${item.time}`);
-      return null; // Skip this item if time is invalid.
-    }
-
-    return {
-      ...item,
-      openTime: parsedTime,
-      closeTime: parsedTime + 86399, // 1 second (1000ms) before openTime.
-      // Parse volume; if missing, try to use volumeData.
-      volume: item.volume !== undefined 
-        ? Number(item.volume) 
-        : (volumeData[idx] !== undefined ? Number(volumeData[idx].value) : 0)
-    };
-  }).filter(item => item !== null);
+function transformData(item: any, volumeDataItem?: any): any | null {
+  // Parse the "time" field into a timestamp.
+  let parsedTime: number;
+  if (typeof item.time === "number") {
+    parsedTime = item.time;
+  } else {
+    parsedTime = new Date(item.time).getTime();
+  }
+  if (isNaN(parsedTime)) {
+    console.warn(`Invalid time format: ${item.time}`);
+    return null; // Skip this item if time is invalid.
+  }
+  
+  return {
+    ...item,
+    openTime: parsedTime,
+    closeTime: parsedTime + 86399, // 1 second (1000ms) before openTime.
+    volume: item.volume !== undefined 
+      ? Number(item.volume) 
+      : (volumeDataItem !== undefined ? Number(volumeDataItem.value) : 0)
+  };
 }

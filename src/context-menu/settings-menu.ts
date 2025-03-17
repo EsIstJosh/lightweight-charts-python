@@ -1306,6 +1306,8 @@ private buildSeriesColorsTab(): void {
 
        },
       container
+      
+      
     );
   
     // Finally, attach container to content area
@@ -1338,7 +1340,7 @@ private buildSeriesColorsTab(): void {
     if (
       seriesType === "Candlestick" ||
       seriesType === "Bar" ||
-      seriesType === "Custom"
+      seriesType === "Custom" && 'upColor' in series.options()
     ) {
       if ("upColor" in series.options()) {
         // Body
@@ -1364,7 +1366,8 @@ private buildSeriesColorsTab(): void {
               borderDownColor: downColor,
             });
           },
-          container
+          container,
+          series
         );
 
         this.addSideBySideColors(
@@ -1377,10 +1380,11 @@ private buildSeriesColorsTab(): void {
               wickDownColor: downColor,
             });
           },
-          container
+          container,
+          series
         );
       }
-    } else if (seriesType === "Line") {
+    } else if (seriesType === "Line" || seriesType === "Custom" && 'color' in series.options()) {
       // Single color
       const currentLineColor = series.options().color || "#ffffff";
       this.addColorPicker(
@@ -1398,7 +1402,8 @@ private buildSeriesColorsTab(): void {
         (c) => {
           series.applyOptions({ lineColor: c });
         },
-        container
+        container,
+        series
       );
 
       this.addColorPicker(
@@ -1407,7 +1412,8 @@ private buildSeriesColorsTab(): void {
         (c) => {
           series.applyOptions({ topColor: c });
         },
-        container
+        container,
+        series
       );
 
       this.addColorPicker(
@@ -1416,7 +1422,8 @@ private buildSeriesColorsTab(): void {
         (c) => {
           series.applyOptions({ bottomColor: c });
         },
-        container
+        container,
+        series
       );
     } else {
       const msg = document.createElement("div");
@@ -1424,7 +1431,8 @@ private buildSeriesColorsTab(): void {
       msg.style.color = "#bbb";
       container.appendChild(msg);
     }
-  
+
+
 
     // Finally, attach container to content area
     this.contentArea.appendChild(container);
@@ -1462,7 +1470,7 @@ private buildSeriesColorsTab(): void {
     if (
       seriesType === "Candlestick" ||
       seriesType === "Bar" ||
-      seriesType === "Custom"
+      seriesType === "Custom" && 'upColor' in series.options()
     ) {
       if ("upColor" in series.options()) {
         // Body
@@ -1473,7 +1481,8 @@ private buildSeriesColorsTab(): void {
           (upColor, downColor) => {
             series.applyOptions({ upColor, downColor });
           },
-          container
+          container,
+          series
         );
       }
       if ("borderUpColor" in series.options()) {
@@ -1487,7 +1496,8 @@ private buildSeriesColorsTab(): void {
               borderDownColor: downColor,
             });
           },
-          container
+          container,
+          series
         );
 
         this.addSideBySideColors(
@@ -1500,10 +1510,11 @@ private buildSeriesColorsTab(): void {
               wickDownColor: downColor,
             });
           },
-          container
+          container,
+          series
         );
       }
-    } else if (seriesType === "Line") {
+    } else if (seriesType === "Line" || seriesType === "Custom" && 'color' in series.options()) {
       const currentLineColor = series.options().color || "#FFFFFF";
       this.addColorPicker(
         "Line Color",
@@ -1511,7 +1522,8 @@ private buildSeriesColorsTab(): void {
         (newColor) => {
           series.applyOptions({ color: newColor });
         },
-        container
+        container,
+        series
       );
       // etc...
     } else if (seriesType === "Area") {
@@ -1523,7 +1535,8 @@ private buildSeriesColorsTab(): void {
         (c) => {
           series.applyOptions({ lineColor: c });
         },
-        container
+        container,
+        series
       );
       // ...
     } else {
@@ -1673,67 +1686,87 @@ private buildSeriesColorsTab(): void {
         }
       );
     });
-  }
+  }/**
+ * Adds a color “swatch” button that, when clicked, opens our *reusable* colorPicker menu.
+ * Also updates the legend color and calls an `onChange` callback whenever a color is selected.
+ */
+private addColorPicker(
+  label: string,
+  defaultColor: string,
+  onChange: (color: string) => void,
+  parent: HTMLElement = this.contentArea,
+  series?: ISeriesApi<SeriesType>
+): void {
+  // 1) Create a container row
+  const container = document.createElement("div");
+  Object.assign(container.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "8px",
+    fontFamily: "sans-serif",
+    fontSize: "16px",
+  });
 
-  // ─────────────────────────────────────────────────────────────
-  // 6) HELPER METHODS
-  // ─────────────────────────────────────────────────────────────
-  /**
-   * Adds a color “swatch” button that, when clicked, opens our *reusable* colorPicker menu.
-   */
-  private addColorPicker(
-    label: string,
-    defaultColor: string,
-    onChange: (color: string) => void,
-    parent: HTMLElement = this.contentArea
-  ): void {
-    // Container row
-    const container = document.createElement("div");
-    Object.assign(container.style, {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      marginBottom: "8px",
-      fontFamily: "sans-serif",
-      fontSize: "16px",
+  // 2) Label
+  const lbl = document.createElement("span");
+  lbl.innerText = label;
+  container.appendChild(lbl);
+
+  // 3) The swatch (color box)
+  const swatch = document.createElement("div");
+  Object.assign(swatch.style, {
+    width: "26px",
+    height: "26px",
+    borderRadius: "4px",
+    cursor: "pointer",
+    border: "1px solid #999",
+    backgroundColor: defaultColor,
+  });
+  container.appendChild(swatch);
+
+  // Helper to update the legend (if series is provided)
+  const updateLegendColor = (newColor: string) => {
+    if (!series) {
+      return;
+    }
+    const legendItem = this.handler.legend._lines.find(
+      (item) => item.series === series
+    );
+    if (legendItem) {
+      // If your legend colors[0] is the single color slot:
+      legendItem.colors[0] = newColor;
+    }
+  };
+
+  // 4) On swatch click, open the REUSABLE colorPicker
+  swatch.addEventListener("click", (ev: MouseEvent) => {
+    if (!this.colorPicker) {
+      console.warn("No colorPicker defined!");
+      return;
+    }
+
+    // a) Update the colorPicker's current color & define a callback
+    this.colorPicker.update(swatch.style.backgroundColor, (newColor) => {
+      swatch.style.backgroundColor = newColor;
+      onChange(newColor);
+      updateLegendColor(newColor);
     });
 
-    // Label
-    const lbl = document.createElement("span");
-    lbl.innerText = label;
-    container.appendChild(lbl);
-
-    // Swatch (div) that shows the currently selected color
-    const swatch = document.createElement("div");
-    Object.assign(swatch.style, {
-      width: "26px",
-      height: "26px",
-      borderRadius: "4px",
-      cursor: "pointer",
-      border: "1px solid #999",
-      backgroundColor: defaultColor,
+    // b) Actually open the colorPicker near the swatch
+    //    The applySelection callback is triggered whenever a color is chosen
+    this.colorPicker.openMenu(ev, swatch.offsetWidth, (newColor) => {
+      swatch.style.backgroundColor = newColor;
+      onChange(newColor);
+      updateLegendColor(newColor);
     });
-    container.appendChild(swatch);
+  });
 
-    // When user clicks the swatch, open the REUSABLE colorPicker
-    swatch.addEventListener("click", (ev: MouseEvent) => {
-      // 1) Update the colorPicker's current color and callback
-      this.colorPicker!.update(swatch.style.backgroundColor, (newColor) => {
-        // We'll also set the swatch's background to the newly chosen color
-        swatch.style.backgroundColor = newColor;
-        onChange(newColor);
-      });
+  // 5) Add our container to the parent
+  parent.appendChild(container);
+}
 
-      // 2) Open the colorPicker near the clicked swatch
-      this.colorPicker!.openMenu(ev, swatch.offsetWidth, (newColor) => {
-        // This "applySelection" callback is also triggered whenever the user picks a color
-        swatch.style.backgroundColor = newColor;
-        onChange(newColor);
-      });
-    });
 
-    parent.appendChild(container);
-  }
   /**
    * Adds a dropdown (select) control.
    * @param label The label to display.
@@ -2016,7 +2049,8 @@ private addSideBySideColors(
   defaultUpColor: string,
   defaultDownColor: string,
   onChange: (upColor: string, downColor: string) => void,
-  parent: HTMLElement = this.contentArea
+  parent: HTMLElement = this.contentArea,
+  series?: ISeriesApi<SeriesType>
 ): void {
   // 1) Create row container for checkbox, label, and swatches
   const row = document.createElement("div");
@@ -2089,7 +2123,21 @@ private addSideBySideColors(
   // Helper: notify the outside world about color changes
   const fireChange = () => {
     onChange(currentUpColor, currentDownColor);
-  };
+
+    if (series) { 
+      const legendItem = this.handler.legend._lines.find(
+          (item) => item.series === series 
+      );
+      if (legendItem) {
+          // If your legend colors[0] = up color, colors[1] = down color
+          legendItem.colors[0] =  currentUpColor;
+          legendItem.colors[1] =  currentDownColor;
+      }
+    
+    
+
+  };}
+
   // 6) Checkbox logic: when toggled, update the colors' opacity and adjust the checkbox state.
   enabledCheck.addEventListener("change", () => {
     if (enabledCheck.checked) {
@@ -2269,20 +2317,3 @@ function logSeriesColorsFromMap(this: any): void {
  
 }
 
-
-
-
-/* 
-  Example usage somewhere in your code:
-  
-  logSeriesColorsFromMap.call(this);
-
-  This will print to the console something like:
-
-    > Color keys for Series: "MyCandles"
-      Found color: upColor = "#1565C0"
-      Found color: downColor = "#8B4513"
-      Found color: borderUpColor = "#00FF00"
-      Found color: borderDownColor = "#FF0000"
-      ...
-*/

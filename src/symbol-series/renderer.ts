@@ -114,7 +114,7 @@ private _drawImpl(
             lineWidth: lineWidth,
             textAlign: 'center',
             textBaseline: 'middle',
-			fontSize: (fontSize??.8)* barSpace,
+			fontSize: (fontSize??1)* barSpace,
         };
 
         const bars = this._data.bars;
@@ -157,7 +157,7 @@ private _drawImpl(
 			lineWidth = 1,
 			textAlign = 'center',
 			textBaseline = 'middle',
-			fontSize = .8
+			fontSize = 1
 		} = opts;
 
 		ctx.fillStyle = fillColor?? this._options?.color;
@@ -178,15 +178,39 @@ private _drawImpl(
 				break;
 			}
 			case 'cross': {
+				// Overall size and arm thickness.
 				const half = shapeSize / 2;
+				const t = shapeSize / 3; // thickness of the arms
+			  
+				// Define vertices for the outer border of a plus shape.
+				// The polygon starts at the top middle and goes clockwise.
 				ctx.beginPath();
-				ctx.moveTo(x - half, y);
-				ctx.lineTo(x + half, y);
-				ctx.moveTo(x, y - half);
-				ctx.lineTo(x, y + half);
-				ctx.stroke();
+				ctx.moveTo(x - t / 2, y - half);        // Vertex 1: left of top edge
+				ctx.lineTo(x + t / 2, y - half);        // Vertex 2: right of top edge
+				ctx.lineTo(x + t / 2, y - t / 2);         // Vertex 3: top-right inner corner
+				ctx.lineTo(x + half, y - t / 2);        // Vertex 4: right of upper arm
+				ctx.lineTo(x + half, y + t / 2);        // Vertex 5: right of lower arm
+				ctx.lineTo(x + t / 2, y + t / 2);         // Vertex 6: bottom-right inner corner
+				ctx.lineTo(x + t / 2, y + half);        // Vertex 7: right of bottom edge
+				ctx.lineTo(x - t / 2, y + half);        // Vertex 8: left of bottom edge
+				ctx.lineTo(x - t / 2, y + t / 2);         // Vertex 9: bottom-left inner corner
+				ctx.lineTo(x - half, y + t / 2);        // Vertex 10: left of lower arm
+				ctx.lineTo(x - half, y - t / 2);        // Vertex 11: left of upper arm
+				ctx.lineTo(x - t / 2, y - t / 2);         // Vertex 12: top-left inner corner
+				ctx.closePath();
+			  
+				// Fill the plus shape.
+				ctx.fill();
+			  
+				// Stroke only the outer border if a border color is provided.
+				if (borderColor) {
+				  ctx.stroke();
+				}
 				break;
-			}
+			  }
+			  
+			  
+			  
 			case 'triangleUp': {
 				const half = shapeSize / 2;
 				ctx.beginPath();

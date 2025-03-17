@@ -18,6 +18,7 @@ import { ISeriesApiExtended } from "../helpers/series";
 import { ContextMenu } from "../context-menu/context-menu";
 import { LegendMenu } from "../context-menu/legend-menu";
 import { isISeriesApi } from "../helpers/typeguards";
+import { SymbolSeriesData } from "../symbol-series/data";
 
 type LegendEntry = LegendSeries | LegendGroup | LegendPrimitive;
 
@@ -972,11 +973,11 @@ private renderGroup(group: LegendGroup, container: HTMLDivElement): void {
         event.stopPropagation();
         if (group.div.style.display === 'none') {
             group.div.style.display = 'block';
-            toggleButton.innerHTML = '⌲'; // Expanded icon
+            toggleButton.innerHTML = '⌲'; // Expand
             toggleButton.setAttribute('aria-expanded', 'true');
         } else {
             group.div.style.display = 'none';
-            toggleButton.innerHTML = '☰'; // Collapsed icon
+            toggleButton.innerHTML = '☰'; // Collapse
             toggleButton.setAttribute('aria-expanded', 'false');
         }
     });
@@ -1100,8 +1101,8 @@ private renderGroup(group: LegendGroup, container: HTMLDivElement): void {
             const seriesType = e.seriesType || 'Line';
             const priceFormat = e.series.options().priceFormat as PriceFormatBuiltIn;
     
-            if (seriesType === 'Line' || seriesType === 'Area') {
-                const valueData = data as LineData | AreaData;
+            if (seriesType === 'Line' || seriesType === 'Area' || seriesType === 'Histogram' || seriesType == 'Symbol') {
+                const valueData = data as LineData | AreaData | HistogramData | SymbolSeriesData;
                 if (valueData.value == null) {
                     return;
                 }
@@ -1181,7 +1182,7 @@ private renderGroup(group: LegendGroup, container: HTMLDivElement): void {
                     `;
                 } else {
                     // Handle series types with a single 'value' property
-                    const valueData = data as LineData | AreaData | HistogramData;
+                    const valueData = data as LineData | AreaData | HistogramData | SymbolSeriesData;
                     const value = 'value' in valueData ? valueData.value : undefined;
                     if (value == null) {
                         return;

@@ -62,20 +62,26 @@ export class PineScriptManager {
 
 
      
-  /**
-   * Retrieves the most recent script that was added.
-   * Since Map preserves insertion order, this returns the last inserted value.
-   *
-   * @returns The most recent script object, or null if none exist.
-   */
-  public getLast(): any | null {
-    if (this.scripts.size === 0) {
-      return null;
-    }
-    // Convert the values to an array and return the last element.
-    const allScripts = Array.from(this.scripts.values());
-    return allScripts[allScripts.length - 1];
+/**
+ * Retrieves the most recent script that was added.
+ * Since Map preserves insertion order, this returns the last inserted value.
+ * Before doing so, it checks if there is a script with the key "cache" and returns it if found.
+ *
+ * @returns The most recent script object, or null if none exist.
+ */
+public getLast(): any | null {
+  // Check for a script named "cache" first.
+  if (this.scripts.has('cache')) {
+    return this.scripts.get('cache');
   }
+
+  // Fallback to returning the last inserted script if "cache" is not found.
+  if (this.scripts.size === 0) {
+    return null;
+  }
+
+  // Convert the values to an array and return the last element.
+  const allScripts = Array.from(this.scripts.values());
+  return allScripts[allScripts.length - 1];
 }
-  
-  
+}
