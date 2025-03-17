@@ -276,3 +276,26 @@ export const PluginRegistry: { [key: string]: new (...args: any[]) => PluginBase
   "TrendTrace": TrendTrace,
   // Add other plugin types as needed...
 };
+
+
+
+/**
+ * Returns the number of sequential NaN values at the beginning of an array.
+ *
+ * This function iterates over the array from the start until the first non-NaN value is encountered.
+ *
+ * @param data - An array of numbers that may contain NaN values.
+ * @returns The count of consecutive NaN values from the start of the array.
+ */
+export function getLeadingNaNCount(data: any[]): number {
+  let count = 0;
+  for (const point of data) {
+    // Check if the point exists and its 'value' field is NaN.
+    if (point && Number.isNaN(point.value)) {
+      count++;
+    } else {
+      break;
+    }
+  }
+  return count;
+}

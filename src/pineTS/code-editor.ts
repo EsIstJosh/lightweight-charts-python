@@ -11,12 +11,13 @@
 
 
 import * as monaco from "monaco-editor";
-import { PineTS } from "pinets";
+import { Context, PineTS } from "pinets";
 import { Handler } from "../general/handler";
 import { DataChangedScope, ISeriesApi,  SeriesType  } from "lightweight-charts";
 
 import { GlobalParams } from "../general";
 import {  addFillAreaToHandler, addPlotToHandler} from "../helpers/series";
+import { getLeadingNaNCount } from "../helpers/general";
 
 declare const window: GlobalParams;
 export type DataChangedHandler = (scope: DataChangedScope) => void;
@@ -578,6 +579,8 @@ const baseButtonStyle = {
   public getValue(): string {
     return this.editorInstance?.getValue() || "";
   }
+
+  
   public async executePineTS(): Promise<void> {
     try {
       // Get code from the editor.
@@ -625,18 +628,30 @@ const input = context.input;
 ${code}
         }`;
 
-      const { plots, candles, bars, fills, max_period } = await pineTS.run(script, undefined, false);
+      const { plots, candles, bars, fills, ta } = await pineTS.run(script, undefined, false);
       console.log("Plots:", plots);
       console.log("Candles:", candles);
       console.log("Bars:", bars);
+      let maxNaNCount = 0;
 
+      // Compute the maximum number of leading NaN values across all plot data arrays.
       if (plots) {
         for (const plotName in plots) {
           if (plots.hasOwnProperty(plotName)) {
-            addPlotToHandler(this.handler, plotName, plots[plotName], undefined,"overwrite");
+            // Add the plot to the handler.
+            addPlotToHandler(this.handler, plotName, plots[plotName], undefined, "overwrite");
+            const plotData = plots[plotName].data;
+            if (Array.isArray(plotData)) {
+              const count = getLeadingNaNCount(plotData);
+              if (count > maxNaNCount) {
+                maxNaNCount = count;
+              }
+            }
           }
         }
       }
+          
+      
     
       if (candles) {
         for (const plotName in candles) {
@@ -660,14 +675,13 @@ ${code}
           }
         }
       }
-    
       // Save the PineTS instance along with the series titles.
       this.scripts[scriptKey] = {
         pineTSInstance: pineTS,
         ohlc: mainSeries,
         volume: volumeSeries,
         code: code,
-        n: max_period
+        n: maxNaNCount + 1
       }
 
     
@@ -729,15 +743,15 @@ ${code}
 
     const ohlc = this.scripts[scriptKey]?.ohlc;
     const volume = this.scripts[scriptKey]?.volume;
-    const n = this.scripts[scriptKey]?.n?? undefined
-    console.log('N:',n)
+    const max_period = this.scripts[scriptKey]?.n?? undefined
+    console.log(max_period)
     // Run the saved instance.
     // Passing undefined for the code parameter causes run() to use the cached code.
       
       // Look up the main series and volume series from the handler's seriesMap.
       const mainSeries = ohlc ? this.handler.seriesMap.get(ohlc) : null;
       const volSeries = volume ? this.handler.seriesMap.get(volume) : null;
-  
+      
       if (!mainSeries) {
         console.warn(`Main series with title "${mainSeries}" not found.`);
         return;
@@ -757,7 +771,7 @@ ${code}
       }
     pineTS.updateData(newBar) 
 
-    const { plots, candles, bars} = await pineTS.run(undefined,n);
+    const { plots, candles, bars, fills, ta } = await pineTS.run(undefined,max_period,true);
     console.log("Plots:", plots);
     console.log("Candles:", candles);
     console.log("Bars:", bars);
@@ -791,7 +805,7 @@ ${code}
     console.error("Error executing PineTS code:", error);
   }}
 
-  public saveScript(): void {
+  public saveScript(pineTSInstance?: PineTS): void {
     const code = this.getValue();
   
     // Extract the indicator title from the code, ignoring lines that start with // or *
@@ -811,7 +825,7 @@ ${code}
         ohlc: (this.selectedSeries ?? this.handler.series).options().title,
         volume: (this.selectedVolumeSeries ?? this.handler.volumeSeries).options().title,
         code: code,
-        pineTSInstance: null,
+        pineTSInstance: pineTSInstance??null,
         n: null 
       };
     }
@@ -834,7 +848,7 @@ ${code}
 
   }
   
-  public async saveToFile(): Promise<void> {
+  public async saveToFile(pineTSInstance?: PineTS): Promise<void> {
     const code = this.getValue();
     const newScriptKey = prompt("Enter a new script name/title:", "MyNewScript");
     if (!newScriptKey) {
@@ -847,7 +861,7 @@ ${code}
       ohlc: (this.selectedSeries ?? this.handler.series).options().title,
       volume: (this.selectedVolumeSeries ?? this.handler.volumeSeries).options().title,
       code,
-      pineTSInstance: null,
+      pineTSInstance: pineTSInstance??null,
       n: null 
     };
     console.log(`Script saved as "${newScriptKey}" in memory.`);
