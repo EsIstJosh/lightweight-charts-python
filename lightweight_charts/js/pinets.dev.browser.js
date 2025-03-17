@@ -7675,24 +7675,24 @@
     return state.output
   }
 
-  var __defProp$7 = Object.defineProperty;
-  var __defNormalProp$7 = (obj, key, value) => key in obj ? __defProp$7(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField$7 = (obj, key, value) => __defNormalProp$7(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __defProp$8 = Object.defineProperty;
+  var __defNormalProp$8 = (obj, key, value) => key in obj ? __defProp$8(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField$8 = (obj, key, value) => __defNormalProp$8(obj, typeof key !== "symbol" ? key + "" : key, value);
   class ScopeManager {
     constructor() {
-      __publicField$7(this, "scopes", []);
-      __publicField$7(this, "scopeTypes", []);
-      __publicField$7(this, "scopeCounts", /* @__PURE__ */ new Map());
-      __publicField$7(this, "contextBoundVars", /* @__PURE__ */ new Set());
-      __publicField$7(this, "arrayPatternElements", /* @__PURE__ */ new Set());
-      __publicField$7(this, "rootParams", /* @__PURE__ */ new Set());
-      __publicField$7(this, "varKinds", /* @__PURE__ */ new Map());
-      __publicField$7(this, "loopVars", /* @__PURE__ */ new Set());
-      __publicField$7(this, "loopVarNames", /* @__PURE__ */ new Map());
+      __publicField$8(this, "scopes", []);
+      __publicField$8(this, "scopeTypes", []);
+      __publicField$8(this, "scopeCounts", /* @__PURE__ */ new Map());
+      __publicField$8(this, "contextBoundVars", /* @__PURE__ */ new Set());
+      __publicField$8(this, "arrayPatternElements", /* @__PURE__ */ new Set());
+      __publicField$8(this, "rootParams", /* @__PURE__ */ new Set());
+      __publicField$8(this, "varKinds", /* @__PURE__ */ new Map());
+      __publicField$8(this, "loopVars", /* @__PURE__ */ new Set());
+      __publicField$8(this, "loopVarNames", /* @__PURE__ */ new Map());
       // Map original names to transformed names
-      __publicField$7(this, "paramIdCounter", 0);
-      __publicField$7(this, "cacheIdCounter", 0);
-      __publicField$7(this, "tempVarCounter", 0);
+      __publicField$8(this, "paramIdCounter", 0);
+      __publicField$8(this, "cacheIdCounter", 0);
+      __publicField$8(this, "tempVarCounter", 0);
       this.pushScope("glb");
     }
     get nextParamIdArg() {
@@ -9151,9 +9151,9 @@
     return _wraperFunction(this);
   }
 
-  var __defProp$6 = Object.defineProperty;
-  var __defNormalProp$6 = (obj, key, value) => key in obj ? __defProp$6(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField$6 = (obj, key, value) => __defNormalProp$6(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __defProp$7 = Object.defineProperty;
+  var __defNormalProp$7 = (obj, key, value) => key in obj ? __defProp$7(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField$7 = (obj, key, value) => __defNormalProp$7(obj, typeof key !== "symbol" ? key + "" : key, value);
   class PineTS {
     constructor(source, tickerId, timeframe, limit, sDate, eDate, title) {
       this.source = source;
@@ -9163,25 +9163,26 @@
       this.sDate = sDate;
       this.eDate = eDate;
       this.title = title;
-      __publicField$6(this, "data", []);
+      __publicField$7(this, "data", []);
       //#region [Pine Script built-in variables]
-      __publicField$6(this, "open", []);
-      __publicField$6(this, "high", []);
-      __publicField$6(this, "low", []);
-      __publicField$6(this, "close", []);
-      __publicField$6(this, "volume", []);
-      __publicField$6(this, "hl2", []);
-      __publicField$6(this, "hlc3", []);
-      __publicField$6(this, "ohlc4", []);
-      __publicField$6(this, "openTime", []);
-      __publicField$6(this, "closeTime", []);
+      __publicField$7(this, "open", []);
+      __publicField$7(this, "high", []);
+      __publicField$7(this, "low", []);
+      __publicField$7(this, "close", []);
+      __publicField$7(this, "volume", []);
+      __publicField$7(this, "hl2", []);
+      __publicField$7(this, "hlc3", []);
+      __publicField$7(this, "ohlc4", []);
+      __publicField$7(this, "openTime", []);
+      __publicField$7(this, "closeTime", []);
       //#endregion
       //#region run context
-      __publicField$6(this, "_periods");
+      __publicField$7(this, "_periods");
       //#endregion
-      //public fn: Function;
-      __publicField$6(this, "_readyPromise", null);
-      __publicField$6(this, "_ready", false);
+      __publicField$7(this, "pineTSCode");
+      __publicField$7(this, "fn");
+      __publicField$7(this, "_readyPromise", null);
+      __publicField$7(this, "_ready", false);
       this._readyPromise = new Promise((resolve) => {
         this.loadMarketData(source, tickerId, timeframe, limit, sDate, eDate, title).then((data) => {
           const marketData = data.reverse();
@@ -9227,9 +9228,30 @@
       if (!this._readyPromise) throw new Error("PineTS is not ready");
       return this._readyPromise;
     }
+    updateData(newData) {
+      if (!newData) {
+        throw new Error("Invalid data: newData must be a valid object.");
+      }
+      this.data = [newData, ...this.data];
+      this._periods = this.data.length;
+      this.open = [newData.open, ...this.open];
+      this.close = [newData.close, ...this.close];
+      this.high = [newData.high, ...this.high];
+      this.low = [newData.low, ...this.low];
+      this.volume = [newData.volume, ...this.volume];
+      this.hl2 = [(newData.high + newData.low) / 2, ...this.hl2];
+      this.hlc3 = [(newData.high + newData.low + newData.close) / 3, ...this.hlc3];
+      this.ohlc4 = [(newData.high + newData.low + newData.open + newData.close) / 4, ...this.ohlc4];
+      this.openTime = [newData.openTime, ...this.openTime];
+      this.closeTime = [newData.closeTime, ...this.closeTime];
+    }
     async run(pineTSCode, n, useTACache) {
       await this.ready();
       if (!n) n = this._periods;
+      if (!this.pineTSCode && !pineTSCode) {
+        throw new Error("Invalid PineTS Code: No pineTSCode supplied/stored.");
+      }
+      pineTSCode = pineTSCode || this.pineTSCode;
       const context = new Context({
         marketData: this.data,
         source: this.source,
@@ -9242,8 +9264,12 @@
       });
       context.pineTSCode = pineTSCode;
       context.useTACache = useTACache;
-      const transformer = transpile.bind(this);
-      let transpiledFn = transformer(pineTSCode);
+      if (!this.fn || this.pineTSCode !== pineTSCode) {
+        const transformer = transpile.bind(this);
+        this.fn = transformer(pineTSCode);
+        this.pineTSCode = pineTSCode;
+      }
+      const transpiledFn = this.fn;
       const contextVarNames = ["const", "var", "let", "params"];
       for (let i = this._periods - n, idx = n - 1; i < this._periods; i++, idx--) {
         context.idx = i;
@@ -9288,15 +9314,15 @@
     }
   }
 
-  var __defProp$5 = Object.defineProperty;
-  var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __defProp$6 = Object.defineProperty;
+  var __defNormalProp$6 = (obj, key, value) => key in obj ? __defProp$6(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField$6 = (obj, key, value) => __defNormalProp$6(obj, typeof key !== "symbol" ? key + "" : key, value);
   class Core {
     constructor(context) {
       this.context = context;
-      __publicField$5(this, "script");
-      __publicField$5(this, "pane", 0);
-      __publicField$5(this, "color", {
+      __publicField$6(this, "script");
+      __publicField$6(this, "pane", 0);
+      __publicField$6(this, "color", {
         param: (source, index = 0) => {
           if (Array.isArray(source)) {
             return source[index];
@@ -9421,6 +9447,15 @@
         options: this.extractPlotOptions(options)
       });
     }
+    fill(plot1, plot2, options) {
+      if (!this.context.fills[plot1]) {
+        this.context.fills[plot1] = {
+          plot1,
+          plot2,
+          options: this.extractPlotOptions(options)
+        };
+      }
+    }
   }
 
   class Input {
@@ -9477,13 +9512,13 @@
     }
   }
 
-  var __defProp$4 = Object.defineProperty;
-  var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __defProp$5 = Object.defineProperty;
+  var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, typeof key !== "symbol" ? key + "" : key, value);
   class PineMath {
     constructor(context) {
       this.context = context;
-      __publicField$4(this, "_cache", {});
+      __publicField$5(this, "_cache", {});
     }
     param(source, index, name) {
       if (!this.context.params[name]) this.context.params[name] = [];
@@ -9574,14 +9609,14 @@
     }
   }
 
-  var __defProp$3 = Object.defineProperty;
-  var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __defProp$4 = Object.defineProperty;
+  var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, typeof key !== "symbol" ? key + "" : key, value);
   const TIMEFRAMES = ["1", "3", "5", "15", "30", "45", "60", "120", "180", "240", "D", "W", "M"];
   class PineRequest {
     constructor(context) {
       this.context = context;
-      __publicField$3(this, "_cache", {});
+      __publicField$4(this, "_cache", {});
     }
     param(source, index, name) {
       if (!this.context.params[name]) this.context.params[name] = [];
@@ -9636,9 +9671,31 @@
     }
   }
 
+  var __defProp$3 = Object.defineProperty;
+  var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, typeof key !== "symbol" ? key + "" : key, value);
   class TechnicalAnalysis {
     constructor(context) {
       this.context = context;
+      // Keeps track of the highest period/length encountered.
+      __publicField$3(this, "max_period", null);
+    }
+    /**
+     * Updates max_period if the provided value is larger.
+     * @param value - A period or length value.
+     */
+    updateMaxPeriod(value) {
+      if (this.context.max_period === null || value > this.context.max_period) {
+        this.context.max_period = value;
+      }
+    }
+    /**
+     * If the given value is an array, returns the maximum number within it;
+     * otherwise, returns the number itself.
+     * @param value - A number or an array of numbers.
+     */
+    extractMaxValue(value) {
+      return Array.isArray(value) ? Math.max(...value) : value;
     }
     get tr() {
       const val = this.context.math.max(
@@ -9665,12 +9722,14 @@
     }
     ema(source, _period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const result = ema(source.slice(0).reverse(), period);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     sma(source, _period, _cacheId) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const reversedSource = source.slice(0).reverse();
       if (this.context.useTACache && _cacheId) {
         if (!this.context.cache[_cacheId]) {
@@ -9689,6 +9748,7 @@
     }
     vwma(source, _period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const volume = this.context.data.volume;
       const result = vwma(source.slice(0).reverse(), volume.slice(0).reverse(), period);
       const idx = this.context.idx;
@@ -9696,36 +9756,42 @@
     }
     wma(source, _period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const result = wma(source.slice(0).reverse(), period);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     hma(source, _period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const result = hma(source.slice(0).reverse(), period);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     rma(source, _period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const result = rma(source.slice(0).reverse(), period);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     change(source, _length = 1) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = change(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     rsi(source, _period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const result = rsi(source.slice(0).reverse(), period);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     atr(_period) {
       const period = Array.isArray(_period) ? _period[0] : _period;
+      this.updateMaxPeriod(this.extractMaxValue(_period));
       const high = this.context.data.high.slice().reverse();
       const low = this.context.data.low.slice().reverse();
       const close = this.context.data.close.slice().reverse();
@@ -9735,48 +9801,56 @@
     }
     mom(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = mom(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     roc(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = roc(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     dev(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = dev(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     variance(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = variance(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     highest(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = highest(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     lowest(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = lowest(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     median(source, _length) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const result = median(source.slice(0).reverse(), length);
       const idx = this.context.idx;
       return this.context.precision(result[idx]);
     }
     stdev(source, _length, _bias = true) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const bias = Array.isArray(_bias) ? _bias[0] : _bias;
       const result = stdev(source.slice(0).reverse(), length, bias);
       const idx = this.context.idx;
@@ -9784,6 +9858,7 @@
     }
     linreg(source, _length, _offset) {
       const length = Array.isArray(_length) ? _length[0] : _length;
+      this.updateMaxPeriod(this.extractMaxValue(_length));
       const offset = Array.isArray(_offset) ? _offset[0] : _offset;
       const result = linreg(source.slice(0).reverse(), length, offset);
       const idx = this.context.idx;
@@ -9792,6 +9867,7 @@
     supertrend(_factor, _atrPeriod) {
       const factor = Array.isArray(_factor) ? _factor[0] : _factor;
       const atrPeriod = Array.isArray(_atrPeriod) ? _atrPeriod[0] : _atrPeriod;
+      this.updateMaxPeriod(this.extractMaxValue(atrPeriod));
       const high = this.context.data.high.slice().reverse();
       const low = this.context.data.low.slice().reverse();
       const close = this.context.data.close.slice().reverse();
@@ -10444,6 +10520,7 @@
       __publicField$1(this, "plots", {});
       __publicField$1(this, "candles", {});
       __publicField$1(this, "bars", {});
+      __publicField$1(this, "fills", {});
       __publicField$1(this, "marketData");
       __publicField$1(this, "source");
       __publicField$1(this, "tickerId");
@@ -10453,6 +10530,7 @@
       __publicField$1(this, "eDate");
       __publicField$1(this, "group");
       __publicField$1(this, "pineTSCode");
+      __publicField$1(this, "max_period");
       this.marketData = marketData;
       this.source = source;
       this.tickerId = tickerId;
@@ -10475,7 +10553,8 @@
         plot: core.plot.bind(core),
         plotbar: core.plotbar.bind(core),
         plotchar: core.plotchar.bind(core),
-        plotcandle: core.plotcandle.bind(core)
+        plotcandle: core.plotcandle.bind(core),
+        fill: core.fill.bind(core)
       };
     }
     //#region [Runtime functions] ===========================

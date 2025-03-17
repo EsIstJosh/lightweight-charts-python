@@ -14,6 +14,8 @@ import { defaultSymbolSeriesOptions, SymbolSeriesOptions } from "../symbol-serie
 import { SymbolSeries } from "../symbol-series/symbol-series";
 import { tradeDefaultOptions, TradeData } from "../tx-series/renderer";
 import { SymbolSeriesData } from "../symbol-series/data";
+import { defaultFillAreaOptions, FillArea } from "../fill-area/fill-area";
+import { base } from "acorn-walk";
 export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     primitives: {
         [key: string]: any; // Dictionary for attached primitives
@@ -21,7 +23,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
         length: number; // Array-like length
       };
     primitive: any; // Reference to the most recently attached primitive
-
+    applyOptions(options: any): void;
     sync(series: ISeriesApi<any>): void;
     attachPrimitive(primitive:ISeriesPrimitive, name?: string, replace?:boolean, addToLegend?:boolean): void; // Method to attach a primitive
     detachPrimitive(primitive:ISeriesPrimitive): void; // Detach a primitive by type
@@ -59,6 +61,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
   const originalDetachPrimitive = (original as any).detachPrimitive?.bind(original);
   const originalAttachPrimitive = (original as any).attachPrimitive?.bind(original);
   const originalData = (original as any).data?.bind(original);
+  const originalApplyOptions = (original as any).applyOptions?.bind(original);
 
   /**
    * Helper function to convert data items.
@@ -183,7 +186,83 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     });
   }
   
+  // ─────────────────────────────────────────────────────────────────────────
+    // DECORATED applyOptions
+    // ─────────────────────────────────────────────────────────────────────────
+    const applyOptions = (options: any): void => {
+      // 1) Call the original applyOptions (to actually change the chart’s appearance)
+      if (originalApplyOptions) {
+          originalApplyOptions(options);
+      }
 
+      // 2) If we have a Legend instance, update the legend colors accordingly
+      if (legend && typeof legend._lines !== 'undefined') {
+          const seriesType = (original as any).seriesType();
+          // Find the corresponding legend item for this series
+          const legendItem = legend._lines.find((item: any) => item.series === original);
+
+          if (legendItem) {
+              // If this is a candlestick/bar-type series
+              if (seriesType === 'Candlestick' || seriesType === 'Bar' || seriesType === 'Custom' && ('upColor' in options || 'downColor' in options)) {
+                  // Typical color properties: upColor, downColor, borderUpColor, borderDownColor, wickUpColor, wickDownColor
+                  if (options.upColor !== undefined) {
+                      // For example, store upColor in legendItem.colors[0]
+                      legendItem.colors[0] = options.upColor;
+                  }
+                  if (options.downColor !== undefined) {
+                      // Possibly store downColor in legendItem.colors[1]
+                      legendItem.colors[1] = options.downColor;
+                  }
+                  // Extend this logic to borderUpColor, borderDownColor, wickUpColor, etc. if you display them in the legend
+              }
+              // If this is a line series
+              else if (seriesType === 'Line' || seriesType === 'Histogram' || seriesType === 'Custom' && 'color' in options) {
+                  if (options.color !== undefined) {
+                      // Possibly store color in legendItem.colors[0]
+                      legendItem.colors[0] = options.color;
+                  }
+              }
+              // If this is an area, or other type you want to handle
+              else if (seriesType === 'Area') {
+                  // e.g. lineColor => legendItem.colors[0], etc.
+                  if (options.lineColor !== undefined) {
+                      legendItem.colors[0] = options.lineColor;
+                  }
+              }
+              // ...
+          
+      // Check if 'shape' is present in options and update legendSymbol accordingly.
+      if ('shape' in options) {
+        const symbol = (() => {
+          switch (options.shape) {
+            // Unicode circle
+            case 'circle':
+            case 'circles':
+              return '●'; // or '○'
+            // A cross-like symbol
+            case 'cross':
+              return '✚';
+            // Filled upward triangle
+            case 'triangleUp':
+              return '▲';
+            // Filled downward triangle
+            case 'triangleDown':
+              return '▼';
+            // Up arrow
+            case 'arrowUp':
+              return '↑';
+            // Down arrow
+            case 'arrowDown':
+              return '↓';
+            default:
+              return options.shape;
+          }
+        })();
+        legendItem.legendSymbol = symbol;
+      }
+    }
+  }
+};
   function attachPrimitive(
     primitive: ISeriesPrimitive,
     name?: string,
@@ -305,6 +384,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
   }
   
     return Object.assign(original, {
+      applyOptions,
       setData,
       dataType,
       dataTransform,
@@ -488,7 +568,8 @@ export function getDefaultSeriesOptions(
         return {
             ...common,
             ...defaultSymbolSeriesOptions,
-            
+            title: type,
+
         }
     default:
         throw new Error(`Unsupported series type: ${type}`);
@@ -1473,12 +1554,13 @@ export function updatePlotOnHandler(
     addPlotToHandler(handler,plotName, plotObj);
   }
 }
+
 export function addPlotToHandler(
   handler: Handler,
   plotName: string,
   plotObj: any,
-  type: SeriesType | 'Ohlc' = "Line",
-  overwrite: boolean = true
+  type: SeriesType | "Ohlc" = "Line",
+  mode: "overwrite" | "update" | "append" = "overwrite"
 ): void {
   const { data, group, options, pane } = plotObj;
   const extractedOptions = { ...extractPlotOptions(options) };
@@ -1489,50 +1571,62 @@ export function addPlotToHandler(
   if (plotName) {
     extractedOptions.title = plotName;
   }
-  const plotType = (extractedOptions.style === 'circles' || extractedOptions.style === 'cross')?'Symbol':type
+  const plotType = (extractedOptions.style === "circles" || extractedOptions.style === "cross")
+    ? "Symbol"
+    : type;
+
   const defaultOptions = getDefaultSeriesOptions(plotType as SeriesTypeEnum) || {};
   const fileDefaults = handler.defaultsManager.get(plotType) || {};
-  let baseOptions = { ...defaultOptions, ...fileDefaults, ...extractedOptions};
-  
-  baseOptions = { ...baseOptions, ...extractedOptions };
-  // Format the time value for each data item.
+
+  let baseOptions = { ...defaultOptions, ...fileDefaults, ...extractedOptions };
+
+  // If there is a style defined and it isn't 'line', rename it to 'shape'
+  if (baseOptions.style && baseOptions.style !== "line") {
+    baseOptions.shape = baseOptions.style;
+    delete baseOptions.style;
+  }
   const formattedData = data.map((item: any) => ({
     ...item,
-    time: typeof item.time === 'number' ? convertTime(item.time): item.time,
+    time: typeof item.time === "number" ? convertTime(item.time) : item.time,
   }));
+  const existingSeries = handler.seriesMap.get(plotName);
 
-  // Check if a series with the same name already exists.
-  if (handler.seriesMap.has(plotName)) {
-    if (overwrite) {
-      // Overwrite the existing series data.
-      const existingSeries = handler.seriesMap.get(plotName);
-      if (existingSeries) {
-        existingSeries.setData(formattedData);
+  if (existingSeries && (mode === "overwrite" || mode === "update")) {
+
+      if (mode === "update") {
+          existingSeries.update(formattedData[formattedData.length - 1]);
+          baseOptions = {...baseOptions, ...existingSeries.options()}
+      } else {
+          existingSeries.detachPrimitives()
+          existingSeries.setData(formattedData);
       }
-    }
-    // Exit the function whether we overwrote or not.
-    return;
+      existingSeries.applyOptions(baseOptions);
+      return;
   }
-
-
+  
+  // No existing series or different mode => create a new one
   let createdSeries: { name: string; series: ISeriesApiExtended } | null = null;
 
   // Choose the correct series factory based on the provided type.
-if (type === "Line") {
-  // If the style is anything other than 'line', use the symbol series factory.
-  if (extractedOptions.style !== 'line') {
-    createdSeries = handler.createSymbolSeries(
-      plotName,
-      { ...baseOptions, shape: extractedOptions.style },
-      pane
-    );
-  } else {
-    createdSeries = handler.createLineSeries(plotName, baseOptions, pane);
-  }
-
+  if (type === "Line") {
+    // If the style is anything other than 'line', use the symbol series factory.
+    if (extractedOptions.style !== "line") {
+      createdSeries = handler.createSymbolSeries(
+        plotName,
+        { ...baseOptions, shape: extractedOptions.style },
+        pane
+      );
+    } else {
+      createdSeries = handler.createLineSeries(plotName, baseOptions, pane);
+    }
   } else if (type === "Bar") {
     createdSeries = handler.createBarSeries(plotName, baseOptions, pane);
-  } else if (type === "Candlestick" || type === "Ohlc" || (type === "Custom" && data[0]?.open !== undefined)) {
+  } else if (
+    type === "Candlestick" ||
+    type === "Ohlc" ||
+    (type === "Custom" && data[0]?.open !== undefined)
+  ) {
+    // If you have a custom createCustomOHLCSeries method:
     createdSeries = handler.createCustomOHLCSeries
       ? handler.createCustomOHLCSeries(plotName, baseOptions)
       : handler.createBarSeries(plotName, baseOptions, pane);
@@ -1545,20 +1639,29 @@ if (type === "Line") {
     createdSeries = handler.createLineSeries(plotName, baseOptions, pane);
   }
 
-  // Set the data directly from the plot object.
+  // 1) Set the data on the newly created series
   createdSeries!.series.setData(formattedData);
 
-  // Add the newly created series to the seriesMap.
+  // 2) DECORATE the newly created series so that it has your extended applyOptions logic
+  if (handler.legend && !createdSeries.series.decorated) {
+    createdSeries!.series = decorateSeries(
+      createdSeries!.series as ISeriesApi<SeriesType>,
+      handler.legend
+    );
+  }
+
+  // 3) Add the newly created (and decorated) series to the seriesMap.
   handler.seriesMap.set(plotName, createdSeries!.series);
 }
 
+// Example of extracting / normalizing user-supplied options
 export function extractPlotOptions(options: any): any {
   const _options: any = {};
   for (const key in options) {
-    // Use the first element if the option value is an array.
+    // If it's an array, take the first element
     const value = Array.isArray(options[key]) ? options[key][0] : options[key];
-    // Check if the key (in lowercase) is 'linewidth'
-    if (key.toLowerCase() === 'linewidth') {
+    // If the key is "linewidth" (case-insensitive), rename to "lineWidth"
+    if (key.toLowerCase() === "linewidth") {
       _options.lineWidth = value;
     } else {
       _options[key] = value;
@@ -1566,3 +1669,62 @@ export function extractPlotOptions(options: any): any {
   }
   return _options;
 }
+export interface FillOptions {
+  // Define fill options here.
+  // For example:
+  opacity?: number;
+  color?: string;
+  // etc.
+}
+
+/**
+ * Creates or updates a fill area primitive between two series in the handler.
+ *
+ * @param handler - The chart handler managing the seriesMap.
+ * @param originPlot - The title (or key) of the origin series (plot1).
+ * @param destinationPlot - The title (or key) of the destination series (plot2).
+ * @param options - Fill options that customize the fill area.
+ * @param mode - Determines whether to "overwrite", "update", or "append" to an existing fill.
+ */
+export function addFillAreaToHandler(
+  handler: Handler,
+  fillObj: any, 
+): void {
+
+
+  const {plot1, plot2, options } = fillObj;
+
+  const fillOptions = defaultFillAreaOptions
+  // Retrieve the origin and destination series from the handler's seriesMap.
+  const originSeries = handler.seriesMap.get(plot1);
+  const destinationSeries = handler.seriesMap.get(plot2);
+
+  if (!originSeries) {
+    console.warn(`Origin series with title "${plot1}" not found.`);
+    return;
+  }
+  if (!destinationSeries) {
+    console.warn(`Destination series with title "${plot2}" not found.`);
+    return;
+  }
+  const fillKey = destinationSeries.options().title;
+  let fillPrimitive: ISeriesPrimitive | null = null;
+  // If a fill primitive already exists for this key, reuse it.
+  if (originSeries.primitives[fillKey]) {
+    fillPrimitive = originSeries.primitives[fillKey];
+  } else {
+    // Otherwise, create a new FillArea primitive.
+    fillPrimitive = new FillArea(originSeries, destinationSeries, fillOptions);
+    // Store the fill primitive using the composite key.
+    originSeries.primitives[fillKey] = fillPrimitive;
+
+    // Attach the fill area to the origin series.
+    // The attached label includes an arrow and the destination series title.
+    originSeries.attachPrimitive(
+      fillPrimitive as ISeriesPrimitive,
+      `Fill ➣ ${destinationSeries.options().title}`,
+      false,
+      true
+    );
+  }
+  }

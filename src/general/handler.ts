@@ -561,7 +561,7 @@ createSymbolSeries(
 	const legendItem: LegendItem = {
 		name,
 		series: decorated,
-		colors: [mergedOptions.color],
+		colors: [decorated.options().color || 'rgba(255,0,0,1)'],
 		legendSymbol: Array.isArray(legendSymbol)
 			? legendSymbol
 			: legendSymbol
