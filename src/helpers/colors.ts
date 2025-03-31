@@ -203,31 +203,7 @@ export function generateShades(count: number): string[] {
  * Safely extracts the alpha component from an RGBA or HSLA color string.
  * Returns 1.0 if parsing fails or if no alpha is found (e.g. "rgb(...)").
  */
- export  function getAlphaFromColor(color: string): number {
-    // Attempt to parse 'rgba(...)' or 'hsla(...)' format.
-    const rgbaMatch = color.match(/rgba?\(([^)]+)\)/i);
-    const hslaMatch = color.match(/hsla?\(([^)]+)\)/i);
-    
-    let alpha = 1.0; // Default if we fail to parse or if no alpha is present
-    
-    if (rgbaMatch) {
-      // Extract the comma-separated values inside the parentheses
-      const parts = rgbaMatch[1].split(',').map((p) => parseFloat(p.trim()));
-      // If there are 4 parts (r, g, b, a), use the last as alpha
-      if (parts.length === 4) {
-      alpha = parts[3];
-      }
-    } else if (hslaMatch) {
-      // Extract the comma-separated values inside the parentheses
-      const parts = hslaMatch[1].split(',').map((p) => parseFloat(p.trim()));
-      // If there are 4 parts (h, s, l, a), use the last as alpha
-      if (parts.length === 4) {
-      alpha = parts[3];
-      }
-    }
-    
-    return alpha;
-    }
+ 
 
 
     /**
@@ -258,3 +234,28 @@ export function findColorOptions(
     }
   }
 };
+
+
+
+/**
+ * Extracts the alpha value from a CSS color string, safely.
+ * Supports rgba() and hsla() formats.
+ * Returns 1.0 if no alpha channel is found or format is invalid.
+ */
+export function getAlphaFromColor(color: string): number {
+    const MAX_LENGTH = 100; // Prevent ReDoS via long input
+    if (color.length > MAX_LENGTH) return 1.0;
+
+    let alpha = 1.0;
+
+    const rgbaMatch = /^rgba\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(\d?\.?\d+)\s*$/i.exec(color);
+    const hslaMatch = /^hsla\s*\d{1,3}(?:\.\d+)?\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*,\s*(\d?\.?\d+)\s*$/i.exec(color);
+
+    if (rgbaMatch) {
+        alpha = parseFloat(rgbaMatch[1]);
+    } else if (hslaMatch) {
+        alpha = parseFloat(hslaMatch[1]);
+    }
+
+    return isNaN(alpha) ? 1.0 : Math.max(0, Math.min(1, alpha));
+}
