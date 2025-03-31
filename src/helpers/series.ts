@@ -950,6 +950,9 @@ function setOptionByPath(target: ISeriesApi<SeriesType>, path: string, value: an
   const keys = path.split(".");
   let obj: any = currentOptions; // cast to any so we can index by string
   for (let i = 0; i < keys.length - 1; i++) {
+    if (keys[i] === "__proto__" || keys[i] === "constructor") {
+      continue;
+    }
     if (!(keys[i] in obj)) {
       obj[keys[i]] = {};
     }
