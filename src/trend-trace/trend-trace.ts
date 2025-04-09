@@ -933,7 +933,7 @@ export class TrendTracePaneRenderer
           const candleBodyWidth = (this._options.barSpacing??0.8)*(singleWidth );
           const candleGap = singleWidth -candleBodyWidth 
       const offset = .5
-      let leftSide = bar.scaledX1-(0.5*singleWidth)
+      let leftSide = bar.scaledX1
       let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
       if (index < bars.length - 1 && bars[index+1].scaledX1) {
         const nextBar = bars[index + 1];

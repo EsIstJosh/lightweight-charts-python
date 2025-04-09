@@ -748,11 +748,7 @@ createSymbolSeries(
     }
 
 
-    //toJSON() {
-    //    // Exclude the chart attribute from serialization
-    //    const { chart, ...serialized } = this;
-    //    return serialized;
-    //}
+
     /**
      * Extracts data from a series in a format suitable for indicators.
      * @param series - The series to extract data from.

@@ -5,9 +5,8 @@ import typing
 import webview
 from webview.errors import JavascriptException
 
-from lightweight_charts import abstract
 from .util import parse_event_message, FLOAT
-
+from .abstract import AbstractChart, Window, INDEX
 import os
 import threading
 
@@ -49,7 +48,7 @@ class PyWV:
 
         self.windows.append(webview.create_window(
             title,
-            url=abstract.INDEX,
+            url=INDEX,
             js_api=self.callback_api,
             width=width,
             height=height,
@@ -147,7 +146,7 @@ class WebviewHandler():
         self._reset()
 
 
-class Chart(abstract.AbstractChart):
+class Chart(AbstractChart):
     _main_window_handlers = None
     WV: WebviewHandler = WebviewHandler()
 
@@ -175,21 +174,21 @@ class Chart(abstract.AbstractChart):
                     width, height, x, y, screen, on_top, maximize, title
                 )
 
-        window = abstract.Window(
+        window = Window(
                     script_func=lambda s: Chart.WV.evaluate_js(self._i, s),
                     js_api_code='pywebview.api.callback'
                 )
 
-        abstract.Window._return_q = Chart.WV.return_queue
+        Window._return_q = Chart.WV.return_queue
 
         self.is_alive = True
 
         if Chart._main_window_handlers is None:
-            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults)
+            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults, scripts = scripts)
             Chart._main_window_handlers = self.win.handlers
         else:
             window.handlers = Chart._main_window_handlers
-            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults)
+            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults, scripts = scripts)
 
     def show(self, block: bool = False):
         """
