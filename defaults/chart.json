@@ -95,7 +95,7 @@
     "visible": true,
     "ticksVisible": false,
     "scaleMargins": {
-      "bottom": 0.2,
+      "bottom": 0.1,
       "top": 0.2
     },
     "minimumWidth": 0
