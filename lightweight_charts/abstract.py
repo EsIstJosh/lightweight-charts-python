@@ -1280,7 +1280,7 @@ class AbstractChart(Candlestick, Pane):
     def set_scripts(self, scripts_dir: str) -> None:
         """
         Load and apply JSON scripts from directory to the scriptsManager.
-        """lob/dev/run.py
+        """
         for root, _, files in os.walk(scripts_dir):
             for filename in files:
                 if filename.endswith('.json'):
