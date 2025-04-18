@@ -5,7 +5,7 @@ with open('README.md', 'r', encoding='utf-8') as f:
 
 setup(
     name='lightweight_charts_esistjosh',
-    version='3.0.2',
+    version='3.0.3',
     packages=find_packages(),
     python_requires='>=3.8',
     install_requires=[
@@ -14,7 +14,7 @@ setup(
         'pywebview>=5.0.5',
     ],
     package_data={
-        'lightweight_charts': ['js/*'],
+        'lightweight_charts_esistjosh': ['js/*'],
     },
     author='EsIstJosh',
     license='MIT/AGPL-3.0',
