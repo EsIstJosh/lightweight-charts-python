@@ -1,4 +1,4 @@
--import asyncio
+import asyncio
 import json
 import os
 from base64 import b64decode
@@ -1189,11 +1189,13 @@ class PositionPlot(SeriesCommon):
         return self._convert_time(last_bar_time)
 
 
--bool = True, position: FLOAT = 'left',
+class AbstractChart(Candlestick, Pane):
+    def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
+                 scale_candles_only: bool = False, toolbox: bool = False,
+                 autosize: bool = True, position: FLOAT = 'left',
                  defaults: str = '../../src/general/defaults', scripts: str = '../../src/general/scripts'):
         Pane.__init__(self, window)
         Candlestick.__init__(self, self)
-
         self._lines = []
         self._scale_candles_only = scale_candles_only
         self._width = width
@@ -1278,7 +1280,7 @@ class PositionPlot(SeriesCommon):
     def set_scripts(self, scripts_dir: str) -> None:
         """
         Load and apply JSON scripts from directory to the scriptsManager.
-        """
+        """lob/dev/run.py
         for root, _, files in os.walk(scripts_dir):
             for filename in files:
                 if filename.endswith('.json'):
@@ -1329,7 +1331,7 @@ class PositionPlot(SeriesCommon):
             self, 
             name: str = '', 
             color: str = 'rgba(214, 237, 255, 0.6)',
-            style: LINE_STYLE = 'solid', 
+            style: LINE_STYLE = 'solid', lob/dev/run.py
             width: int = 2,
             price_line: bool = True, 
             price_label: bool = True, 
@@ -1361,11 +1363,11 @@ class PositionPlot(SeriesCommon):
         return self._lines[-1]
 
 
-    def create_symbols(
+    def create_symbol(
             self,
             name: str,
             color: str = 'rgba(214, 237, 255, 0.6)',
-            shape: str = 'circle',
+            shape: str = '*',
             group: str = '',
             legend_symbol: str = '',
             price_scale_id: Optional[str] = None,
