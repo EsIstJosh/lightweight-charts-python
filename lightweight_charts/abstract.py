@@ -1,4 +1,4 @@
-import asyncio
+-import asyncio
 import json
 import os
 from base64 import b64decode
@@ -491,19 +491,6 @@ class Line(SeriesCommon):
                 }}
             )
         null''')
-    #     if round:
-    #         start_time = self._single_datetime_format(start_time)
-    #         end_time = self._single_datetime_format(end_time)
-    #     else:
-    #         start_time, end_time = pd.to_datetime((start_time, end_time)).astype('int64') // 10 ** 9
-
-    #     self.run_script(f'''
-    #     {self._chart.id}.chart.timeScale().applyOptions({{shiftVisibleRangeOnNewBar: false}})
-    #     {self.id}.series.setData(
-    #         calculateTrendLine({start_time}, {start_value}, {end_time}, {end_value},
-    #                             {self._chart.id}, {jbool(ray)}))
-    #     {self._chart.id}.chart.timeScale().applyOptions({{shiftVisibleRangeOnNewBar: true}})
-    #     ''')
 
     def delete(self):
         """
@@ -521,6 +508,100 @@ class Line(SeriesCommon):
             {self._chart.id}.chart.removeSeries({self.id}.series)
             delete {self.id}legendItem
             delete {self.id}
+        ''')
+class Symbols(SeriesCommon):
+    """
+    Represents a custom Symbol series, compatible with the createSymbolSeries JS method.
+    """
+
+    SYMBOL_MAP = {
+        'circle': '●',
+        'circles': '●',
+        'cross': '✚',
+        'triangleUp': '▲',
+        'triangleDown': '▼',
+        'arrowUp': '↑',
+        'arrowDown': '↓'
+    }
+
+    def __init__(
+        self,
+        chart,
+        name: str,
+        color: str,
+        shape: str,
+        group: str,
+        legend_symbol: str = None,
+        price_scale_id: str = None,
+        crosshair_marker: bool = True,
+        price_line: bool = False,
+        price_label: bool = False,
+    ):
+        """
+        Initializes a Symbol series with configuration options.
+
+        :param chart: The parent chart instance.
+        :param name: Series title.
+        :param color: Color of symbols.
+        :param shape: Shape of the symbols (circle, cross, triangleUp, triangleDown, arrowUp, arrowDown).
+        :param group: Legend group identifier.
+        :param legend_symbol: Optional custom legend symbol; defaults to mapped shape symbol.
+        :param price_scale_id: Optional price scale ID.
+        :param crosshair_marker: Whether to display crosshair markers.
+        :param price_line: Whether to display the price line.
+        :param price_label: Whether to display the price label.
+        """
+        super().__init__(chart, name)
+        self.color = color
+        self.group = group
+        self.shape = shape
+        self.legend_symbol = legend_symbol or self.SYMBOL_MAP.get(shape, shape)
+
+        self.run_script(f'''
+            {self.id} = {self._chart.id}.createSymbolSeries(
+                "{name}",
+                {{
+                    group: '{group}',
+                    color: '{color}',
+                    shape: '{shape}',
+                    crosshairMarkerVisible: {str(crosshair_marker).lower()},
+                    priceLineVisible: {str(price_line).lower()},
+                    lastValueVisible: {str(price_label).lower()},
+                    legendSymbol: '{self.legend_symbol}',
+                    priceScaleId: {f'"{price_scale_id}"' if price_scale_id else 'undefined'}
+                    {"""autoscaleInfoProvider: () => ({
+                            priceRange: {
+                                minValue: 1_000_000_000,
+                                maxValue: 0,
+                            },
+                        }),""" if chart._scale_candles_only else ''}
+                }}
+            );
+            null;
+        ''')
+
+    def delete(self):
+        """
+        Irreversibly deletes the symbol series, removing it from the chart and legend.
+        """
+        if self in self._chart._lines:
+            self._chart._lines.remove(self)
+
+        self.run_script(f'''
+            const legendItem = {self._chart.id}.legend._lines.find(
+                (line) => line.series === {self.id}.series
+            );
+
+            if (legendItem) {{
+                {self._chart.id}.legend.div.removeChild(legendItem.row);
+                {self._chart.id}.legend._lines = {self._chart.id}.legend._lines.filter(
+                    (item) => item !== legendItem
+                );
+            }}
+
+            {self._chart.id}.chart.removeSeries({self.id}.series);
+            delete legendItem;
+            delete {self.id};
         ''')
 
 
@@ -1108,11 +1189,7 @@ class PositionPlot(SeriesCommon):
         return self._convert_time(last_bar_time)
 
 
-
-class AbstractChart(Candlestick, Pane):
-    def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
-                 scale_candles_only: bool = False, toolbox: bool = False,
-                 autosize: bool = True, position: FLOAT = 'left',
+-bool = True, position: FLOAT = 'left',
                  defaults: str = '../../src/general/defaults', scripts: str = '../../src/general/scripts'):
         Pane.__init__(self, window)
         Candlestick.__init__(self, self)
@@ -1282,6 +1359,43 @@ class AbstractChart(Candlestick, Pane):
             group, legend_symbol, price_scale_id
         ))
         return self._lines[-1]
+
+
+    def create_symbols(
+            self,
+            name: str,
+            color: str = 'rgba(214, 237, 255, 0.6)',
+            shape: str = 'circle',
+            group: str = '',
+            legend_symbol: str = '',
+            price_scale_id: Optional[str] = None,
+            crosshair_marker: bool = True,
+            price_line: bool = False,
+            price_label: bool = False
+        ) -> Symbols:
+        """
+        Creates and returns a Symbols series object.
+        """
+
+        symbol_map = {
+            'circle': '●',
+            'circles': '●',
+            'cross': '✚',
+            'triangleUp': '▲',
+            'triangleDown': '▼',
+            'arrowUp': '↑',
+            'arrowDown': '↓'
+        }
+
+        if legend_symbol == '':
+            legend_symbol = symbol_map.get(shape, shape)
+
+        symbols_series = Symbols(
+            self, name, color, shape, group, legend_symbol, price_scale_id,
+            crosshair_marker, price_line, price_label
+        )
+        self._lines.append(symbols_series)
+        return symbols_series
 
     def create_histogram(
             self, 
