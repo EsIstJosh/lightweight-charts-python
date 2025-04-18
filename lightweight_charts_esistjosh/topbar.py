@@ -114,7 +114,7 @@ class TopBar(Pane):
         if self._created:
             return
         self._created = True
-        self.run_script(f'{self.id} = {self._chart.id}.createTopBar()')
+        #self.run_script(f'{self.id} = {self._chart.id}.createTopBar()')
 
     def __getitem__(self, item):
         if widget := self._widgets.get(item):

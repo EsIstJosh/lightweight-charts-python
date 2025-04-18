@@ -23,7 +23,7 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-cp dist/bundle.js src/general/styles.css lightweight_charts/js
+cp dist/bundle.js src/general/styles.css lightweight_charts_esistjosh/js
 if [[ $? -eq 0 ]]; then
     echo -e "${INFO}copied bundle.js, style.css into python package"
 else
