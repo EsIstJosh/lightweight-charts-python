@@ -556,7 +556,7 @@ class Symbols(SeriesCommon):
         self.group = group
         self.shape = shape
         self.legend_symbol = legend_symbol or self.SYMBOL_MAP.get(shape, shape)
-
+        self.name = name
         self.run_script(f'''
             {self.id} = {self._chart.id}.createSymbolSeries(
                 "{name}",
