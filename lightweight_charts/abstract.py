@@ -1331,7 +1331,7 @@ class AbstractChart(Candlestick, Pane):
             self, 
             name: str = '', 
             color: str = 'rgba(214, 237, 255, 0.6)',
-            style: LINE_STYLE = 'solid', lob/dev/run.py
+            style: LINE_STYLE = 'solid',
             width: int = 2,
             price_line: bool = True, 
             price_label: bool = True, 
