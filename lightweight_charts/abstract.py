@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Callable, Union, Literal, List, Optional, Any
 import pandas as pd
 from webview.errors import JavascriptException
-
+import shutil
+from typing import Optional
 from .table import Table
 from .toolbox import ToolBox
 from .drawings import Box, HorizontalLine, RayLine, TrendLine, TwoPointDrawing, VerticalLine, VerticalSpan
@@ -490,19 +491,6 @@ class Line(SeriesCommon):
                 }}
             )
         null''')
-    #     if round:
-    #         start_time = self._single_datetime_format(start_time)
-    #         end_time = self._single_datetime_format(end_time)
-    #     else:
-    #         start_time, end_time = pd.to_datetime((start_time, end_time)).astype('int64') // 10 ** 9
-
-    #     self.run_script(f'''
-    #     {self._chart.id}.chart.timeScale().applyOptions({{shiftVisibleRangeOnNewBar: false}})
-    #     {self.id}.series.setData(
-    #         calculateTrendLine({start_time}, {start_value}, {end_time}, {end_value},
-    #                             {self._chart.id}, {jbool(ray)}))
-    #     {self._chart.id}.chart.timeScale().applyOptions({{shiftVisibleRangeOnNewBar: true}})
-    #     ''')
 
     def delete(self):
         """
@@ -520,6 +508,100 @@ class Line(SeriesCommon):
             {self._chart.id}.chart.removeSeries({self.id}.series)
             delete {self.id}legendItem
             delete {self.id}
+        ''')
+class Symbols(SeriesCommon):
+    """
+    Represents a custom Symbol series, compatible with the createSymbolSeries JS method.
+    """
+
+    SYMBOL_MAP = {
+        'circle': '●',
+        'circles': '●',
+        'cross': '✚',
+        'triangleUp': '▲',
+        'triangleDown': '▼',
+        'arrowUp': '↑',
+        'arrowDown': '↓'
+    }
+
+    def __init__(
+        self,
+        chart,
+        name: str,
+        color: str,
+        shape: str,
+        group: str,
+        legend_symbol: str = None,
+        price_scale_id: str = None,
+        crosshair_marker: bool = True,
+        price_line: bool = False,
+        price_label: bool = False,
+    ):
+        """
+        Initializes a Symbol series with configuration options.
+
+        :param chart: The parent chart instance.
+        :param name: Series title.
+        :param color: Color of symbols.
+        :param shape: Shape of the symbols (circle, cross, triangleUp, triangleDown, arrowUp, arrowDown).
+        :param group: Legend group identifier.
+        :param legend_symbol: Optional custom legend symbol; defaults to mapped shape symbol.
+        :param price_scale_id: Optional price scale ID.
+        :param crosshair_marker: Whether to display crosshair markers.
+        :param price_line: Whether to display the price line.
+        :param price_label: Whether to display the price label.
+        """
+        super().__init__(chart, name)
+        self.color = color
+        self.group = group
+        self.shape = shape
+        self.legend_symbol = legend_symbol or self.SYMBOL_MAP.get(shape, shape)
+        self.name = name
+        self.run_script(f'''
+            {self.id} = {self._chart.id}.createSymbolSeries(
+                "{name}",
+                {{
+                    group: '{group}',
+                    color: '{color}',
+                    shape: '{shape}',
+                    crosshairMarkerVisible: {str(crosshair_marker).lower()},
+                    priceLineVisible: {str(price_line).lower()},
+                    lastValueVisible: {str(price_label).lower()},
+                    legendSymbol: '{self.legend_symbol}',
+                    priceScaleId: {f'"{price_scale_id}"' if price_scale_id else 'undefined'}
+                    {"""autoscaleInfoProvider: () => ({
+                            priceRange: {
+                                minValue: 1_000_000_000,
+                                maxValue: 0,
+                            },
+                        }),""" if chart._scale_candles_only else ''}
+                }}
+            );
+            null;
+        ''')
+
+    def delete(self):
+        """
+        Irreversibly deletes the symbol series, removing it from the chart and legend.
+        """
+        if self in self._chart._lines:
+            self._chart._lines.remove(self)
+
+        self.run_script(f'''
+            const legendItem = {self._chart.id}.legend._lines.find(
+                (line) => line.series === {self.id}.series
+            );
+
+            if (legendItem) {{
+                {self._chart.id}.legend.div.removeChild(legendItem.row);
+                {self._chart.id}.legend._lines = {self._chart.id}.legend._lines.filter(
+                    (item) => item !== legendItem
+                );
+            }}
+
+            {self._chart.id}.chart.removeSeries({self.id}.series);
+            delete legendItem;
+            delete {self.id};
         ''')
 
 
@@ -1111,76 +1193,65 @@ class AbstractChart(Candlestick, Pane):
     def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False,
                  autosize: bool = True, position: FLOAT = 'left',
-                 defaults: str = './defaults', scripts: str = './scripts'):
+                 defaults: str = '../../src/general/defaults', scripts: str = '../../src/general/scripts'):
         Pane.__init__(self, window)
-
+        Candlestick.__init__(self, self)
         self._lines = []
         self._scale_candles_only = scale_candles_only
         self._width = width
         self._height = height
         self.events: Events = Events(self)
-
         from lightweight_charts.polygon import PolygonAPI
+
+        # Initialize PolygonAPI instance
         self.polygon: PolygonAPI = PolygonAPI(self)
 
+        # Initialize Lib.Handler JavaScript instance
         self.run_script(
             f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})'
         )
-
-        Candlestick.__init__(self, self)
 
         self.topbar: TopBar = TopBar(self)
         if toolbox:
             self.toolbox: ToolBox = ToolBox(self)
 
-        # Ensure the defaults folder exists.
-        if defaults:
-            if not os.path.exists(defaults):
-                os.makedirs(defaults, exist_ok=True)
-            self.defaults = defaults 
-            self.set_defaults(defaults)
-            self.win.handlers['save_defaults'] = self._save_defaults
-            self.events.save_defaults += self._save_defaults
+        # Set and initialize defaults directory
+        self.defaults = defaults or './defaults'
+        if not os.path.exists(self.defaults):
+            os.makedirs(self.defaults, exist_ok=True)
+            if os.path.exists('../../src/general/defaults'):
+                shutil.copytree('../../src/general/defaults', self.defaults, dirs_exist_ok=True)
+        self.set_defaults(self.defaults)
 
-        # Ensure the scripts folder exists.
-        if scripts:
-            if not os.path.exists(scripts):
-                os.makedirs(scripts, exist_ok=True)
-            self.scripts = scripts
-            self.set_scripts(scripts)
-            self.win.handlers['save_script'] = self._save_script
-            self.events.save_script += self._save_script
+        # Handlers for defaults
+        self.win.handlers['save_defaults'] = self._save_defaults
+        self.events.save_defaults += self._save_defaults
+
+        # Set and initialize scripts directory
+        self.scripts = scripts or './scripts'
+        if not os.path.exists(self.scripts):
+            os.makedirs(self.scripts, exist_ok=True)
+            if os.path.exists('../../src/general/scripts'):
+                shutil.copytree('../../src/general/scripts', self.scripts, dirs_exist_ok=True)
+        self.set_scripts(self.scripts)
+
+        # Handlers for scripts
+        self.win.handlers['save_script'] = self._save_script
+        self.events.save_script += self._save_script
+
     def _save_script(self, key: str, options: str) -> None:
-        """
-        Callback method that receives a key and a JSON string of script options.
-        It parses the JSON and saves the resulting object in self.exportedScripts.
-        Then writes it to disk in the scripts folder. If a file named `<key>.json` already exists,
-        it is overwritten; otherwise, a new file is created.
-        
-        This method can be invoked via a JS callback similar to:
-            window.callbackFunction("save_script_<key>_~_<json_options>")
-        
-        :param key: The key under which to store the script.
-        :param options: A JSON string containing the script options.
-        """
+        """Save script JSON data to memory and disk."""
         try:
-            # Parse the options JSON string.
             parsed_options = json.loads(options)
-            # Save to memory.
             if not hasattr(self, 'exportedScripts'):
                 self.exportedScripts = {}
             self.exportedScripts[key] = parsed_options
-            print(f"Saved script for key '{key}' in memory: {parsed_options}")
 
-            # Determine the folder to save scripts.
-            # Use self.scripts if provided; otherwise, default to a folder named "./scripts".
-            scripts_folder = self.scripts if isinstance(self.scripts, str) and self.scripts != '' else "./scripts"
-            # Ensure the folder exists.
+            scripts_folder = self.scripts if isinstance(self.scripts, str) and self.scripts else "./scripts"
             if not os.path.exists(scripts_folder):
                 os.makedirs(scripts_folder)
-            # Build the file path.
+
             file_path = os.path.join(scripts_folder, f"{key}.json")
-            # Write the parsed options to the file (pretty-printed).
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(parsed_options, f, indent=2)
             print(f"Script for key '{key}' written to disk at: {file_path}")
@@ -1188,141 +1259,71 @@ class AbstractChart(Candlestick, Pane):
             print(f"Error saving script for key '{key}': {e}")
 
     def _save_defaults(self, key: str, options: str) -> None:
-            """
-            Callback method that receives a key and a JSON string of options.
-            It parses the JSON and saves the resulting object in self.exportedDefaults.
-            Then writes it to disk in the defaults folder. If a file named `<key>.json` already exists,
-            it is overwritten; otherwise, a new file is created.
+        """Save defaults JSON data to memory and disk."""
+        try:
+            parsed_options = json.loads(options)
+            if not hasattr(self, 'exportedDefaults'):
+                self.exportedDefaults = {}
+            self.exportedDefaults[key] = parsed_options
 
-            This method is invoked via a JS callback like:
-                window.callbackFunction("save_defaults_<key>_~_<json_options>")
+            defaults_folder = self.defaults if isinstance(self.defaults, str) else "./defaults"
+            if not os.path.exists(defaults_folder):
+                os.makedirs(defaults_folder)
 
-            :param key: The key under which to store the defaults.
-            :param options: A JSON string containing the options.
-            """
-            try:
-                # Parse the options JSON string.
-                parsed_options = json.loads(options)
-                # Save to memory.
-                if not hasattr(self, 'exportedDefaults'):
-                    self.exportedDefaults = {}
-                self.exportedDefaults[key] = parsed_options
-                print(f"Saved defaults for key '{key}' in memory: {parsed_options}")
-
-                # Determine the folder to save defaults.
-                # Here we assume that self.defaults holds the defaults folder path (passed in via the constructor)
-                # Otherwise, default to a folder named "./defaults".
-                defaults_folder = self.defaults if isinstance(self.defaults, str) else "./defaults"
-                # Ensure the folder exists.
-                if not os.path.exists(defaults_folder):
-                    os.makedirs(defaults_folder)
-                # Build the file path.
-                file_path = os.path.join(defaults_folder, f"{key}.json")
-                # Write the parsed options to the file (pretty-printed).
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(parsed_options, f, indent=2)
-                print(f"Defaults for key '{key}' written to disk at: {file_path}")
-            except Exception as e:
-                print(f"Error saving defaults for key '{key}': {e}")
+            file_path = os.path.join(defaults_folder, f"{key}.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(parsed_options, f, indent=2)
+            print(f"Defaults for key '{key}' written to disk at: {file_path}")
+        except Exception as e:
+            print(f"Error saving defaults for key '{key}': {e}")
 
     def set_scripts(self, scripts_dir: str) -> None:
         """
-        Recursively loads all JSON script files from the provided directory and applies them
-        to the chart's scriptsManager via run_script. In addition, if a file with key "chart"
-        is encountered, its options are applied to the chart via chart.applyOptions.
-
-        Assumes that:
-        - self has an 'id' property that is used in JS.
-        - self has a method 'run_script' that executes JS code.
-        - In the JS environment, the handler instance (referenced by self.id)
-            already has a 'scriptsManager' property with a set method,
-            and a 'chart' property with an applyOptions method.
-
-        :param scripts_dir: The directory where JSON script files reside.
+        Load and apply JSON scripts from directory to the scriptsManager.
         """
-        # Recursively walk through the directory.
-        for root, dirs, files in os.walk(scripts_dir):
+        for root, _, files in os.walk(scripts_dir):
             for filename in files:
                 if filename.endswith('.json'):
-                    # Use the filename (without extension) as the key.
                     key = os.path.splitext(filename)[0]
                     file_path = os.path.join(root, filename)
                     try:
                         with open(file_path, 'r', encoding="utf-8") as f:
                             data = json.load(f)
-                    except Exception as e:
-                        print(f"Error loading {file_path}: {e}")
-                        continue
-
-                    # Convert the Python dict to a JSON string.
-                    json_data = json.dumps(data)
-                    # Construct a JS snippet to call scriptsManager.set on the chart's id.
-                    js_code = f'''
-                    {self.id}.scriptsManager.set("{key}", {json_data});
-                    '''
-                    try:
-                        # Execute the JS code in the browser/webview.
+                        json_data = json.dumps(data)
+                        js_code = f'{self.id}.scriptsManager.set("{key}", {json_data});'
                         self.run_script(js_code)
                         print(f"Set script for key '{key}' successfully.")
                     except Exception as e:
-                        print(f"Error running script for key '{key}': {e}")
+                        print(f"Error processing script '{file_path}': {e}")
 
     def set_defaults(self, defaults_dir: str) -> None:
         """
-        Recursively loads all JSON default files from the provided directory and applies them
-        to the chart's defaultManager via run_script. In addition, if a file with key "chart"
-        is encountered, its options are applied to the chart via chart.applyOptions.
-
-        Assumes that:
-        - self has an 'id' property that is used in JS.
-        - self has a method 'run_script' that executes JS code.
-        - In the JS environment, the handler instance (referenced by self.id)
-            already has a 'defaultManager' property with a set method,
-            and a 'chart' property with an applyOptions method.
-
-        :param defaults_dir: The directory where JSON default files reside.
+        Load and apply JSON defaults from directory to the defaultsManager.
+        Special handling for "chart.json".
         """
-        # Recursively walk through the directory.
-        for root, dirs, files in os.walk(defaults_dir):
+        for root, _, files in os.walk(defaults_dir):
             for filename in files:
                 if filename.endswith('.json'):
-                    # Use the filename (without extension) as the key.
                     key = os.path.splitext(filename)[0]
                     file_path = os.path.join(root, filename)
                     try:
-                        with open(file_path, 'r') as f:
+                        with open(file_path, 'r', encoding="utf-8") as f:
                             data = json.load(f)
-                    except Exception as e:
-                        print(f"Error loading {file_path}: {e}")
-                        continue
-
-                    # Convert the Python dict to a JSON string.
-                    json_data = json.dumps(data)
-                    # Construct a JS snippet to call defaultManager.set on the chart's id.
-                    js_code = f'''
-                    {self.id}.defaultsManager.set("{key}", {json_data});
-                    '''
-                    try:
-                        # Execute the JS code in the browser/webview.
+                        json_data = json.dumps(data)
+                        js_code = f'{self.id}.defaultsManager.set("{key}", {json_data});'
                         self.run_script(js_code)
                         print(f"Set defaults for key '{key}' successfully.")
-                    except Exception as e:
-                        print(f"Error running script for key '{key}': {e}")
 
-                    # If the key is "chart", apply the chart defaults.
-                if key.lower() == "chart":
-                    # Using spread syntax to ensure we apply all properties.
-                    js_apply = f'''
-                    {self.id}.chart.applyOptions({{ ...{self.id}.defaultsManager.get("chart") }});
-                    '''
-                    try:
-                        self.run_script(js_apply)
-                        print("Applied chart defaults successfully.")
+                        if key.lower() == "chart":
+                            js_apply = f'{self.id}.chart.applyOptions({{ ...{self.id}.defaultsManager.get("chart") }});'
+                            self.run_script(js_apply)
+                            print("Applied chart defaults successfully.")
                     except Exception as e:
-                        print(f"Error applying chart defaults: {e}")
+                        print(f"Error processing defaults '{file_path}': {e}")
+
     def fit(self):
         """
-        Fits the maximum amount of the chart data within the viewport.
+        Fits chart data within the viewport.
         """
         self.run_script(f'{self.id}.chart.timeScale().fitContent()')
 
@@ -1330,7 +1331,7 @@ class AbstractChart(Candlestick, Pane):
             self, 
             name: str = '', 
             color: str = 'rgba(214, 237, 255, 0.6)',
-            style: LINE_STYLE = 'solid', 
+            style: LINE_STYLE = 'solid',
             width: int = 2,
             price_line: bool = True, 
             price_label: bool = True, 
@@ -1360,6 +1361,43 @@ class AbstractChart(Candlestick, Pane):
             group, legend_symbol, price_scale_id
         ))
         return self._lines[-1]
+
+
+    def create_symbol(
+            self,
+            name: str,
+            color: str = 'rgba(214, 237, 255, 0.6)',
+            shape: str = '*',
+            group: str = '',
+            legend_symbol: str = '',
+            price_scale_id: Optional[str] = None,
+            crosshair_marker: bool = True,
+            price_line: bool = False,
+            price_label: bool = False
+        ) -> Symbols:
+        """
+        Creates and returns a Symbols series object.
+        """
+
+        symbol_map = {
+            'circle': '●',
+            'circles': '●',
+            'cross': '✚',
+            'triangleUp': '▲',
+            'triangleDown': '▼',
+            'arrowUp': '↑',
+            'arrowDown': '↓'
+        }
+
+        if legend_symbol == '':
+            legend_symbol = symbol_map.get(shape, shape)
+
+        symbols_series = Symbols(
+            self, name, color, shape, group, legend_symbol, price_scale_id,
+            crosshair_marker, price_line, price_label
+        )
+        self._lines.append(symbols_series)
+        return symbols_series
 
     def create_histogram(
             self, 

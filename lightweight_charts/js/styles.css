@@ -59,7 +59,7 @@ body {
 
 .context-menu {
 	position: absolute;
-	z-index: 1000;
+	z-index: 10000;
 	background: rgb(50, 50, 50);
 	color: var(--active-color);
 	display: none;
@@ -223,6 +223,28 @@ body {
 	display: none;
 	flex-direction: column;
 }
+
+.legend-action-button {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 1em; 
+    cursor: pointer;
+
+    transition: color 0.2s ease, background-color 0.2s ease;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.legend-action-button:hover {
+
+    background-color: #eaeaea;
+}
+
 .series-container {
     display: flex;
     flex-direction: column;
