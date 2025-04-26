@@ -1193,7 +1193,7 @@ class AbstractChart(Candlestick, Pane):
     def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False,
                  autosize: bool = True, position: FLOAT = 'left',
-                 defaults: str = '../../src/general/defaults', scripts: str = '../../src/general/scripts'):
+                 defaults: str = '../defaults', scripts: str = '../scripts'):
         Pane.__init__(self, window)
         Candlestick.__init__(self, self)
         self._lines = []
@@ -1216,11 +1216,11 @@ class AbstractChart(Candlestick, Pane):
             self.toolbox: ToolBox = ToolBox(self)
 
         # Set and initialize defaults directory
-        self.defaults = defaults or './defaults'
+        self.defaults = defaults or '../defaults'
         if not os.path.exists(self.defaults):
             os.makedirs(self.defaults, exist_ok=True)
-            if os.path.exists('../../src/general/defaults'):
-                shutil.copytree('../../src/general/defaults', self.defaults, dirs_exist_ok=True)
+            if os.path.exists('../defaults'):
+                shutil.copytree('../defaults', self.defaults, dirs_exist_ok=True)
         self.set_defaults(self.defaults)
 
         # Handlers for defaults
@@ -1228,11 +1228,11 @@ class AbstractChart(Candlestick, Pane):
         self.events.save_defaults += self._save_defaults
 
         # Set and initialize scripts directory
-        self.scripts = scripts or './scripts'
+        self.scripts = scripts or '../scripts'
         if not os.path.exists(self.scripts):
             os.makedirs(self.scripts, exist_ok=True)
-            if os.path.exists('../../src/general/scripts'):
-                shutil.copytree('../../src/general/scripts', self.scripts, dirs_exist_ok=True)
+            if os.path.exists('../scripts'):
+                shutil.copytree('../scripts', self.scripts, dirs_exist_ok=True)
         self.set_scripts(self.scripts)
 
         # Handlers for scripts

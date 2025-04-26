@@ -1,40 +1,44 @@
 import {
+    LineStyle,
     MouseEventParams,
 } from 'lightweight-charts';
 
 import { Point } from '../drawing/data-source';
 import { InteractionState } from '../drawing/drawing';
 import { DrawingOptions, defaultOptions } from '../drawing/options';
-import { BoxPaneView } from './pane-view';
+import { MeasurePaneView } from './pane-view';
 import { TwoPointDrawing } from '../drawing/two-point-drawing';
 
 
-export interface BoxOptions extends DrawingOptions {
+export interface MeasureOptions extends DrawingOptions {
     fillEnabled: boolean;
     fillColor: string;
 }
 
 const defaultBoxOptions = {
     fillEnabled: true,
-    fillColor: 'rgba(255, 255, 255, 0.2)',
-    ...defaultOptions
+    fillColor: 'rgba(255, 255, 255, 0.0)',
+    
+    lineColor: '#1E80F0',
+    lineStyle: LineStyle.Solid,
+    width: 1,
 }
 
 
-export class Box extends TwoPointDrawing {
-    _type = "Box";
+export class Measure extends TwoPointDrawing {
+    _type = "Measure";
 
     constructor(
         p1: Point,
         p2: Point,
-        options?: Partial<BoxOptions>
+        options?: Partial<MeasureOptions>
     ) {
         super(p1, p2, options);
         this._options = {
             ...defaultBoxOptions,
             ...options,
         }
-        this._paneViews = [new BoxPaneView(this)];
+        this._paneViews = [new MeasurePaneView(this)];
     }
 
     // autoscaleInfo(startTimePoint: Logical, endTimePoint: Logical): AutoscaleInfo | null {
@@ -124,7 +128,7 @@ export class Box extends TwoPointDrawing {
             this._moveToState(InteractionState.DRAGGING);
         }
     }
-
+     
     protected _mouseIsOverTwoPointDrawing(param: MouseEventParams, tolerance = 4) {
         if (!param.point) return false;
 

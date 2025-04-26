@@ -5,7 +5,7 @@ with open('README.md', 'r', encoding='utf-8') as f:
 
 setup(
     name='lightweight_charts_esistjosh',
-    version='3.0.3',
+    version='3.0.4',
     packages=find_packages(),
     python_requires='>=3.8',
     install_requires=[
@@ -14,8 +14,14 @@ setup(
         'pywebview>=5.0.5',
     ],
     package_data={
-        'lightweight_charts_esistjosh': ['js/*'],
+        # “**” says “and everything under here, at any depth”
+        "lightweight_charts_esistjosh": [
+            "defaults/**/*",
+            "scripts/**/*",
+            "js/*.js",
+        ],
     },
+
     author='EsIstJosh',
     license='MIT/AGPL-3.0',
     description="Python framework for TradingView's Lightweight Charts JavaScript library.",

@@ -9,13 +9,10 @@ import { findColorOptions } from "./colors";
 import { PineTS } from "pinets";
 import { convertTime, formattedDateAndTime } from "./time";
 import { DefaultOptionsManager } from "../general/defaults";
-import { IsExternal } from "rollup";
 import { defaultSymbolSeriesOptions, SymbolSeriesOptions } from "../symbol-series/options";
 import { SymbolSeries } from "../symbol-series/symbol-series";
-import { tradeDefaultOptions, TradeData } from "../tx-series/renderer";
 import { SymbolSeriesData } from "../symbol-series/data";
 import { defaultFillAreaOptions, FillArea } from "../fill-area/fill-area";
-import { base } from "acorn-walk";
 export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     primitives: {
         [key: string]: any; // Dictionary for attached primitives
