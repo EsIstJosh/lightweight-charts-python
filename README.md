@@ -1,6 +1,16 @@
 <div align="center">
 # lightweight-charts-python
 
+## Installation
+
+```bash
+pip install lightweight-charts-esistjosh
+
+
+## Installation
+```
+pip install lightweight-charts-esistjosh
+```
 ## Forked to Add Features
 ![Cover Image](https://raw.githubusercontent.com/EsIstJosh/lightweight-charts-python/main/Screenshot2025-02-07114921.png)
 
@@ -133,12 +143,12 @@ For full details, refer to the [MIT License](./MIT_LICENSE).
 ## Installation
 
 ```bash
-pip install lightweight-charts
+pip install lightweight-charts-esistjosh
 
 
 ## Installation
 ```
-pip install lightweight-charts
+pip install lightweight-charts-esistjosh
 ```
 ___
 
