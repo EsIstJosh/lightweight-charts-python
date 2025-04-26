@@ -42,7 +42,7 @@ if __name__ == '__main__':
     df1 = data.iloc[:midpoint]
     df2 = data.iloc[midpoint+1:]
 
-    chart = Chart(toolbox=True, debug=True)
+    chart = Chart(toolbox=True, debug=True, defaults= "./lightweight_charts_esistjosh/defaults", scripts= "./lightweight_charts_esistjosh/scripts")
     chart.legend(True)
     chart.set(df1)
 

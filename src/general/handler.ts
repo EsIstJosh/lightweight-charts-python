@@ -737,7 +737,7 @@ createSymbolSeries(
     }
 
     createToolBox() {
-        this.toolBox = new ToolBox(this, this.id, this.chart, this.series, this.commandFunctions);
+        this.toolBox = new ToolBox(this, this.chart, this.series, this.commandFunctions);
         this.div.appendChild(this.toolBox.div);
     }
 
