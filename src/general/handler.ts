@@ -157,7 +157,7 @@ export class Handler {
             window.MouseEventParams = this.currentMouseEventParams || null;
         });
         this.seriesMetadata = new WeakMap();
-        this.createTopBar()
+        //this.createTopBar()
         window.monaco = false
         // Additional MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {

@@ -107,8 +107,8 @@ export class TopBar {
         return widget
     }
 
-    makeTextBoxWidget(text: string, align='left', callbackName=null) {
-        if (callbackName) {
+    makeTextBoxWidget(text: string, align='left', callbackName: null | undefined | string = undefined) {
+        if (callbackName && typeof callbackName === 'string') {
             const textBox = document.createElement('input');
             textBox.classList.add('topbar-textbox-input');
             textBox.value = text
