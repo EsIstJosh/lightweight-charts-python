@@ -2,7 +2,7 @@ import asyncio
 import html
 
 from .util import parse_event_message
-from lightweight_charts import abstract
+from .abstract import AbstractChart, Window, INDEX
 
 try:
     import wx.html2
@@ -58,32 +58,32 @@ def emit_callback(window, string):
     asyncio.create_task(func(*args)) if asyncio.iscoroutinefunction(func) else func(*args)
 
 
-class WxChart(abstract.AbstractChart):
+class WxChart(AbstractChart):
     def __init__(self, parent, inner_width: float = 1.0, inner_height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False):
         if wx is None:
             raise ModuleNotFoundError('wx.html2 was not found, and must be installed to use WxChart.')
         self.webview: wx.html2.WebView = wx.html2.WebView.New(parent)
-        super().__init__(abstract.Window(self.webview.RunScript, 'window.wx_msg.postMessage.bind(window.wx_msg)'),
+        super().__init__(Window(self.webview.RunScript, 'window.wx_msg.postMessage.bind(window.wx_msg)'),
                          inner_width, inner_height, scale_candles_only, toolbox)
 
         self.webview.Bind(wx.html2.EVT_WEBVIEW_LOADED, lambda e: wx.CallLater(500, self.win.on_js_load))
         self.webview.Bind(wx.html2.EVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, lambda e: emit_callback(self.win, e.GetString()))
         self.webview.AddScriptMessageHandler('wx_msg')
 
-        self.webview.LoadURL("file://"+abstract.INDEX)
+        self.webview.LoadURL("file://"+INDEX)
 
     def get_webview(self):
         return self.webview
 
 
-class QtChart(abstract.AbstractChart):
+class QtChart(AbstractChart):
     def __init__(self, widget=None, inner_width: float = 1.0, inner_height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False):
         if QWebEngineView is None:
             raise ModuleNotFoundError('QWebEngineView was not found, and must be installed to use QtChart.')
         self.webview = QWebEngineView(widget)
-        super().__init__(abstract.Window(self.webview.page().runJavaScript, 'window.pythonObject.callback'),
+        super().__init__(Window(self.webview.page().runJavaScript, 'window.pythonObject.callback'),
                          inner_width, inner_height, scale_candles_only, toolbox)
 
         self.web_channel = QWebChannel()
@@ -107,31 +107,31 @@ class QtChart(abstract.AbstractChart):
         self.webview.loadFinished.connect(lambda: QTimer.singleShot(200, self.win.on_js_load))
         if using_pyside6:
             self.webview.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.webview.load(QUrl.fromLocalFile(abstract.INDEX))
+        self.webview.load(QUrl.fromLocalFile(INDEX))
 
 
     def get_webview(self): return self.webview
 
 
-class StaticLWC(abstract.AbstractChart):
+class StaticLWC(AbstractChart):
     def __init__(self, width=None, height=None, inner_width=1, inner_height=1,
                  scale_candles_only: bool = False, toolbox=False, autosize=True):
 
-        with open(abstract.INDEX.replace("index.html", 'styles.css'), 'r') as f:
+        with open(INDEX.replace("index.html", 'styles.css'), 'r') as f:
             css = f.read()
-        with open(abstract.INDEX.replace("index.html", 'bundle.js'), 'r') as f:
+        with open(INDEX.replace("index.html", 'bundle.js'), 'r') as f:
             js = f.read()
-        with open(abstract.INDEX.replace("index.html", 'lightweight-charts.js'), 'r') as f:
+        with open(INDEX.replace("index.html", 'lightweight-charts.js'), 'r') as f:
             lwc = f.read()
 
-        with open(abstract.INDEX, 'r') as f:
+        with open(INDEX, 'r') as f:
             self._html = f.read() \
                 .replace('<link rel="stylesheet" href="styles.css">', f"<style>{css}</style>") \
                 .replace(' src="./lightweight-charts.js">', f'>{lwc}') \
                 .replace(' src="./bundle.js">', f'>{js}') \
                 .replace('</body>\n</html>', '<script>')
 
-        super().__init__(abstract.Window(run_script=self.run_script), inner_width, inner_height,
+        super().__init__(Window(run_script=self.run_script), inner_width, inner_height,
                          scale_candles_only, toolbox, autosize)
         self.width = width
         self.height = height

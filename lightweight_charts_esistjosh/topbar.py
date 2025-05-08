@@ -30,9 +30,9 @@ class TextWidget(Widget):
     def __init__(self, topbar, initial_text, align, func):
         super().__init__(topbar, value=initial_text, func=func)
 
-        callback_name = f'"{self.id}"' if func else ''
+        callback_name = f'"{self.id}"' if func else 'undefined'
 
-        self.run_script(f'{self.id} = {topbar.id}.makeTextBoxWidget("{initial_text}", "{align}", {callback_name})')
+        self.run_script(f'{self.id} = {topbar.id}.makeTextBoxWidget("{initial_text}", "{align}", "{callback_name}")')
 
     def set(self, string):
         self.value = string
@@ -114,7 +114,7 @@ class TopBar(Pane):
         if self._created:
             return
         self._created = True
-        #self.run_script(f'{self.id} = {self._chart.id}.createTopBar()')
+        self.run_script(f'{self.id} = {self._chart.id}.createTopBar()')
 
     def __getitem__(self, item):
         if widget := self._widgets.get(item):

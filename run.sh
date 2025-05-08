@@ -1,2 +1,2 @@
 #!/bin/sh
-/home/ace/lightweight-charts-python/venv2/bin/python /home/ace/lightweight-charts-python/run.py
+/home/linux/lightweight-charts-python/venv/bin/python /home/linux/lightweight-charts-python/run.py

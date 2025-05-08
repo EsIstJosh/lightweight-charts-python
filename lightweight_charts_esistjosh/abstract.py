@@ -865,6 +865,35 @@ class CustomCandle(SeriesCommon):
         self._last_bar = series
         self.run_script(f'{self.id}.series.update({js_data(series)})')
 
+    def update_from_tick(self, series: pd.Series, cumulative_volume: bool = False):
+        series = self._series_datetime_format(series)
+        price = series['price']
+        time = series['time']
+
+        if self._last_bar is None or time > self._last_bar['time']:
+            # Start new candle from tick
+            bar = pd.Series({
+                'time': time,
+                'open': price,
+                'high': price,
+                'low': price,
+                'close': price,
+                'volume': series.get('volume', 0)
+            })
+        else:
+            # Update current candle with new tick
+            bar = self._last_bar.copy()
+            bar['high'] = max(bar['high'], price)
+            bar['low'] = min(bar['low'], price)
+            bar['close'] = price
+            if 'volume' in series:
+                if cumulative_volume:
+                    bar['volume'] += series['volume']
+                else:
+                    bar['volume'] = series['volume']
+
+        self._last_bar = bar
+        self.update(bar, _from_tick=True)
 
 class Candlestick(SeriesCommon):
     def __init__(self, chart: 'AbstractChart'):
