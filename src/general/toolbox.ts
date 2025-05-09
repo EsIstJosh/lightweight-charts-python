@@ -1,7 +1,7 @@
 import { DrawingTool } from "../drawing/drawing-tool";
 import { TrendLine } from "../trend-line/trend-line";
 import { Box } from "../box/box";
-import { defaultOptions } from "../drawing/options";
+import { defaultBoxOptions } from "../box/box";
 import { Drawing} from "../drawing/drawing";
 import { Point } from "../drawing/data-source";
 import { GlobalParams } from "./global-params";
@@ -324,20 +324,32 @@ private _onIconClick(icon: Icon) {
     };
   
     // 2) Compute min(low) & max(high) from the data
-    const lows  = raw.data.filter(d => d.low != null).map(d => d.low!);
-    const highs = raw.data.filter(d => d.high!= null).map(d => d.high!);
-    if (lows.length) {
-      p2.price = Math.min(...lows);
-    }
-    if (highs.length) {
-      p1.price = Math.max(...highs);
+  const lows  = raw.data.filter(d => d.low   != null).map(d => d.low!);
+  const highs = raw.data.filter(d => d.high  != null).map(d => d.high!);
+  if (lows.length)  { p2.price = Math.min(...lows);  }
+  if (highs.length) { p1.price = Math.max(...highs); }
+    // 3) Inline color logic: green if first open < last close, else red
+    let lineColor = defaultBoxOptions.lineColor;
+    if (raw.data.length > 0) {
+      const firstOpen = raw.data[0].open??0;
+      const lastClose = raw.data[raw.data.length - 1].close??1;
+      lineColor = firstOpen < lastClose ? 'rgba(0,255,0,1)' : 'rgba(255,0,0,1)';
     }
   
-    // 3) Draw the box with those updated points
-    const box = new Box(p1, p2, raw.options);
+    // 4) Draw the box with that color
+    const box = new Box(
+      p1,
+      p2,
+      {
+        ...defaultBoxOptions,
+        lineColor,
+        fillColor: 'rgba(0,0,0,0)',
+        width: 0.5
+      }
+    );
     this._drawingTool.addNewDrawing(box);
   
-    // 4) Attach the TrendTrace exactly as before
+    // 5) Attach the TrendTrace exactly as before
     const ext = ensureExtendedSeries(
       this._series,
       (this.handler as any).legend
