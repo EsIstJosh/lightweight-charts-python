@@ -36,18 +36,16 @@ while getopts ":bpu" opt; do
   esac
 done
 
-# If no options are provided, set all flags to true
+# If no options are provided, default to build only
 if [ "$OPTIND" -eq 1 ]; then
   BUILD=true
-  PACKAGE=true
-  UPLOAD=true
+  # PACKAGE remains false (we'll prompt), UPLOAD remains false
 fi
 
 # Function to perform the build process
 perform_build() {
   echo -e "${INFO}Starting build process..."
 
-  # Remove existing build artifacts
   rm -rf dist/bundle.js dist/typings/
   if [[ $? -eq 0 ]]; then
     echo -e "${INFO}Deleted old build artifacts."
@@ -55,14 +53,12 @@ perform_build() {
     echo -e "${WARNING}Could not delete old dist files, continuing..."
   fi
 
-  # Run Rollup to build the project
   npx rollup -c rollup.config.js
   if [[ $? -ne 0 ]]; then
     echo -e "${ERROR}Rollup build failed."
     exit 1
   fi
 
-  # Copy build outputs to the Python package directory
   cp dist/bundle.js src/general/styles.css lightweight_charts_esistjosh/js
   if [[ $? -eq 0 ]]; then
     echo -e "${INFO}Copied bundle.js and styles.css into Python package."
@@ -78,10 +74,8 @@ perform_build() {
 perform_package() {
   echo -e "${INFO}Starting packaging and installation..."
 
-  # Define the path to the virtual environment's Python interpreter
   VENV_PYTHON="/home/linux/lightweight-charts-python/venv/bin/python"
 
-  # Build source distribution and wheel
   sudo "$VENV_PYTHON" -m build --sdist
   if [[ $? -ne 0 ]]; then
     echo -e "${ERROR}Failed to build source distribution."
@@ -94,7 +88,6 @@ perform_package() {
     exit 1
   fi
 
-  # Install the package
   sudo "$VENV_PYTHON" -m pip install .
   if [[ $? -ne 0 ]]; then
     echo -e "${ERROR}Failed to install the package."
@@ -104,13 +97,11 @@ perform_package() {
   echo -e "${GREEN}[PACKAGE & INSTALL SUCCESS]${NC}"
 }
 
+# Function to perform upload
 perform_upload() {
   echo -e "${INFO}Starting upload process..."
 
-  # Define output directory
   OUTPUT_DIR="./output"
-
-  # Remove existing output directory if it exists
   if [ -d "$OUTPUT_DIR" ]; then
     echo -e "${INFO}Removing existing output directory..."
     sudo rm -rf "$OUTPUT_DIR"
@@ -120,14 +111,12 @@ perform_upload() {
     fi
   fi
 
-  # Create output directory
   mkdir -p "$OUTPUT_DIR"
   if [[ $? -ne 0 ]]; then
     echo -e "${ERROR}Failed to create output directory."
     exit 1
   fi
 
-  # Enable nullglob to handle cases where no files match the pattern
   shopt -s nullglob
   files=(./dist/*.tar.gz ./dist/*.whl)
   shopt -u nullglob
@@ -137,14 +126,12 @@ perform_upload() {
     return
   fi
 
-  # Move distribution files to output directory
   mv "${files[@]}" "$OUTPUT_DIR"/
   if [[ $? -ne 0 ]]; then
     echo -e "${ERROR}Failed to move distribution files to output directory."
     exit 1
   fi
 
-  # Upload distributions using twine
   "$VENV_PYTHON" -m twine upload "$OUTPUT_DIR"/*
   if [[ $? -ne 0 ]]; then
     echo -e "${ERROR}Failed to upload distributions to PyPI."
@@ -154,19 +141,27 @@ perform_upload() {
   echo -e "${GREEN}[UPLOAD SUCCESS]${NC}"
 }
 
-
-
-# Execute build if the BUILD flag is set
+# Execute build if requested
 if [ "$BUILD" = true ]; then
   perform_build
+
+  # If -p was given, package automatically; otherwise prompt
+  if [ "$PACKAGE" = true ]; then
+    perform_package
+  else
+    read -p "Do you want to package and install? (y/n): " answer
+    case "$answer" in
+      [Yy]* )
+        perform_package
+        ;;
+      * )
+        echo -e "${INFO}Skipping packaging."
+        ;;
+    esac
+  fi
 fi
 
-# Execute packaging if the PACKAGE flag is set
-if [ "$PACKAGE" = true ]; then
-  perform_package
-fi
-
-# Execute upload if the UPLOAD flag is set
+# Execute upload only if -u was explicitly passed
 if [ "$UPLOAD" = true ]; then
   perform_upload
 fi

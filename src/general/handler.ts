@@ -736,8 +736,8 @@ createSymbolSeries(
         console.log(`✅ Series "${seriesName}" successfully removed.`);
     }
 
-    createToolBox() {
-        this.toolBox = new ToolBox(this, this.chart, this.series, this.commandFunctions);
+    createToolBox(toggle: boolean = true) {
+        this.toolBox = new ToolBox(this, this.chart, this.series, this.commandFunctions, toggle);
         this.div.appendChild(this.toolBox.div);
     }
 
@@ -746,7 +746,6 @@ createSymbolSeries(
         this.wrapper.prepend(this._topBar._div);
         return this._topBar;
     }
-
 
 
     /**

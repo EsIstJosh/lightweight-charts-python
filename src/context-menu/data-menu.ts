@@ -27,7 +27,7 @@ export class DataMenu {
   private handler: Handler;
   private container: HTMLElement;
   // Set the default active tab to "options" (primary).
-  private currentTab: "full" | "options" = "options";
+  private currentTab: "full" | "options" = "full";
 
   constructor(options: DataMenuOptions) {
     this.contextMenu = options.contextMenu;

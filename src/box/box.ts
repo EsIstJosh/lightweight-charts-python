@@ -14,7 +14,7 @@ export interface BoxOptions extends DrawingOptions {
     fillColor: string;
 }
 
-const defaultBoxOptions = {
+export const defaultBoxOptions = {
     fillEnabled: true,
     fillColor: 'rgba(255, 255, 255, 0.2)',
     ...defaultOptions
