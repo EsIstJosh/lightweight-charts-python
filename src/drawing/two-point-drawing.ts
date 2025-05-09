@@ -4,7 +4,6 @@ import { Drawing } from './drawing';
 import { TwoPointDrawingPaneView } from './pane-view';
 import { PluginBase } from '../plugin-base';
 import { ISeriesApiExtended } from '../helpers/series';
-import { PluginRegistry } from '../helpers/general';
 import { MouseEventParams } from 'lightweight-charts';
 
 
