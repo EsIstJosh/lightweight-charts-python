@@ -700,14 +700,25 @@ createSymbolSeries(
     /**
      * Instantiate the Toolbox for a given series.
      *
-     * @param series  - the ISeriesApi instance to bind to the toolbox (falls back to this.series if null)
-     * @param toggle  - whether to use toggle mode (default: true)
+     * @param seriesName  - the name of the series to bind to the toolbox (uses this.series or first in list if not found)
+     * @param toggle      - whether to use toggle mode (default: true)
      */
     createToolBox(
-        series: ISeriesApi<SeriesType> | null = null,
+        seriesName: string | null = null,
         toggle: boolean = true
     ): void {
-        const targetSeries = series ?? this.series ?? this._seriesList[0];
+        let targetSeries: ISeriesApi<SeriesType> | undefined;
+    
+        if (seriesName && this.seriesMap.has(seriesName)) {
+        targetSeries = this.seriesMap.get(seriesName) as ISeriesApi<SeriesType>;
+        } else {
+        targetSeries = this.series ?? this._seriesList[0];
+        }
+    
+        if (!targetSeries) {
+        console.warn(`❌ No valid series found for toolbox creation.`);
+        return;
+        }
     
         this.toolBox = new ToolBox(
         this,
