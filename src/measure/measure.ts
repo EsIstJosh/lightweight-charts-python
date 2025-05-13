@@ -17,16 +17,17 @@ export interface MeasureOptions extends DrawingOptions {
 
 const defaultBoxOptions = {
     fillEnabled: true,
-    fillColor: 'rgba(255, 255, 255, 0.0)',
+    fillColor: 'rgba(100, 255, 100, 0.6)',
     
-    lineColor: '#1E80F0',
-    lineStyle: LineStyle.Solid,
+    lineColor: 'rgba(0, 0, 0, 0.6)',
+    lineStyle: LineStyle.Dashed,
     width: 1,
 }
 
 
 export class Measure extends TwoPointDrawing {
     _type = "Measure";
+    isTemporary = true;
 
     constructor(
         p1: Point,
@@ -128,8 +129,8 @@ export class Measure extends TwoPointDrawing {
             this._moveToState(InteractionState.DRAGGING);
         }
     }
-     
-    protected _mouseIsOverTwoPointDrawing(param: MouseEventParams, tolerance = 4) {
+
+    protected _mouseIsOverDrawing(param: MouseEventParams, tolerance = 4) {
         if (!param.point) return false;
 
         const x1 = this._paneViews[0]._p1.x;

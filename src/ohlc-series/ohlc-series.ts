@@ -21,19 +21,10 @@ export interface ohlcSeriesOptions
 		> {
 	radius: number;
 	shape:CandleShape;
+	chandelierSize: number; 
 	barSpacing: number;
 	lineStyle: LineStyle;
 	lineWidth: LineWidth;
-	enableVolumeOpacity:boolean;
-	volumeOpacityMode: "/ max"|"> previous"| "> average";
-	volumeOpacityPeriod:number;
-	maxOpacity:number;
-	dynamicCandles :"use Chandelier Size" | "trend" | "trigger" | "volume_trend";
-	chandelierSize: number; 
-	volumeMALength?: number;    // e.g. 20 (default if not provided)
-	volumeMultiplier?: number;  // e.g. 1.0 (default if not provided)
-	dynamicTrigger?: () => { newBar: boolean }; // Corrected function signature
-			
 		}
 	//upperUpColor: string|undefined
 	//upperDownColor: string|undefined
@@ -41,28 +32,23 @@ export interface ohlcSeriesOptions
 	//lowerDownColor: string|undefined
 export const ohlcdefaultOptions: ohlcSeriesOptions = {
 	...customSeriesDefaultOptions,
-	upColor: '#008000',
-	downColor: '#8C0000',
+	upColor: '#26a69a',
+	downColor: '#ef5350',
 	wickVisible: true,
 	borderVisible: true,
-	borderColor: '#737375',
-	borderUpColor: '#008000',
-	borderDownColor: '#8C0000',
+	borderColor: '#378658',
+	borderUpColor: '#26a69a',
+	borderDownColor: '#ef5350',
 	wickColor: '#737375',
-	wickUpColor: '#008000',
-	wickDownColor: '#8C0000',
+	wickUpColor: '#26a69a',
+	wickDownColor: '#ef5350',
 	radius: .6,
 	shape: 'Rounded' as CandleShape,  // Default shape
 	chandelierSize: 1,
 	barSpacing: 0.8,
 	lineStyle: 0 as LineStyle,
-	lineWidth: 2 as  LineWidth,
-	enableVolumeOpacity: true,
-	volumeOpacityMode: '> previous',
-	volumeOpacityPeriod: 21,
-	maxOpacity:0.3,
-	dynamicCandles:"use Chandelier Size",
-	dynamicTrigger: () => ({ newBar: true }) // Corrected function implementation
+	lineWidth: 2 as  LineWidth
+
 } as const;
 	//upperUpColor: undefined,
 	//upperDownColor: undefined,

@@ -6,11 +6,10 @@ from datetime import datetime
 from typing import Callable, Union, Literal, List, Optional, Any
 import pandas as pd
 from webview.errors import JavascriptException
-import shutil
-from typing import Optional
+
 from .table import Table
 from .toolbox import ToolBox
-from .drawings import Box, HorizontalLine, RayLine, TrendLine, TwoPointDrawing, VerticalLine, VerticalSpan
+from .drawings import Box, HorizontalLine, RayLine, TrendLine, TwoPointDrawing, VerticalLine, VerticalSpan, PointMarker
 from .topbar import TopBar
 from .util import (
     BulkRunScript, Pane, Events, IDGen, as_enum, jbool, js_json, TIME, NUM, FLOAT,
@@ -245,72 +244,67 @@ class SeriesCommon(Pane):
         self._last_bar = series
         self.run_script(f'{self.id}.series.update({js_data(series)})')
 
-    def _init_markers(self):
-        """
-        Creates a markers primitive once for this series,
-        stored at `series.markers`.
-        
-        In the JS code, you need something like:
-          import { createSeriesMarkers } from 'lightweight-charts';
-        
-        Then we do:
-          series.markers = createSeriesMarkers(series, []);
-        """
-        self.run_script(f"""
-            if (!{self.id}.series.markers) {{
-                {self.id}.series.markers = createSeriesMarkers({self.id}.series, []);
-            }}
-        """)
-
     def _update_markers(self):
-        """
-        Replaces the old call '{self.id}.series.setMarkers(...)'
-        with the new v5 call:
-          '{self.id}.series.markers.setMarkers(...)'
-        """
-        markers_list = list(self.markers.values())  # from your Python dict
-        markers_json = json.dumps(markers_list)
-        self.run_script(f"""
-            {self.id}.series.markers.setMarkers({markers_json});
-        """)
-
-    # ============ Everything else is mostly unchanged ============
+        # Inclure le prix dans les données des marqueurs si disponible
+        markers_data = [
+            {**marker, 'price': marker.get('price')} for marker in self.markers.values()
+        ]
+        self.run_script(f'{self.id}.series.setMarkers({json.dumps(markers_data)})')
 
     def marker_list(self, markers: list):
         """
-        Creates multiple markers.
-        `markers` is a list of dicts, for example:
-          [
-              {"time": "2021-01-21", "position": "below", "shape": "circle", "color": "#2196F3", "text": ""},
-              ...
-          ]
-        Returns a list of new marker IDs.
+        Creates multiple markers.\n
+        :param markers: The list of markers to set. These should be in the format:\n
+        [
+            {"time": "2021-01-21", "position": "below", "shape": "circle", "color": "#2196F3", "text": ""},
+            {"time": "2021-01-22", "position": "below", "shape": "circle", "color": "#2196F3", "text": ""},
+            ...
+        ]\n
+        Detailed description of the parameters:
+        time: Time location of the marker.
+        position: The position of the marker.
+        color: The color of the marker (rgb, rgba or hex).
+        shape: The shape of the marker.
+        text: Optional text to be placed with the marker.
+        size: The size of the marker (default is 1) .
+
+        For more info please refer to:
+        https://tradingview.github.io/lightweight-charts/docs/api/interfaces/SeriesMarker#properties
+
+        :return: a list of marker ids.
         """
         markers = markers.copy()
         marker_ids = []
         for marker in markers:
             marker_id = self.win._id_gen.generate()
-            self.markers[marker_id] = {
-                "time": self._single_datetime_format(marker['time']),
-                "position": marker_position(marker['position']),
-                "color": marker['color'],
-                "shape": marker_shape(marker['shape']),
-                "text": marker['text'],
+            m = {
+                'time': self._single_datetime_format(marker['time']),
+                'position': marker_position(marker['position']),
+                'color': marker['color'],
+                'shape': marker_shape(marker['shape']),
             }
+            for k, v in marker.items():
+                match(k):
+                    case 'text' | 'size':
+                        m[k] = v
+
+            self.markers[marker_id] = m.copy()
             marker_ids.append(marker_id)
         self._update_markers()
         return marker_ids
 
-    def marker(self,
-               time: Optional[datetime] = None,
-               position: str = 'below',
-               shape: str = 'arrow_up',
-               color: str = '#2196F3',
-               text: str = '') -> str:
+    def marker(self, time: Optional[datetime] = None, position: MARKER_POSITION = 'below',
+               shape: MARKER_SHAPE = 'arrow_up', color: str = '#2196F3', text: str | None = None,
+               size: NUM | None = None):
         """
-        Creates a new marker.
-        If no `time` is given, places it at the last bar.
-        Returns the newly generated marker ID.
+        Creates a new marker.\n
+        :param time: Time location of the marker. If no time is given, it will be placed at the last bar.
+        :param position: The position of the marker.
+        :param color: The color of the marker (rgb, rgba or hex).
+        :param shape: The shape of the marker.
+        :param text: Optional text to be placed with the marker.
+        :param size: The size of the marker (default is 1) .
+        :return: The id of the marker placed.
         """
         try:
             formatted_time = self._last_bar['time'] if not time else self._single_datetime_format(time)
@@ -318,28 +312,27 @@ class SeriesCommon(Pane):
             raise TypeError('Chart marker created before data was set.')
         marker_id = self.win._id_gen.generate()
 
-        self.markers[marker_id] = {
-            "time": formatted_time,
-            "position": marker_position(position),
-            "color": color,
-            "shape": marker_shape(shape),
-            "text": text,
+        m = {
+            'time': formatted_time,
+            'position': marker_position(position),
+            'color': color,
+            'shape': marker_shape(shape),
         }
+
+        if text is not None:
+            m['text'] = text
+        if size is not None:
+            m['size'] = size
+
+        self.markers[marker_id] = m
         self._update_markers()
         return marker_id
 
     def remove_marker(self, marker_id: str):
         """
-        Removes the marker with the given id.
+        Removes the marker with the given id.\n
         """
-        self.markers.pop(marker_id, None)
-        self._update_markers()
-
-    def clear_markers(self):
-        """
-        Clears all markers from this series.
-        """
-        self.markers.clear()
+        self.markers.pop(marker_id)
         self._update_markers()
 
     def horizontal_line(self, price: NUM, color: str = 'rgb(122, 146, 202)', width: int = 2,
@@ -456,6 +449,31 @@ class SeriesCommon(Pane):
             start_time = self._single_datetime_format(start_time)
             end_time = self._single_datetime_format(end_time) if end_time else None
         return VerticalSpan(self, start_time, end_time, color)
+    
+    def point_marker(
+        self,
+        time: TIME,
+        price: NUM,
+        radius: int = 5,
+        fill_color: str = '#000000',
+        line_color: str = '#1E80F0',
+        width: int = 1,
+        func: Optional[Callable] = None
+    ) -> 'PointMarker':
+        """
+        Creates a point marker at specified time and price coordinates.
+        
+        :param time: Datetime or timestamp for the marker
+        :param price: Price level for the marker
+        :param radius: Radius of the marker in pixels
+        :param fill_color: Fill color of the marker
+        :param line_color: Border color of the marker
+        :param width: Border width in pixels
+        :param func: Optional callback function when the marker is moved
+        
+        :return: PointMarker object
+        """
+        return PointMarker(self._chart, time, price, radius, fill_color, line_color, width, func)
 
 
 class Line(SeriesCommon):
@@ -491,6 +509,19 @@ class Line(SeriesCommon):
                 }}
             )
         null''')
+    #     if round:
+    #         start_time = self._single_datetime_format(start_time)
+    #         end_time = self._single_datetime_format(end_time)
+    #     else:
+    #         start_time, end_time = pd.to_datetime((start_time, end_time)).astype('int64') // 10 ** 9
+
+    #     self.run_script(f'''
+    #     {self._chart.id}.chart.timeScale().applyOptions({{shiftVisibleRangeOnNewBar: false}})
+    #     {self.id}.series.setData(
+    #         calculateTrendLine({start_time}, {start_value}, {end_time}, {end_value},
+    #                             {self._chart.id}, {jbool(ray)}))
+    #     {self._chart.id}.chart.timeScale().applyOptions({{shiftVisibleRangeOnNewBar: true}})
+    #     ''')
 
     def delete(self):
         """
@@ -508,100 +539,6 @@ class Line(SeriesCommon):
             {self._chart.id}.chart.removeSeries({self.id}.series)
             delete {self.id}legendItem
             delete {self.id}
-        ''')
-class Symbols(SeriesCommon):
-    """
-    Represents a custom Symbol series, compatible with the createSymbolSeries JS method.
-    """
-
-    SYMBOL_MAP = {
-        'circle': '●',
-        'circles': '●',
-        'cross': '✚',
-        'triangleUp': '▲',
-        'triangleDown': '▼',
-        'arrowUp': '↑',
-        'arrowDown': '↓'
-    }
-
-    def __init__(
-        self,
-        chart,
-        name: str,
-        color: str,
-        shape: str,
-        group: str,
-        legend_symbol: str = None,
-        price_scale_id: str = None,
-        crosshair_marker: bool = True,
-        price_line: bool = False,
-        price_label: bool = False,
-    ):
-        """
-        Initializes a Symbol series with configuration options.
-
-        :param chart: The parent chart instance.
-        :param name: Series title.
-        :param color: Color of symbols.
-        :param shape: Shape of the symbols (circle, cross, triangleUp, triangleDown, arrowUp, arrowDown).
-        :param group: Legend group identifier.
-        :param legend_symbol: Optional custom legend symbol; defaults to mapped shape symbol.
-        :param price_scale_id: Optional price scale ID.
-        :param crosshair_marker: Whether to display crosshair markers.
-        :param price_line: Whether to display the price line.
-        :param price_label: Whether to display the price label.
-        """
-        super().__init__(chart, name)
-        self.color = color
-        self.group = group
-        self.shape = shape
-        self.legend_symbol = legend_symbol or self.SYMBOL_MAP.get(shape, shape)
-        self.name = name
-        self.run_script(f'''
-            {self.id} = {self._chart.id}.createSymbolSeries(
-                "{name}",
-                {{
-                    group: '{group}',
-                    color: '{color}',
-                    shape: '{shape}',
-                    crosshairMarkerVisible: {str(crosshair_marker).lower()},
-                    priceLineVisible: {str(price_line).lower()},
-                    lastValueVisible: {str(price_label).lower()},
-                    legendSymbol: '{self.legend_symbol}',
-                    priceScaleId: {f'"{price_scale_id}"' if price_scale_id else 'undefined'}
-                    {"""autoscaleInfoProvider: () => ({
-                            priceRange: {
-                                minValue: 1_000_000_000,
-                                maxValue: 0,
-                            },
-                        }),""" if chart._scale_candles_only else ''}
-                }}
-            );
-            null;
-        ''')
-
-    def delete(self):
-        """
-        Irreversibly deletes the symbol series, removing it from the chart and legend.
-        """
-        if self in self._chart._lines:
-            self._chart._lines.remove(self)
-
-        self.run_script(f'''
-            const legendItem = {self._chart.id}.legend._lines.find(
-                (line) => line.series === {self.id}.series
-            );
-
-            if (legendItem) {{
-                {self._chart.id}.legend.div.removeChild(legendItem.row);
-                {self._chart.id}.legend._lines = {self._chart.id}.legend._lines.filter(
-                    (item) => item !== legendItem
-                );
-            }}
-
-            {self._chart.id}.chart.removeSeries({self.id}.series);
-            delete legendItem;
-            delete {self.id};
         ''')
 
 
@@ -865,35 +802,6 @@ class CustomCandle(SeriesCommon):
         self._last_bar = series
         self.run_script(f'{self.id}.series.update({js_data(series)})')
 
-    def update_from_tick(self, series: pd.Series, cumulative_volume: bool = False):
-        series = self._series_datetime_format(series)
-        price = series['price']
-        time = series['time']
-
-        if self._last_bar is None or time > self._last_bar['time']:
-            # Start new candle from tick
-            bar = pd.Series({
-                'time': time,
-                'open': price,
-                'high': price,
-                'low': price,
-                'close': price,
-                'volume': series.get('volume', 0)
-            })
-        else:
-            # Update current candle with new tick
-            bar = self._last_bar.copy()
-            bar['high'] = max(bar['high'], price)
-            bar['low'] = min(bar['low'], price)
-            bar['close'] = price
-            if 'volume' in series:
-                if cumulative_volume:
-                    bar['volume'] += series['volume']
-                else:
-                    bar['volume'] = series['volume']
-
-        self._last_bar = bar
-        self.update(bar, _from_tick=True)
 
 class Candlestick(SeriesCommon):
     def __init__(self, chart: 'AbstractChart'):
@@ -909,7 +817,7 @@ class Candlestick(SeriesCommon):
         """
         Sets the initial data for the chart.\n
         :param df: columns: date/time, open, high, low, close, volume (if volume enabled).
-        :param 6: keeps any drawings made through the toolbox. Otherwise, they will be deleted.
+        :param keep_drawings: keeps any drawings made through the toolbox. Otherwise, they will be deleted.
         """
         if df is None or df.empty:
             self.run_script(f'{self.id}.series.setData([])')
@@ -942,6 +850,55 @@ class Candlestick(SeriesCommon):
             self.run_script(f'{self._chart.id}.toolBox?._drawingTool.repositionOnTime()')
         else:
             self.run_script(f"{self._chart.id}.toolBox?.clearDrawings()")
+
+    # TODO: ctte methode ne marche pas du tout, comprend pas comment le js fonctionne 
+    def auto_aggregate_candles(self, min_space_per_candle=5):
+        """
+        Configure l'agrégation automatique des bougies en fonction du niveau de zoom.
+        
+        :param min_space_per_candle: Espace minimum en pixels entre chaque bougie
+        """
+        self.run_script(f"""
+        // Fonction qui sera appelée à chaque changement de timeScale
+        function updateCandleAggregation() {{
+            // Obtenir les propriétés de l'échelle de temps
+            const visibleLogicalRange = {self.id}.chart.timeScale().getVisibleLogicalRange();
+            if (!visibleLogicalRange) return;
+            
+            // Calculer le nombre de barres visibles
+            const barCount = visibleLogicalRange.to - visibleLogicalRange.from;
+            
+            // Obtenir la largeur disponible pour les barres
+            const timeScaleWidth = {self.id}.chart.timeScale().width();
+            
+            // Calculer la largeur disponible par barre
+            const pixelsPerBar = timeScaleWidth / barCount;
+            
+            // Si l'espace est trop petit, calculer un facteur d'agrégation
+            let aggregationFactor = 1;
+            if (pixelsPerBar < {min_space_per_candle}) {{
+                // Calculer le facteur d'agrégation pour atteindre l'espace minimum souhaité
+                aggregationFactor = Math.ceil({min_space_per_candle} / pixelsPerBar);
+                
+                // Appliquer les nouvelles options à la série
+                {self.id}.series.applyOptions({{
+                    chandelierSize: aggregationFactor
+                }});
+                
+            }} else {{
+                // Revenir à l'affichage normal
+                {self.id}.series.applyOptions({{
+                    chandelierSize: 1
+                }});
+            }}
+        }}
+        
+        // Observer les changements de timeScale
+        {self.id}.chart.timeScale().subscribeVisibleLogicalRangeChange(updateCandleAggregation);
+        
+        // Exécuter une fois immédiatement
+        updateCandleAggregation();
+        """)
 
     def update(self, series: pd.Series, _from_tick=False):
         """
@@ -1052,307 +1009,197 @@ class Candlestick(SeriesCommon):
             top: {scale_margin_top},
             bottom: {scale_margin_bottom},
             }}
-        }})
-        {self.id}.volumeUpColor = "{self._volume_up_color}";
-        {self.id}.volumeDownColor = "{self._volume_down_color}";
-         ''')
+        }})''')
 
-class PositionPlot(SeriesCommon):
-    def __init__(
-        self,
-        chart,
-        name: str,
-        side: str = "long",  # 'long' or 'short'
-        mode: str = "relative",
-        background_color_stop: str = "rgba(255,0,0,0.2)",
-        background_color_target: str = "rgba(0,255,0,0.2)",
-        price_line: bool = True,
-        price_label: bool = True,
-        group: str = "Position",
-        legend_symbol: str = "⚑",
-        auto: bool = True,
-    ):
-        super().__init__(chart, name)
-        self.group = group
-        self.legend_symbol = legend_symbol
+#class PositionPlot(SeriesCommon):
+#    def __init__(
+#        self,
+#        chart,
+#        name: str,
+#        side: str = "long",  # 'long' or 'short'
+#        mode: str = "relative",
+#        background_color_stop: str = "rgba(255,0,0,0.2)",
+#        background_color_target: str = "rgba(0,255,0,0.2)",
+#        price_line: bool = True,
+#        price_label: bool = True,
+#        group: str = "Position",
+#        legend_symbol: str = "⚑",
+#        auto: bool = True,
+#    ):
+#        super().__init__(chart, name)
+#        self.group = group
+#        self.legend_symbol = legend_symbol
+#
+#        if side not in ("long", "short"):
+#            raise ValueError("side must be 'long' or 'short'")
+#        if mode not in ("relative", "absolute"):
+#            raise ValueError("mode must be 'relative' or 'absolute'")
+#
+#        # Create trade series in the JS environment
+#        js_code = f"""
+#        {self.id} = {chart.id}.createTradeSeries("{name}", {{
+#            name: "{name}",
+#            group: "{group}",
+#            side: "{side}",
+#            mode: "{mode}",
+#            backgroundColorStop: "{background_color_stop}",
+#            backgroundColorTarget: "{background_color_target}",
+#            lastValueVisible: {str(price_label).lower()},
+#            priceLineVisible: {str(price_line).lower()},
+#            legendSymbol: "{legend_symbol}",
+#            auto: {str(auto).lower()}
+#        }});
+#        """
+#        try:
+#            self.run_script(js_code)
+#        except JavascriptException as e:
+#            raise RuntimeError(f"Failed to create trade series. JS Error: {e}")
+#
+#    def set(self, df: Optional[pd.DataFrame] = None, format_cols: bool = True):
+#        if df is None or df.empty:
+#            self.run_script(f'''{self.id}.series.setData([])''')
+#            self.data = pd.DataFrame()
+#            return
+#        if format_cols:
+#            df = self._df_datetime_format(df, exclude_lowercase=self.name)
+#        if not df.empty:
+#           # if 'entry_price' not in df:
+#           #     raise NameError(f'No column named "{'entry_price'}".')
+#            df['value'] = df['entry']#.rename(columns={self.name: 'value'})
+#        self.data = df.copy()
+#        self._last_bar = df.iloc[-1]
+#        self.run_script(f'''{self.id}.series.setData({js_data(df)}); ''')
+#    def delete(self):
+#        """
+#        Irreversibly deletes the trade series.
+#        """
+#        self.run_script(f'''
+#            {self.id}legendItem = {self._chart.id}.legend._lines.find((line) => line.series == {self.id}.series)
+#            {self._chart.id}.legend._lines = {self._chart.id}.legend._lines.filter((item) => item != {self.id}legendItem)
+#
+#            if ({self.id}legendItem) {{
+#                {self._chart.id}.legend.div.removeChild({self.id}legendItem.row)
+#            }}
+#
+#            {self._chart.id}.chart.removeSeries({self.id}.series)
+#            delete {self.id}legendItem
+#            delete {self.id}
+#        ''')
+#    def initiate_trade(
+#        self,
+#        time: Optional[Any] = None,
+#        entry: float = 0.0,
+#        stop: Optional[float] = None,
+#        target: Optional[float] = None,
+#        action: str = "entry",
+#        amount: float = 1.0,
+#        display_info: str = "",
+#    ) -> None:
+#        """
+#        Initiates or updates a trade on the PositionPlot by inserting one new data point
+#        into the trade series. If `time` is not provided, this method attempts to fetch
+#        the last bar's time from the base series in the trade series' options.
+#        """
+#        time_str = self._get_time_or_last_bar(time)
+#
+#        trade_point = {
+#            "time": time_str,
+#            "entry": entry,
+#            "stop": stop if stop is not None else None,
+#            "target": target if target is not None else None,
+#            "action": action,
+#            "amount": amount,
+#            "displayInfo": display_info,
+#        }
+#
+#        trade_json = js_data([trade_point])[1:-1]  # turn list -> single object
+#        js_code = f"{self.id}.series.update({trade_json});"
+#        self.run_script(js_code)
+#    def close_trade(
+#        self,
+#        time: Optional[Any] = None,
+#        display_info: str = "",
+#    ) -> None:
+#        """
+#        Closes an existing trade on the PositionPlot by sending an update 
+#        with action='close'. If `time` is not provided, we attempt to fetch 
+#        the last bar's time from the base series in the trade series' options.
+#
+#        :param time: The time at which the trade is closed. 
+#                    If None, fetch from the base series' latest bar or fallback to "now".
+#        :param display_info: Optional text info to display on the chart regarding the close.
+#        """
+#        time_str = self._get_time_or_last_bar(time)
+#
+#        # 3) Build the trade point dictionary, with action='close'
+#        trade_point = {
+#            "time": time_str,
+#            "action": "close",
+#            "displayInfo": display_info,
+#        }
+#
+#        # 4) Convert to JS object
+#        trade_json = js_data([trade_point])[1:-1]  # remove the surrounding [ ]
+#
+#        # 5) Send the update to the trade series
+#        js_code = f"{self.id}.series.update({trade_json});"
+#        self.run_script(js_code)
+#
+#    def _get_time_or_last_bar(self, time: Optional[Any]) -> str:
+#        """
+#        Returns a JS-friendly time string:
+#        - If `time` is provided, convert it.
+#        - Otherwise, fetch the last bar's time from baseSeries or fallback to "now".
+#        """
+#        if time is not None:
+#            return self._convert_time(time)
+#
+#        # No time -> fetch from base series
+#        js_fetch_time = f"""
+#        (function() {{
+#            const baseSeries = {self.id}.series.options().baseSeries;
+#            if (!baseSeries) return null;
+#            const data = baseSeries.data();
+#            if (!data || data.length === 0) return null;
+#            return data[data.length - 1].time;
+#        }})();
+#        """
+#        last_bar_time = self.run_script(js_fetch_time)
+#        if last_bar_time is None:
+#            # fallback to "now"
+#            last_bar_time = pd.Timestamp.now().isoformat()
+#
+#        return self._convert_time(last_bar_time)
 
-        if side not in ("long", "short"):
-            raise ValueError("side must be 'long' or 'short'")
-        if mode not in ("relative", "absolute"):
-            raise ValueError("mode must be 'relative' or 'absolute'")
-
-        # Create trade series in the JS environment
-        js_code = f"""
-        {self.id} = {chart.id}.createTradeSeries("{name}", {{
-            name: "{name}",
-            group: "{group}",
-            side: "{side}",
-            mode: "{mode}",
-            backgroundColorStop: "{background_color_stop}",
-            backgroundColorTarget: "{background_color_target}",
-            lastValueVisible: {str(price_label).lower()},
-            priceLineVisible: {str(price_line).lower()},
-            legendSymbol: "{legend_symbol}",
-            auto: {str(auto).lower()}
-        }});
-        """
-        try:
-            self.run_script(js_code)
-        except JavascriptException as e:
-            raise RuntimeError(f"Failed to create trade series. JS Error: {e}")
-
-    def set(self, df: Optional[pd.DataFrame] = None, format_cols: bool = True):
-        if df is None or df.empty:
-            self.run_script(f'''{self.id}.series.setData([])''')
-            self.data = pd.DataFrame()
-            return
-        if format_cols:
-            df = self._df_datetime_format(df, exclude_lowercase=self.name)
-        if not df.empty:
-           # if 'entry_price' not in df:
-           #     raise NameError(f'No column named "{'entry_price'}".')
-            df['value'] = df['entry']#.rename(columns={self.name: 'value'})
-        self.data = df.copy()
-        self._last_bar = df.iloc[-1]
-        self.run_script(f'''{self.id}.series.setData({js_data(df)}); ''')
-    def delete(self):
-        """
-        Irreversibly deletes the trade series.
-        """
-        self.run_script(f'''
-            {self.id}legendItem = {self._chart.id}.legend._lines.find((line) => line.series == {self.id}.series)
-            {self._chart.id}.legend._lines = {self._chart.id}.legend._lines.filter((item) => item != {self.id}legendItem)
-
-            if ({self.id}legendItem) {{
-                {self._chart.id}.legend.div.removeChild({self.id}legendItem.row)
-            }}
-
-            {self._chart.id}.chart.removeSeries({self.id}.series)
-            delete {self.id}legendItem
-            delete {self.id}
-        ''')
-    def initiate_trade(
-        self,
-        time: Optional[Any] = None,
-        entry: float = 0.0,
-        stop: Optional[float] = None,
-        target: Optional[float] = None,
-        action: str = "entry",
-        amount: float = 1.0,
-        display_info: str = "",
-    ) -> None:
-        """
-        Initiates or updates a trade on the PositionPlot by inserting one new data point
-        into the trade series. If `time` is not provided, this method attempts to fetch
-        the last bar's time from the base series in the trade series' options.
-        """
-        time_str = self._get_time_or_last_bar(time)
-
-        trade_point = {
-            "time": time_str,
-            "entry": entry,
-            "stop": stop if stop is not None else None,
-            "target": target if target is not None else None,
-            "action": action,
-            "amount": amount,
-            "displayInfo": display_info,
-        }
-
-        trade_json = js_data([trade_point])[1:-1]  # turn list -> single object
-        js_code = f"{self.id}.series.update({trade_json});"
-        self.run_script(js_code)
-    def close_trade(
-        self,
-        time: Optional[Any] = None,
-        display_info: str = "",
-    ) -> None:
-        """
-        Closes an existing trade on the PositionPlot by sending an update 
-        with action='close'. If `time` is not provided, we attempt to fetch 
-        the last bar's time from the base series in the trade series' options.
-
-        :param time: The time at which the trade is closed. 
-                    If None, fetch from the base series' latest bar or fallback to "now".
-        :param display_info: Optional text info to display on the chart regarding the close.
-        """
-        time_str = self._get_time_or_last_bar(time)
-
-        # 3) Build the trade point dictionary, with action='close'
-        trade_point = {
-            "time": time_str,
-            "action": "close",
-            "displayInfo": display_info,
-        }
-
-        # 4) Convert to JS object
-        trade_json = js_data([trade_point])[1:-1]  # remove the surrounding [ ]
-
-        # 5) Send the update to the trade series
-        js_code = f"{self.id}.series.update({trade_json});"
-        self.run_script(js_code)
-
-    def _get_time_or_last_bar(self, time: Optional[Any]) -> str:
-        """
-        Returns a JS-friendly time string:
-        - If `time` is provided, convert it.
-        - Otherwise, fetch the last bar's time from baseSeries or fallback to "now".
-        """
-        if time is not None:
-            return self._convert_time(time)
-
-        # No time -> fetch from base series
-        js_fetch_time = f"""
-        (function() {{
-            const baseSeries = {self.id}.series.options().baseSeries;
-            if (!baseSeries) return null;
-            const data = baseSeries.data();
-            if (!data || data.length === 0) return null;
-            return data[data.length - 1].time;
-        }})();
-        """
-        last_bar_time = self.run_script(js_fetch_time)
-        if last_bar_time is None:
-            # fallback to "now"
-            last_bar_time = pd.Timestamp.now().isoformat()
-
-        return self._convert_time(last_bar_time)
 
 
 class AbstractChart(Candlestick, Pane):
     def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
                  scale_candles_only: bool = False, toolbox: bool = False,
-                 autosize: bool = True, position: FLOAT = 'left',
-                 defaults: str = '../defaults', scripts: str = '../scripts'):
+                 autosize: bool = True, position: FLOAT = 'left'):
         Pane.__init__(self, window)
-        Candlestick.__init__(self, self)
+
         self._lines = []
         self._scale_candles_only = scale_candles_only
         self._width = width
         self._height = height
         self.events: Events = Events(self)
-        from lightweight_charts_esistjosh.polygon import PolygonAPI
 
-        # Initialize PolygonAPI instance
+        from .polygon import PolygonAPI
         self.polygon: PolygonAPI = PolygonAPI(self)
 
-        # Initialize Lib.Handler JavaScript instance
         self.run_script(
-            f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})'
-        )
+            f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})')
+
+        Candlestick.__init__(self, self)
 
         self.topbar: TopBar = TopBar(self)
         if toolbox:
             self.toolbox: ToolBox = ToolBox(self)
 
-        # Set and initialize defaults directory
-        self.defaults = defaults or '../defaults'
-        if not os.path.exists(self.defaults):
-            os.makedirs(self.defaults, exist_ok=True)
-            if os.path.exists('../defaults'):
-                shutil.copytree('../defaults', self.defaults, dirs_exist_ok=True)
-        self.set_defaults(self.defaults)
-
-        # Handlers for defaults
-        self.win.handlers['save_defaults'] = self._save_defaults
-        self.events.save_defaults += self._save_defaults
-
-        # Set and initialize scripts directory
-        self.scripts = scripts or '../scripts'
-        if not os.path.exists(self.scripts):
-            os.makedirs(self.scripts, exist_ok=True)
-            if os.path.exists('../scripts'):
-                shutil.copytree('../scripts', self.scripts, dirs_exist_ok=True)
-        self.set_scripts(self.scripts)
-
-        # Handlers for scripts
-        self.win.handlers['save_script'] = self._save_script
-        self.events.save_script += self._save_script
-
-    def _save_script(self, key: str, options: str) -> None:
-        """Save script JSON data to memory and disk."""
-        try:
-            parsed_options = json.loads(options)
-            if not hasattr(self, 'exportedScripts'):
-                self.exportedScripts = {}
-            self.exportedScripts[key] = parsed_options
-
-            scripts_folder = self.scripts if isinstance(self.scripts, str) and self.scripts else "./scripts"
-            if not os.path.exists(scripts_folder):
-                os.makedirs(scripts_folder)
-
-            file_path = os.path.join(scripts_folder, f"{key}.json")
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(parsed_options, f, indent=2)
-            print(f"Script for key '{key}' written to disk at: {file_path}")
-        except Exception as e:
-            print(f"Error saving script for key '{key}': {e}")
-
-    def _save_defaults(self, key: str, options: str) -> None:
-        """Save defaults JSON data to memory and disk."""
-        try:
-            parsed_options = json.loads(options)
-            if not hasattr(self, 'exportedDefaults'):
-                self.exportedDefaults = {}
-            self.exportedDefaults[key] = parsed_options
-
-            defaults_folder = self.defaults if isinstance(self.defaults, str) else "./defaults"
-            if not os.path.exists(defaults_folder):
-                os.makedirs(defaults_folder)
-
-            file_path = os.path.join(defaults_folder, f"{key}.json")
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(parsed_options, f, indent=2)
-            print(f"Defaults for key '{key}' written to disk at: {file_path}")
-        except Exception as e:
-            print(f"Error saving defaults for key '{key}': {e}")
-
-    def set_scripts(self, scripts_dir: str) -> None:
-        """
-        Load and apply JSON scripts from directory to the scriptsManager.
-        """
-        for root, _, files in os.walk(scripts_dir):
-            for filename in files:
-                if filename.endswith('.json'):
-                    key = os.path.splitext(filename)[0]
-                    file_path = os.path.join(root, filename)
-                    try:
-                        with open(file_path, 'r', encoding="utf-8") as f:
-                            data = json.load(f)
-                        json_data = json.dumps(data)
-                        js_code = f'{self.id}.scriptsManager.set("{key}", {json_data});'
-                        self.run_script(js_code)
-                        print(f"Set script for key '{key}' successfully.")
-                    except Exception as e:
-                        print(f"Error processing script '{file_path}': {e}")
-
-    def set_defaults(self, defaults_dir: str) -> None:
-        """
-        Load and apply JSON defaults from directory to the defaultsManager.
-        Special handling for "chart.json".
-        """
-        for root, _, files in os.walk(defaults_dir):
-            for filename in files:
-                if filename.endswith('.json'):
-                    key = os.path.splitext(filename)[0]
-                    file_path = os.path.join(root, filename)
-                    try:
-                        with open(file_path, 'r', encoding="utf-8") as f:
-                            data = json.load(f)
-                        json_data = json.dumps(data)
-                        js_code = f'{self.id}.defaultsManager.set("{key}", {json_data});'
-                        self.run_script(js_code)
-                        print(f"Set defaults for key '{key}' successfully.")
-
-                        if key.lower() == "chart":
-                            js_apply = f'{self.id}.chart.applyOptions({{ ...{self.id}.defaultsManager.get("chart") }});'
-                            self.run_script(js_apply)
-                            print("Applied chart defaults successfully.")
-                    except Exception as e:
-                        print(f"Error processing defaults '{file_path}': {e}")
-
     def fit(self):
         """
-        Fits chart data within the viewport.
+        Fits the maximum amount of the chart data within the viewport.
         """
         self.run_script(f'{self.id}.chart.timeScale().fitContent()')
 
@@ -1360,7 +1207,7 @@ class AbstractChart(Candlestick, Pane):
             self, 
             name: str = '', 
             color: str = 'rgba(214, 237, 255, 0.6)',
-            style: LINE_STYLE = 'solid',
+            style: LINE_STYLE = 'solid', 
             width: int = 2,
             price_line: bool = True, 
             price_label: bool = True, 
@@ -1390,43 +1237,6 @@ class AbstractChart(Candlestick, Pane):
             group, legend_symbol, price_scale_id
         ))
         return self._lines[-1]
-
-
-    def create_symbol(
-            self,
-            name: str,
-            color: str = 'rgba(214, 237, 255, 0.6)',
-            shape: str = '*',
-            group: str = '',
-            legend_symbol: str = '',
-            price_scale_id: Optional[str] = None,
-            crosshair_marker: bool = True,
-            price_line: bool = False,
-            price_label: bool = False
-        ) -> Symbols:
-        """
-        Creates and returns a Symbols series object.
-        """
-
-        symbol_map = {
-            'circle': '●',
-            'circles': '●',
-            'cross': '✚',
-            'triangleUp': '▲',
-            'triangleDown': '▼',
-            'arrowUp': '↑',
-            'arrowDown': '↓'
-        }
-
-        if legend_symbol == '':
-            legend_symbol = symbol_map.get(shape, shape)
-
-        symbols_series = Symbols(
-            self, name, color, shape, group, legend_symbol, price_scale_id,
-            crosshair_marker, price_line, price_label
-        )
-        self._lines.append(symbols_series)
-        return symbols_series
 
     def create_histogram(
             self, 
@@ -1559,46 +1369,46 @@ class AbstractChart(Candlestick, Pane):
             price_scale_id=price_scale_id,
         )
         
-    def plot_position(
-            self,
-            name: str = 'Position',
-            side: str = 'long',
-            mode: str = 'relative',
-            background_color_stop: str = 'rgba(255,0,0,0.2)',
-            background_color_target: str = 'rgba(0,255,0,0.2)',
-            price_line: bool = True,
-            price_label: bool = True,
-            group: str = 'Position',
-            legend_symbol: str = '$',
-            auto: bool = 'true'
-        ) -> 'PositionPlot':
-            """
-            Creates and returns a PositionPlot (Trade) object.
-
-            :param name: Name of the trade series.
-            :param side: 'long' or 'short'.
-            :param mode: 'relative' or 'absolute'.
-            :param background_color_stop: Gradient color for entry-stop line.
-            :param background_color_target: Gradient color for entry-target line.
-            :param price_line: Show the price line.
-            :param price_label: Show the price label on the scale.
-            :param group: Legend group.
-            :param legend_symbol: Symbol for the legend.
-            """
-            self._lines.append(PositionPlot(
-                self,
-                name,
-                side,
-                mode,
-                background_color_stop,
-                background_color_target,
-                price_line,
-                price_label,
-                group,
-                legend_symbol,
-                auto
-            ))
-            return self._lines[-1]
+    #def plot_position(
+    #        self,
+    #        name: str = 'Position',
+    #        side: str = 'long',
+    #        mode: str = 'relative',
+    #        background_color_stop: str = 'rgba(255,0,0,0.2)',
+    #        background_color_target: str = 'rgba(0,255,0,0.2)',
+    #        price_line: bool = True,
+    #        price_label: bool = True,
+    #        group: str = 'Position',
+    #        legend_symbol: str = '$',
+    #        auto: bool = 'true'
+    #    ) -> 'PositionPlot':
+    #        """
+    #        Creates and returns a PositionPlot (Trade) object.
+#
+    #        :param name: Name of the trade series.
+    #        :param side: 'long' or 'short'.
+    #        :param mode: 'relative' or 'absolute'.
+    #        :param background_color_stop: Gradient color for entry-stop line.
+    #        :param background_color_target: Gradient color for entry-target line.
+    #        :param price_line: Show the price line.
+    #        :param price_label: Show the price label on the scale.
+    #        :param group: Legend group.
+    #        :param legend_symbol: Symbol for the legend.
+    #        """
+    #        self._lines.append(PositionPlot(
+    #            self,
+    #            name,
+    #            side,
+    #            mode,
+    #            background_color_stop,
+    #            background_color_target,
+    #            price_line,
+    #            price_label,
+    #            group,
+    #            legend_symbol,
+    #            auto
+    #        ))
+    #        return self._lines[-1]
 
 
     
@@ -1819,3 +1629,108 @@ class AbstractChart(Candlestick, Pane):
         args = locals()
         del args['self']
         return self.win.create_subchart(*args.values())
+
+    def create_synchronized_tooltip(self, charts=None, options=None, trigger_key=None, trigger_click=False, toggle_mode=False):
+        """
+        Crée un tooltip synchronisé qui affiche les valeurs de chaque série à la position du crosshair
+        pour le graphique principal et les sous-graphiques spécifiés.
+        
+        :param charts: Liste des sous-graphiques à synchroniser avec le tooltip.
+                   Si None, seul le graphique principal sera utilisé.
+        :param options: Options de style du tooltip (optionnel)
+            - backgroundColor: Couleur de fond de l'infobulle
+            - textColor: Couleur du texte
+            - padding: Marge intérieure
+            - showOHLC: Afficher les valeurs OHLC pour les bougies (par défaut: True)
+        :param trigger_key: Touche du clavier pour activer le tooltip (ex: 't')
+        :param trigger_click: Si True, le tooltip s'affiche après un clic sur le graphique
+        :param toggle_mode: Si True, la touche ou le clic basculera l'état du tooltip (on/off).
+                            Si False, le tooltip ne s'affichera que pendant que la touche est maintenue
+                            ou pour quelques secondes après un clic
+        :return: L'ID du tooltip créé
+        """
+        if options is None:
+            options = {}
+        
+        # Définir l'option showOHLC=True par défaut
+        if 'showOHLC' not in options:
+            options['showOHLC'] = True
+        
+        tooltip_id = self.win._id_gen.generate()
+        
+        # Créer le tooltip synchronisé (désactivé par défaut)
+        js_code = f"{tooltip_id} = new Lib.SynchronizedTooltip({self.id}.chart, {js_json(options)});"
+        self.run_script(js_code)
+        
+        # Ajouter les séries principales du graphique actuel
+        for line in self.lines():
+            escaped_name = line.name.replace("'", "\\'")
+            js_code = f'{tooltip_id}.addSeries({self.id}.chart, {line.id}.series, "{escaped_name}")'
+            self.run_script(js_code)
+        
+        # Ajouter la série de bougies principale
+        js_code = f'{tooltip_id}.addSeries({self.id}.chart, {self.id}.series, "Prix")';
+        self.run_script(js_code)
+        
+        # Ajouter les séries des sous-graphiques si spécifiés
+        if charts:
+            for chart in charts:
+                # Ajouter la série principale du sous-graphique 
+                js_code = f'{tooltip_id}.addSeries({chart.id}.chart, {chart.id}.series, "Principal")';
+                self.run_script(js_code)
+                
+                # Ajouter les lignes du sous-graphique
+                for line in chart.lines():
+                    escaped_name = line.name.replace("'", "\\'")
+                    js_code = f'{tooltip_id}.addSeries({chart.id}.chart, {line.id}.series, "{escaped_name}")'
+                    self.run_script(js_code)
+        
+        # Configuration de l'activation par touche du clavier
+        if trigger_key:
+            if toggle_mode:
+                # Mode bascule: une pression active/désactive le tooltip
+                js_code = f"""
+                document.addEventListener('keydown', function(e) {{
+                    if (e.key === '{trigger_key}') {{
+                        {tooltip_id}.toggleVisibility();
+                    }}
+                }});
+                """
+            else:
+                # Mode maintenu: le tooltip est visible uniquement pendant la pression
+                js_code = f"""
+                document.addEventListener('keydown', function(e) {{
+                    if (e.key === '{trigger_key}') {{
+                        {tooltip_id}.setEnabled(true);
+                    }}
+                }});
+                document.addEventListener('keyup', function(e) {{
+                    if (e.key === '{trigger_key}') {{
+                        {tooltip_id}.setEnabled(false);
+                    }}
+                }});
+                """
+            self.run_script(js_code)
+        
+        # Configuration de l'activation par clic
+        if trigger_click:
+            if toggle_mode:
+                # Mode bascule: un clic active/désactive le tooltip
+                js_code = f"""
+                {self.id}.chart.subscribeClick(function(param) {{
+                    {tooltip_id}.toggleVisibility();
+                }});
+                """
+            else:
+                # Mode temporaire: le tooltip s'affiche pendant 3 secondes après un clic
+                js_code = f"""
+                {self.id}.chart.subscribeClick(function(param) {{
+                    {tooltip_id}.setEnabled(true);
+                    setTimeout(function() {{ 
+                        {tooltip_id}.setEnabled(false); 
+                    }}, 3000);
+                }});
+                """
+            self.run_script(js_code)
+        
+        return tooltip_id

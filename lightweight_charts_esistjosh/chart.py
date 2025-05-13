@@ -5,8 +5,9 @@ import typing
 import webview
 from webview.errors import JavascriptException
 
+from lightweight_charts_esistjosh import abstract
 from .util import parse_event_message, FLOAT
-from .abstract import AbstractChart, Window, INDEX
+
 import os
 import threading
 
@@ -44,11 +45,10 @@ class PyWV:
                 width, height = active_screen.width, active_screen.height
             else:
                 width, height = screen.width, screen.height
-        webview.settings['ALLOW_DOWNLOADS'] = True
 
         self.windows.append(webview.create_window(
             title,
-            url=INDEX,
+            url=abstract.INDEX,
             js_api=self.callback_api,
             width=width,
             height=height,
@@ -146,7 +146,7 @@ class WebviewHandler():
         self._reset()
 
 
-class Chart(AbstractChart):
+class Chart(abstract.AbstractChart):
     _main_window_handlers = None
     WV: WebviewHandler = WebviewHandler()
 
@@ -165,30 +165,28 @@ class Chart(AbstractChart):
         inner_width: float = 1.0,
         inner_height: float = 1.0,
         scale_candles_only: bool = False,
-        position: FLOAT = 'left',
-        defaults: str = None,
-        scripts: str = None
+        position: FLOAT = 'left'
     ):
         Chart.WV.debug = debug
         self._i = Chart.WV.create_window(
                     width, height, x, y, screen, on_top, maximize, title
                 )
 
-        window = Window(
+        window = abstract.Window(
                     script_func=lambda s: Chart.WV.evaluate_js(self._i, s),
                     js_api_code='pywebview.api.callback'
                 )
 
-        Window._return_q = Chart.WV.return_queue
+        abstract.Window._return_q = Chart.WV.return_queue
 
         self.is_alive = True
 
         if Chart._main_window_handlers is None:
-            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults, scripts = scripts)
+            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position)
             Chart._main_window_handlers = self.win.handlers
         else:
             window.handlers = Chart._main_window_handlers
-            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position, defaults= defaults, scripts = scripts)
+            super().__init__(window, inner_width, inner_height, scale_candles_only, toolbox, position=position)
 
     def show(self, block: bool = False):
         """
@@ -206,7 +204,7 @@ class Chart(AbstractChart):
     async def show_async(self):
         self.show(block=False)
         try:
-            from lightweight_charts_esistjosh import polygon
+            from lightweight_charts import polygon
             [asyncio.create_task(self.polygon.async_set(*args)) for args in polygon._set_on_load]
             while 1:
                 while Chart.WV.emit_queue.empty() and self.is_alive:

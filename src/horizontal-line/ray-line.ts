@@ -24,7 +24,7 @@ export class RayLine extends HorizontalLine {
         this.requestUpdate();
     }
 
-    _mouseIsOverTwoPointDrawing(param: MouseEventParams, tolerance = 4) {
+    _mouseIsOverDrawing(param: MouseEventParams, tolerance = 4) {
         if (!param.point) return false;
         const y = this.series.priceToCoordinate(this._point.price);
 

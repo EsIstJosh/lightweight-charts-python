@@ -36,63 +36,6 @@ def parse_event_message(window, string):
     return func, args
 
 
-#def js_data(data: Union[pd.DataFrame, pd.Series]) -> str:
-#    """
-#    Convert a pandas DataFrame or Series into a JSON-formatted string.
-#    For DataFrames, if a 'close' column exists, a 'value' column is created identical to 'close'.
-#    Filters out None and NaN values for DataFrames.
-#
-#    Parameters:
-#    - data: Union[pd.DataFrame, pd.Series]
-#        The pandas DataFrame or Series to convert.
-#
-#    Returns:
-#    - str
-#        A JSON-formatted string representing the cleaned data.
-#    """
-#    try:
-#        if isinstance(data, pd.DataFrame):
-#            df = data.copy()  # Create a copy to avoid modifying the original DataFrame
-#
-#            # Step 1: Check for 'close' column and create 'value' column if it exists
-#            if 'close' in df.columns:
-#                df['value'] = df['close']
-#                print("Added 'value' column based on 'close' column.")
-#
-#            # Step 2: Convert DataFrame to list of records (dictionaries)
-#            records = df.to_dict(orient='records')
-#
-#            # Step 3: Filter out None and NaN values from each record
-#            filtered_records = [
-#                {k: v for k, v in record.items() if v is not None and not pd.isna(v)}
-#                for record in records
-#            ]
-#
-#            # Optional: If 'value' column was added and you want to ensure it's present,
-#            # you can add additional checks or processing here.
-#
-#            # Convert the filtered records to JSON
-#            json_output = json.dumps(filtered_records, indent=2)
-#            return json_output
-#
-#        elif isinstance(data, pd.Series):
-#            # Convert Series to dictionary
-#            series_dict = data.to_dict()
-#
-#            # Optional: If needed, you can add a 'value' field based on the Series values
-#            # For example, if the Series represents 'close' values:
-#            # series_dict['value'] = series_dict.get('close', series_dict)
-#
-#            # Currently, no filtering is applied to Series
-#            json_output = json.dumps(series_dict, indent=2)
-#            return json_output
-#
-#        else:
-#            raise ValueError("Input data must be a pandas DataFrame or Series.")
-#
-#    except Exception as e:
-#        raise ValueError(f"Error converting data to JSON: {e}")
-
 def js_data(data: Union[pd.DataFrame, pd.Series]):
     if isinstance(data, pd.DataFrame):
         d = data.to_dict(orient='records')
@@ -100,7 +43,7 @@ def js_data(data: Union[pd.DataFrame, pd.Series]):
     else:
         d = data.to_dict()
         filtered_records = {k: v for k, v in d.items()}
-    return json.dumps(filtered_records, indent=2)
+    return json.dumps(filtered_records)
 
 
 def snake_to_camel(s: str):
@@ -137,7 +80,7 @@ NUM = Union[float, int]
 
 FLOAT = Literal['left', 'right', 'top', 'bottom']
 
-CANDLE_SHAPE = Literal['Rectangle','Rounded','Ellipse','Arrow','Polygon','Bar','3d',]
+CANDLE_SHAPE = Literal['Ellipse','Rectangle','Hourglass','Bowtie','X','3d','Polygon']
 
 def as_enum(value, string_types):
     types = string_types.__args__
@@ -230,8 +173,7 @@ class Events:
             '''),
             wrapper=lambda func, c, *args: func(c, *[float(a) if a != 'null' else None for a in args])
         )
-        self.save_defaults = Emitter()
-        self.save_script = Emitter()
+
 class BulkRunScript:
     def __init__(self, script_func):
         self.enabled = False

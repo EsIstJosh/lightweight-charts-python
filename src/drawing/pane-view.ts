@@ -1,13 +1,11 @@
-import { Coordinate, IPrimitivePaneView } from 'lightweight-charts';
+import { Coordinate, ISeriesPrimitivePaneView } from 'lightweight-charts';
 import { Drawing } from './drawing';
 import { Point } from './data-source';
 import { DrawingPaneRenderer } from './pane-renderer';
 import { TwoPointDrawing } from './two-point-drawing';
-import { FourPointDrawing } from './four-point-drawing';
-import { ThreePointDrawing } from './three-point-drawing';
 
 
-export abstract class DrawingPaneView implements IPrimitivePaneView {
+export abstract class DrawingPaneView implements ISeriesPrimitivePaneView {
     _source: Drawing;
 
     constructor(source: Drawing) {
@@ -49,88 +47,6 @@ export abstract class TwoPointDrawingPaneView extends DrawingPaneView {
     abstract renderer(): DrawingPaneRenderer;
 
     _getX(p: Point) {
-        const timeScale = this._source.chart.timeScale();
-        return timeScale.logicalToCoordinate(p.logical);
-    }
-}
-
-export abstract class ThreePointDrawingPaneView extends DrawingPaneView {
-    _p1: ViewPoint = { x: null, y: null };
-    _p2: ViewPoint = { x: null, y: null };
-    _p3: ViewPoint = { x: null, y: null };
-
-    _source: ThreePointDrawing;
-
-    constructor(source: ThreePointDrawing) {
-        super(source);
-        this._source = source;
-    }
-
-    update() {
-        if (!this._source.p1 || !this._source.p2 || !this._source.p3) return;
-        const series = this._source.series;
-        const y1 = series.priceToCoordinate(this._source.p1.price);
-        const y2 = series.priceToCoordinate(this._source.p2.price);
-        const y3 = series.priceToCoordinate(this._source.p3.price);
-
-        const x1 = this._getX(this._source.p1);
-        const x2 = this._getX(this._source.p2);
-        const x3 = this._getX(this._source.p3);
-
-        this._p1 = { x: x1, y: y1 };
-        this._p2 = { x: x2, y: y2 };
-        this._p3 = { x: x3, y: y3 };
-
-        if (!x1 || !x2 || !x3|| !y1 || !y2 || !y3) return;
-    }
-
-    abstract renderer(): DrawingPaneRenderer
-
-    _getX(p: Point) {
-        const timeScale = this._source.chart.timeScale();
-        return timeScale.logicalToCoordinate(p.logical);
-    }
-}
-
-export abstract class FourPointDrawingPaneView extends DrawingPaneView {
-    _p1: ViewPoint = { x: null, y: null };
-    _p2: ViewPoint = { x: null, y: null };
-    _p3: ViewPoint = { x: null, y: null };
-    _p4: ViewPoint = { x: null, y: null };
-
-    _source: FourPointDrawing;
-
-    constructor(source: FourPointDrawing) {
-        super(source);
-        this._source = source;
-    }
-
-    update() {
-        if (!this._source.p1 || !this._source.p2 || !this._source.p3 || !this._source.p4) return;
-
-        const series = this._source.series;
-
-        const y1 = series.priceToCoordinate(this._source.p1.price);
-        const y2 = series.priceToCoordinate(this._source.p2.price);
-        const y3 = series.priceToCoordinate(this._source.p3.price);
-        const y4 = series.priceToCoordinate(this._source.p4.price);
-
-        const x1 = this._getX(this._source.p1);
-        const x2 = this._getX(this._source.p2);
-        const x3 = this._getX(this._source.p3);
-        const x4 = this._getX(this._source.p4);
-
-        this._p1 = { x: x1, y: y1 };
-        this._p2 = { x: x2, y: y2 };
-        this._p3 = { x: x3, y: y3 };
-        this._p4 = { x: x4, y: y4 };
-
-        if (!x1 || !x2 || !x3 || !x4 || !y1 || !y2 || !y3 || !y4) return;
-    }
-
-    abstract renderer(): DrawingPaneRenderer
-
-    _getX(p: Point): Coordinate | null {
         const timeScale = this._source.chart.timeScale();
         return timeScale.logicalToCoordinate(p.logical);
     }

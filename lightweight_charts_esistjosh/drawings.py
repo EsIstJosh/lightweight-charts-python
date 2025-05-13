@@ -250,7 +250,7 @@ class VerticalSpan(Pane):
         super().__init__(self._chart.win)
         start_time, end_time = pd.to_datetime(start_time), pd.to_datetime(end_time)
         self.run_script(f'''
-        {self.id} = {self._chart.id}.chart.addSeries(HistogramSeries,{{
+        {self.id} = {self._chart.id}.chart.addHistogramSeries({{
                 color: '{color}',
                 priceFormat: {{type: 'volume'}},
                 priceScaleId: 'vertical_line',
@@ -278,3 +278,69 @@ class VerticalSpan(Pane):
         Irreversibly deletes the vertical span.
         """
         self.run_script(f'{self._chart.id}.chart.removeSeries({self.id})')
+
+class PointMarker(Drawing):
+    def __init__(
+        self,
+        chart,
+        time: TIME,
+        price: NUM,
+        radius: int = 5,
+        fill_color: str = '#000000',
+        line_color: str = '#1E80F0',
+        width: int = 1,
+        func = None
+    ):
+        super().__init__(chart, func)
+        
+        self.run_script(f'''
+        {self.id} = new Lib.PointMarker(
+            {make_js_point(self.chart, time, price)},
+            {{
+                radius: {radius},
+                fillColor: '{fill_color}',
+                lineColor: '{line_color}',
+                width: {width}
+            }}
+        )
+        {self.id}.initializeViews()  // Add this line to initialize the views
+        {chart.id}.series.attachPrimitive({self.id})
+        ''')
+        
+    def update(self, time: Optional[TIME] = None, price: Optional[NUM] = None):
+        """
+        Update the position of the marker.
+        
+        :param time: New time position (optional)
+        :param price: New price position (optional)
+        """
+        if time is not None and price is not None:
+            self.run_script(f'{self.id}.updatePoints({make_js_point(self.chart, time, price)})')
+        elif time is not None:
+            self.run_script(f'{self.id}.updatePoints({{time: {self.chart._single_datetime_format(time)}}})')
+        elif price is not None:
+            self.run_script(f'{self.id}.updatePoints({{price: {price}}})')
+    
+    def options(self, radius: Optional[int] = None, fill_color: Optional[str] = None, 
+                line_color: Optional[str] = None, width: Optional[int] = None):
+        """
+        Update the appearance of the marker.
+        
+        :param radius: Radius of the marker in pixels
+        :param fill_color: Fill color of the marker
+        :param line_color: Border color of the marker
+        :param width: Border width in pixels
+        """
+        options = {}
+        if radius is not None:
+            options['radius'] = radius
+        if fill_color is not None:
+            options['fillColor'] = f"'{fill_color}'"
+        if line_color is not None:
+            options['lineColor'] = f"'{line_color}'"
+        if width is not None:
+            options['width'] = width
+            
+        if options:
+            options_str = ', '.join(f"{k}: {v}" for k, v in options.items())
+            self.run_script(f'{self.id}.applyOptions({{{options_str}}})')

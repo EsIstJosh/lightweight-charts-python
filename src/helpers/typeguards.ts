@@ -1,8 +1,9 @@
 import { SeriesType, ISeriesApi, AreaData, Background, BarData, CandlestickData, ColorType, HistogramData, LineData, OhlcData, SolidColor, Time, VerticalGradientColor, BaselineData, CustomData, ISeriesPrimitive, WhitespaceData } from "lightweight-charts";
+import { ISeriesApiExtended, decorateSeries } from "./general";
+import { Legend } from "../general/legend";
 import { LegendSeries, LegendPrimitive, LegendGroup, LegendItem } from "../general";
 import { FillArea } from "../fill-area/fill-area";
-import { CandleShape, ohlcSeriesData } from "../ohlc-series/data";
-import { ISeriesApiExtended, ISeriesIndicator } from "./series";
+import { CandleShape } from "../ohlc-series/data";
 export function isSolidColor(background: Background): background is SolidColor {
   return background.type === ColorType.Solid;
 }
@@ -22,30 +23,60 @@ export function isSingleValueData(
 
 export function isOHLCData(
   data: any
-): data is BarData<Time> | CandlestickData<Time> | OhlcData<Time> | ohlcSeriesData{
+): data is BarData<Time> | CandlestickData<Time> | OhlcData<Time> {
   return "close" in data && "open" in data && "high" in data && "low" in data;
 }
 
-export function isWhitespaceData(data: any): data is WhitespaceData<Time> {
+
+export function isWhitespaceData(
+  data: any
+): data is WhitespaceData<Time> {
   if (!data || typeof data !== "object") {
     return false;
   }
+
   // Must have time
   if (!("time" in data)) {
     return false;
   }
- 
-  if ("value" in data || "open" in data || "close" in data || "high" in data || "low" in data) {
+
+  // Must NOT have single-value or OHLC fields
+  if (
+    "value" in data ||
+    "open" in data ||
+    "close" in data ||
+    "high" in data ||
+    "low" in data
+  ) {
     return false;
   }
+
   return true;
 }
-
 export function hasColorOption(series: ISeriesApi<SeriesType>): boolean {
     const seriesOptions = series.options() as any;
     return 'lineColor' in seriesOptions || 'color' in seriesOptions;
 }
-
+export function ensureExtendedSeries(
+    series: ISeriesApi<SeriesType> | ISeriesApiExtended,
+    legend: Legend // Assuming `Legend` is the type of the legend instance
+  ): ISeriesApiExtended {
+    // Type guard to check if the series is already extended
+    const isExtendedSeries = (
+      series: ISeriesApi<SeriesType> | ISeriesApiExtended
+    ): series is ISeriesApiExtended => {
+      return (series as ISeriesApiExtended).primitives !== undefined;
+    };
+  
+    // If the series is already extended, return it
+    if (isExtendedSeries(series)) {
+      return series;
+    }
+  
+    // Otherwise, decorate the series dynamically
+    console.log("Decorating the series dynamically.");
+    return decorateSeries(series, legend);
+  }
 
   export function isLegendPrimitive(item: LegendSeries | LegendPrimitive): item is LegendPrimitive {
     return (item as LegendPrimitive).primitive !== undefined;
@@ -77,27 +108,13 @@ export interface SeriesTypeToDataMap {
  */
 export function isFillArea(primitive: ISeriesPrimitive | FillArea): primitive is FillArea {
   return (
+    (primitive as FillArea).options !== undefined && 
     (primitive as FillArea).options.originColor !== null &&
-    (primitive as FillArea).options.destinationColor !== null 
+    (primitive as FillArea).options.destinationColor !== null &&
+    (primitive as FillArea).options.lineWidth !== null
   );
 }
 
 export function isCandleShape(value: unknown): value is CandleShape {
   return Object.values(CandleShape).includes(value as CandleShape);
-}
-
-
-export function isISeriesApi(series: any): series is ISeriesApi<SeriesType>| ISeriesApiExtended {
-  return (
-    typeof series === "object" &&
-    series !== null &&
-    typeof series.data === "function" &&
-    typeof series.options === "function" 
-  );
-}
-// Type Guard: Check if the series is an ISeriesIndicator
-export function isISeriesIndicator(series: any): series is ISeriesIndicator {
-  return (series as ISeriesIndicator).figures !== undefined &&
-         (series as ISeriesIndicator).sourceSeries !== undefined &&
-         (series as ISeriesIndicator).indicator !== undefined;
 }

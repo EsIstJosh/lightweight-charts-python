@@ -1,154 +1,31 @@
 <div align="center">
+
 # lightweight-charts-python
 
-## Installation
-
-```bash
-pip install lightweight-charts-esistjosh
-
-
-## Installation
-```
-pip install lightweight-charts-esistjosh
-```
-## Forked to Add Features
-![Cover Image](https://raw.githubusercontent.com/EsIstJosh/lightweight-charts-python/main/Screenshot2025-02-07114921.png)
-
-### PineTS integration (original PineTS source: https://github.com/alaa-eddine/PineTS, edited source: https://github.com/EsIstJosh/PineTS) 
-### PineTS related code is licensed seperately using the AGPL3.0 license: [AGPL License](./AGPL_LICENSE) 
-    Simple scripting capabilities similar to pinescript, 
-    see the [PineTS ReadMe](https://github.com/EsIstJosh/PineTS/blob/bd79b7f2d21d15f7470da118eab4f71638ce07da/README.md) 
-    for more information
-
-    
-![ezgif-88d432c58012aa](https://github.com/user-attachments/assets/ffbe2b3d-6be6-4d1f-8b42-86e950800712)
-
-
-
-
-### Series Types
-    - Area
-    - Bar
-    - Custom Candlestick implementation 
-            |   |   |
-            V   V   V
-        - Capable of candle data aggregation
-            for displaying multiple timeframes 
-            simultaneously
-        - Customizable Line Width
-        - Customizable Line Style
-        - Customizable Bar Spacing
-        - Customizable Shape: 
-            - Rectangle
-            - Rounded
-            - Ellipse 
-            - Arrow
-            - Polygon
-            - Bar
-            - 3d
-        - Volume Color Opacity
-        
-            
-### Plugins
-    - Fill Area: Shades the area between two series. 
-    - Pitch Fork: Tool for drawing (added to toolbox):
-      - Standard
-      - Schiff
-      - Modified Schiff
-      - Inside 
-    - Volume Profile: Displays volume profiles based on the visible range and supports drawing. 
-    
-    - Trend Trace: A transformable/scalable  replica of a section of series between a drawings points. Similar to 'Bars Pattern' in TradingView (instantiated from and linked to existing drawing: box, trendline etc)
-
-
-### Indicators (implemented in typescript, from KLineChart primarily ( https://github.com/klinecharts/KLineChart ))
-    
-    Overlay Indicators:
-        - Arnaud Legoux Moving Average
-        - Bollinger Bands
-        - Exponential Moving Average
-        - Highest High
-        - Highest High Lowest Low
-        - Linear Regression Indicator
-        - Lowest Low
-        - Median
-        - Moving Average
-        - Rolling Moving Average
-        - Simple Moving Average
-        - Stop and Reverse
-        - Super Trend
-        - Symmetric Weighted Moving Average
-        - Triple Exponentially Smoothed Average
-        - Volume Weighted Average Price
-        - Volume Weighted Moving Average
-        - Weighted Moving Average
-    
-    Oscillator Indicators:
-        - Awesome Oscillator
-        - Average True Range
-        - Bias
-        - BRAR
-        - Bull and Bear Index
-        - Commodity Channel Index
-        - Current Ratio
-        - Difference of Moving Average
-        - Directional Movement Index
-        - Momentum
-        - Moving Average Convergence Divergence
-        - Psychological Line
-        - Rate of Change
-        - Relative Strength Index
-        - Stochastic Oscillator
-        - Variance
-        - Williams %R
-        - Change
-        - Range
-        - Standard Deviation
-
-### Context Menu
-    - Upgraded context menu for better control over chart/series/primitive settings.
-    - Ability to save options for chart, series, and primitives to JSON.
-
-### Legend
-    - Upgraded to allow for collapsible grouping of series.
-    - Tree-style display of groups > series > primitives.
-    
-### Series Cloning / Type Conversion
-    - Simple cloning to different series types
-
-
-
-
-## License
-
-Unless otherwise stated, all code in this repository is licensed under the MIT License.
-
-Additional license: See the [AGPL License](./AGPL_LICENSE) for specific components covered under AGPL.
-
-For full details, refer to the [MIT License](./MIT_LICENSE).
----####################################################################################---
-## Original 
-
-
-[![PyPi Release](https://img.shields.io/pypi/v/lightweight-charts?color=32a852&label=PyPi)](https://pypi.org/project/lightweight-charts/)  
-[![Made with Python](https://img.shields.io/badge/Python-3.8+-c7a002?logo=python&logoColor=white)](https://python.org "Go to Python homepage")  
+[![PyPi Release](https://img.shields.io/pypi/v/lightweight-charts?color=32a852&label=PyPi)](https://pypi.org/project/lightweight-charts/)
+[![Made with Python](https://img.shields.io/badge/Python-3.8+-c7a002?logo=python&logoColor=white)](https://python.org "Go to Python homepage")
+[![License](https://img.shields.io/github/license/louisnw01/lightweight-charts-python?color=9c2400)](https://github.com/louisnw01/lightweight-charts-python/blob/main/LICENSE)
 [![Documentation](https://img.shields.io/badge/documentation-006ee3)](https://lightweight-charts-python.readthedocs.io/en/latest/index.html)
 
+![cover](https://raw.githubusercontent.com/louisnw01/lightweight-charts-python/main/cover.png)
 
-**lightweight-charts-python** aims to provide a simple and Pythonic way to access and implement [TradingView's Lightweight Charts](https://www.tradingview.com/lightweight-charts/).
-
----
-
-
-## Installation
-
-```bash
-pip install lightweight-charts-esistjosh
+lightweight-charts-python aims to provide a simple and pythonic way to access and implement [TradingView's Lightweight Charts](https://www.tradingview.com/lightweight-charts/).
+</div>
 
 
 ## Installation
+
+
 ```
-pip install lightweight-charts-esistjosh
+pip install lightweight-charts
+sudo apt install nodejs npm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
+source ~/.bashrc
+nvm install node
+git clone http://10.8.0.1:9000/finance/lightweight-charts-python.git && cd lightweight-charts-python
+npm install
+(optional) npm audit fix --force
+./build.sh
 ```
 ___
 
