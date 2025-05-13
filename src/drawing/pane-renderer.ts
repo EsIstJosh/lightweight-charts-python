@@ -1,9 +1,9 @@
-import { IPrimitivePaneRenderer } from "lightweight-charts";
+import { ISeriesPrimitivePaneRenderer } from "lightweight-charts";
 import { ViewPoint } from "./pane-view";
 import { DrawingOptions } from "./options";
 import { BitmapCoordinatesRenderingScope, CanvasRenderingTarget2D } from "fancy-canvas";
 
-export abstract class DrawingPaneRenderer implements IPrimitivePaneRenderer {
+export abstract class DrawingPaneRenderer implements ISeriesPrimitivePaneRenderer {
     _options: DrawingOptions;
 
     constructor(options: DrawingOptions) {

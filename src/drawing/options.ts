@@ -5,6 +5,7 @@ export interface DrawingOptions {
     lineColor: string;
     lineStyle: LineStyle
     width: number;
+    text?: string;
 }
 
 export const defaultOptions: DrawingOptions = {

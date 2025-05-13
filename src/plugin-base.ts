@@ -8,7 +8,6 @@ import {
 	Time,
 } from 'lightweight-charts';
 import { ensureDefined } from './helpers/assertions';
-import { PluginRegistry } from './helpers/general';
 
 //* PluginBase is a useful base to build a plugin upon which
 //* already handles creating getters for the chart and series,
@@ -54,25 +53,4 @@ export abstract class PluginBase implements ISeriesPrimitive<Time> {
 			this.dataUpdated(scope);
 		}
 	}
-  /**
-   * Serializes the plugin state.
-   * Default implementation returns an empty object.
-   * Subclasses should override this method to export any relevant state.
-   *
-   * @returns A JSON-compatible representation of the plugin state.
-   */
-  public toJSON(): any {
-    return {};
-  }
-
-  /**
-   * Restores the plugin state from the provided JSON.
-   * Default implementation does nothing.
-   * Subclasses should override this method to restore their state.
-   *
-   * @param json - The JSON object representing the plugin state.
-   */
-  public fromJSON(json: any): void {
-    // Default implementation: do nothing.
-  }
 }

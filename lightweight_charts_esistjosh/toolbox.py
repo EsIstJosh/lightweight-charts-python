@@ -1,14 +1,14 @@
 import json
-from .util import jbool 
+
 
 class ToolBox:
-    def __init__(self, chart, toggle = True):
+    def __init__(self, chart):
         self.run_script = chart.run_script
         self.id = chart.id
         self._save_under = None
         self.drawings = {}
         chart.win.handlers[f'save_drawings{self.id}'] = self._save_drawings
-        self.run_script(f'{self.id}.createToolBox({jbool(toggle)})')
+        self.run_script(f'{self.id}.createToolBox()')
 
     def save_drawings_under(self, widget: 'Widget'):
         """

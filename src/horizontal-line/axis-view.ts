@@ -26,7 +26,7 @@ export class HorizontalLineAxisView implements ISeriesPrimitiveAxisView {
         return this._y ?? 0;
     }
     text() {
-        return this._source._options.text || this._price || '';
+        return (this._source._options as any)?.text || this._price || '';
     }
     textColor() {
         return 'white';

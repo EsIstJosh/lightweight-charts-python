@@ -38,7 +38,7 @@ export abstract class Drawing extends PluginBase {
     public static lastHoveredObject: Drawing | null = null;
 
     protected _listeners: any[] = [];
-    
+
     constructor(
         options?: Partial<DrawingOptions>
     ) {

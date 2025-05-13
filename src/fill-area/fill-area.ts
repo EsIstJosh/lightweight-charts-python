@@ -1,5 +1,5 @@
 import { CanvasRenderingTarget2D } from "fancy-canvas";
-import { IPrimitivePaneRenderer, Coordinate, IPrimitivePaneView, Time, ISeriesPrimitive, SeriesAttachedParameter, DataChangedScope, SeriesDataItemTypeMap, SeriesType, Logical, AutoscaleInfo, BarData, LineData, ISeriesApi, PrimitivePaneViewZOrder } from "lightweight-charts";
+import { ISeriesPrimitivePaneRenderer, Coordinate, ISeriesPrimitivePaneView, Time, ISeriesPrimitive, SeriesAttachedParameter, DataChangedScope, SeriesDataItemTypeMap, SeriesType, Logical, AutoscaleInfo, BarData, LineData, ISeriesApi } from "lightweight-charts";
 import { PluginBase } from "../plugin-base";
 import { setOpacity } from "../helpers/colors";
 import { ClosestTimeIndexFinder } from '../helpers/closest-index';
@@ -25,10 +25,10 @@ export class FillArea extends PluginBase implements ISeriesPrimitive<Time> {
         const defaultOriginColor = setOpacity('#0000FF', 0.25); // Blue
         const defaultDestinationColor = setOpacity('#FF0000', 0.25); // Red
         const originSeriesColor = hasColorOption(originSeries)
-            ? setOpacity((originSeries.options() as any).color || defaultOriginColor, 0.3)
+            ? setOpacity((originSeries.options() as any).lineColor || defaultOriginColor, 0.3)
             : setOpacity(defaultOriginColor, 0.3);
         const destinationSeriesColor = hasColorOption(destinationSeries)
-            ? setOpacity((destinationSeries.options() as any).color || defaultDestinationColor, 0.3)
+            ? setOpacity((destinationSeries.options() as any).lineColor || defaultDestinationColor, 0.3)
             : setOpacity(defaultDestinationColor, 0.3);
     
         this.options = {
@@ -63,10 +63,22 @@ export class FillArea extends PluginBase implements ISeriesPrimitive<Time> {
         this._paneViews.forEach(pw => pw.update());
     }
     applyOptions(options: Partial<FillAreaOptions>) {
-
+        const defaultOriginColor = '#0000FF'; // Blue
+        const defaultDestinationColor = '#FF0000'; // Red
+    
+        const originSeriesColor = hasColorOption(this._originSeries)
+            ? setOpacity((this._originSeries.options() as any).lineColor || (this._originSeries.options() as any).color || defaultOriginColor, 0.3)
+            : setOpacity(defaultOriginColor, 0.3);
+    
+        const destinationSeriesColor = hasColorOption(this._destinationSeries)
+            ? setOpacity((this._destinationSeries.options() as any).lineColor || (this._destinationSeries.options() as any).color || defaultDestinationColor, 0.3)
+            : setOpacity(defaultDestinationColor, 0.3);
+    
         this.options = {
             ...this.options,
             ...options,
+            originColor: options.originColor || originSeriesColor,
+            destinationColor: options.destinationColor || destinationSeriesColor,
         };
     
         this.calculateBands();
@@ -172,7 +184,7 @@ export class FillArea extends PluginBase implements ISeriesPrimitive<Time> {
         };
     }
 }
-class FillAreaPaneRenderer implements IPrimitivePaneRenderer {
+class FillAreaPaneRenderer implements ISeriesPrimitivePaneRenderer {
     _viewData: BandViewData;
     _options: FillAreaOptions;
 
@@ -240,7 +252,7 @@ class FillAreaPaneRenderer implements IPrimitivePaneRenderer {
     }
 }
 
-class FillAreaPaneView implements IPrimitivePaneView {
+class FillAreaPaneView implements ISeriesPrimitivePaneView {
     _source: FillArea;
     _data: BandViewData;
 
@@ -268,9 +280,6 @@ class FillAreaPaneView implements IPrimitivePaneView {
 
     renderer() {
         return new FillAreaPaneRenderer(this._data);
-    }
-    zOrder() {
-        return 'bottom' as PrimitivePaneViewZOrder;
     }
 }
 

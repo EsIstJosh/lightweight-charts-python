@@ -6,5 +6,4 @@ export * from './trend-line/trend-line';
 export * from './vertical-line/vertical-line';
 export * from './ohlc-series/ohlc-series';
 export * from './tooltip/tooltip';
-export * from './fill-area/fill-area';
-export * from './pineTS/code-editor';
+export * from './fill-area/fill-area'

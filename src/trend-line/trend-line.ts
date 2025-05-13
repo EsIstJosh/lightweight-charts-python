@@ -83,7 +83,7 @@ export class TrendLine extends TwoPointDrawing {
         }
     }
 
-    protected _mouseIsOverTwoPointDrawing(param: MouseEventParams, tolerance = 4) {
+    protected _mouseIsOverDrawing(param: MouseEventParams, tolerance = 4) {
 
         if (!param.point) return false;;
 

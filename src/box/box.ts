@@ -14,7 +14,7 @@ export interface BoxOptions extends DrawingOptions {
     fillColor: string;
 }
 
-export const defaultBoxOptions = {
+const defaultBoxOptions = {
     fillEnabled: true,
     fillColor: 'rgba(255, 255, 255, 0.2)',
     ...defaultOptions
@@ -125,7 +125,7 @@ export class Box extends TwoPointDrawing {
         }
     }
 
-    protected _mouseIsOverTwoPointDrawing(param: MouseEventParams, tolerance = 4) {
+    protected _mouseIsOverDrawing(param: MouseEventParams, tolerance = 4) {
         if (!param.point) return false;
 
         const x1 = this._paneViews[0]._p1.x;
