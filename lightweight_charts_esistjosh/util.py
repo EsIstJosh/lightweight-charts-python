@@ -29,10 +29,25 @@ class IDGen(list):
         self.generate()
 
 
+
 def parse_event_message(window, string):
+    """
+    Parses messages of the form "handlerName_~_arg1;;;arg2;;;…"
+    and safely looks up the handler, ignoring any undefined names.
+    """
     name, args = string.split('_~_')
     args = args.split(';;;')
-    func = window.handlers[name]
+
+    # safe lookup—if there's no handler for this name, just no-op
+    func = window.handlers.get(name)
+    if func is None:
+        import logging
+        logging.getLogger(__name__).debug(
+            "parse_event_message: no handler for '%s', ignoring", name
+        )
+        # return a no-op plus empty args
+        return (lambda *a, **kw: None, ())
+
     return func, args
 
 
@@ -137,7 +152,9 @@ NUM = Union[float, int]
 
 FLOAT = Literal['left', 'right', 'top', 'bottom']
 
-CANDLE_SHAPE = Literal['Rectangle','Rounded','Ellipse','Arrow','Polygon','Bar','3d',]
+CANDLE_SHAPE = Literal['Rectangle','Rounded','Ellipse','Arrow','Polygon','Bar','3d']
+
+TOOLBOX_MODE = Literal['default', 'legacy', 'disabled']
 
 def as_enum(value, string_types):
     types = string_types.__args__

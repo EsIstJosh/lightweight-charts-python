@@ -48,9 +48,7 @@ import { SupportedSeriesType, getDefaultSeriesOptions } from "../helpers/series"
 import { ColorPicker } from "../context-menu/color-picker_";
 import { PineScriptManager } from "./scripts";
 import { defaultSymbolSeriesOptions, SymbolSeriesOptions } from "../symbol-series/options";
-import { group } from "console";
-import { title } from "process";
-import { json } from "stream/consumers";
+
 import { SymbolSeries } from "../symbol-series/symbol-series";
 
 globalParamInit();
@@ -150,7 +148,8 @@ export class Handler {
             for (let i = 0; i < this.commandFunctions.length; i++) {
                 if (this.commandFunctions[i](event)) break;
             }
-        });
+        });    
+
         window.handlerInFocus = this.id;
         this.wrapper.addEventListener("mouseover", () => {
             window.handlerInFocus = this.id;
@@ -162,8 +161,8 @@ export class Handler {
         // Additional MouseEventParams tracking
         this.chart.subscribeCrosshairMove((param: MouseEventParams) => {
             this.currentMouseEventParams = param;
-        });
-        
+        });   
+
 
         this.reSize();
         if (!autoSize) return;
@@ -191,7 +190,8 @@ export class Handler {
             if (this.toolBox) {
                 this.toolBox.div.style.display = 'flex'
             }
-        }
+        }    
+
     }
     public primitives: Map<ISeriesApi<SeriesType>, ISeriesPrimitive> = new Map(); // Map of plugin primitive instances by series name
     private _createChart() {
@@ -581,45 +581,6 @@ createSymbolSeries(
 	return { name, series: decorated };
 }
 
-   // /**
-   //  * Creates a trade series using merged options.
-   //  */
-   // createTradeSeries(name: string, options?: Partial<TradeSeriesOptions> = {}): { name: string; series: ISeriesApiExtended  } {
-   //     const mergedoptions?: TradeSeriesOptions & { seriesType?: string; group?: string; legendSymbol?: string[] | string; } = {
-   //         ...tradeDefaultOptions,
-   //         ...this.defaultsManager.defaults.get("trade"),
-   //         ...options,
-   //         seriesType: 'Trade',
-   //     };
-//
-   //     const { group, legendSymbol = ['$'], seriesType: _, ...filteredOptions } = mergedOptions;
-//
-   //     const instance = new TradeSeries();
-   //     const tradeCustomSeries = this.chart.addCustomSeries(instance, filteredOptions);
-//
-   //     const decorated = decorateSeries(tradeCustomSeries, this.legend);
-   //     this._seriesList.push(decorated);
-   //     this.seriesMap.set(name ?? 'Trade', decorated);
-//
-   //     const colorsArray = [
-   //         mergedOptions.backgroundColorStop,
-   //         mergedOptions.backgroundColorTarget
-   //     ];
-   //     const finalLegendSymbol = Array.isArray(legendSymbol) ? legendSymbol : [legendSymbol];
-//
-   //     const legendItem: LegendItem = {
-   //         name,
-   //         series: decorated,
-   //         colors: colorsArray,
-   //         legendSymbol: finalLegendSymbol,
-   //         seriesType: 'Trade',
-   //         group,
-   //     };
-//
-   //     this.legend.addLegendItem(legendItem);
-//
-   //     return { name, series: tradeCustomSeries };
-   // }
 
     /**
      * Creates a fill area between two series.
@@ -736,11 +697,28 @@ createSymbolSeries(
         console.log(`✅ Series "${seriesName}" successfully removed.`);
     }
 
-    createToolBox(toggle: boolean = true) {
-        this.toolBox = new ToolBox(this, this.chart, this.series, this.commandFunctions, toggle);
+    /**
+     * Instantiate the Toolbox for a given series.
+     *
+     * @param series  - the ISeriesApi instance to bind to the toolbox (falls back to this.series if null)
+     * @param toggle  - whether to use toggle mode (default: true)
+     */
+    createToolBox(
+        series: ISeriesApi<SeriesType> | null = null,
+        toggle: boolean = true
+    ): void {
+        const targetSeries = series ?? this.series ?? this._seriesList[0];
+    
+        this.toolBox = new ToolBox(
+        this,
+        this.chart,
+        targetSeries,
+        this.commandFunctions,
+        toggle
+        );
         this.div.appendChild(this.toolBox.div);
     }
-
+    
     createTopBar() {
         this._topBar = new TopBar(this);
         this.wrapper.prepend(this._topBar._div);

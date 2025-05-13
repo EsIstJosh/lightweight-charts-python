@@ -52,10 +52,11 @@ export abstract class TwoPointDrawingPaneRenderer extends DrawingPaneRenderer {
     //  scope.context.fillStyle = this._options.labelTextColor;
     //  scope.context.fillText(text, x + offset * 2 - leftAdjustment, y);
     // }
-
-    _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number) {
-        const radius = 9
-        scope.context.fillStyle = '#000';
+    protected _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number): void {
+        const radius = 9;
+        const rawColor = this._options.lineColor?.toLowerCase() ?? '';
+        const color = (rawColor === '#000') ? '#121212' : this._options.lineColor;
+        scope.context.fillStyle = color
         scope.context.beginPath();
         scope.context.arc(x, y, radius, 0, 2 * Math.PI);
         scope.context.stroke();
@@ -96,9 +97,11 @@ export abstract class    ThreePointDrawingPaneRenderer extends DrawingPaneRender
         };
     }
 
-    _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number) {
+    protected _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number): void {
         const radius = 9;
-        scope.context.fillStyle = '#000';
+        const rawColor = this._options.lineColor?.toLowerCase() ?? '';
+        const color = (rawColor === '#000') ? '#121212' : this._options.lineColor;
+        scope.context.fillStyle = color
         scope.context.beginPath();
         scope.context.arc(x, y, radius, 0, 2 * Math.PI);
         scope.context.stroke();
@@ -141,9 +144,11 @@ export abstract class FourPointDrawingPaneRenderer extends DrawingPaneRenderer {
         };
     }
 
-    _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number) {
+    protected _drawEndCircle(scope: BitmapCoordinatesRenderingScope, x: number, y: number): void {
         const radius = 9;
-        scope.context.fillStyle = '#000';
+        const rawColor = this._options.lineColor?.toLowerCase() ?? '';
+        const color = (rawColor === '#000') ? '#121212' : this._options.lineColor;
+        scope.context.fillStyle = color
         scope.context.beginPath();
         scope.context.arc(x, y, radius, 0, 2 * Math.PI);
         scope.context.stroke();
