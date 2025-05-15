@@ -13,7 +13,7 @@ import { PitchFork } from "../pitchfork/pitchfork";
 import { Measure } from "../measure/measure";
 import { Handler } from "./handler";
 import { ensureExtendedSeries, ISeriesApiExtended } from "../helpers/series";
-import { DataPoint, defaultSequenceOptions, SequenceOptions } from "../trend-trace/sequence";
+import { DataPoint,  SequenceOptions } from "../trend-trace/sequence";
 import { TrendTrace } from "../trend-trace/trend-trace";
 
 interface Icon {
@@ -26,7 +26,7 @@ interface Icon {
 
 declare const window: GlobalParams;
 
-export type ToolBoxMode = "static" | "toggle";
+export type ToolBoxMode = "default" | "legacy" | "disabled";
 export class ToolBox {
   public static readonly ICONS: Record<string, string> = {
     import: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28"><g stroke="#FFFFFF" stroke-width="1" fill="none"><line x1="7" y1="22" x2="7" y2="14"/><rect x="5" y="16" width="4" height="6"/><line x1="14" y1="22" x2="14" y2="10"/><rect x="12" y="12" width="4" height="8"/><line x1="21" y1="22" x2="21" y2="6"/><rect x="19" y="8" width="4" height="12"/></g></svg>',
@@ -80,7 +80,7 @@ export class ToolBox {
         });
 
     // pick the mode based on the boolean
-    const mode: ToolBoxMode = toggle ? "toggle" : "static";
+    const mode: ToolBoxMode = toggle ? "default" : "legacy";
     this.div = this._createToolBox(handler, mode);
     // hidden file‐picker for import
     this.fileInput = document.createElement("input");
@@ -111,7 +111,7 @@ export class ToolBox {
   }
 
   private _createToolBox(handler: Handler, mode: ToolBoxMode): HTMLDivElement {
-    return mode === "toggle" ? this._makeToggleToolBox() : this._makeToolBox();
+    return mode === "default" ? this._makeToggleToolBox() : this._makeToolBox();
     }
 
   private _makeToolBox(): HTMLDivElement {
@@ -329,12 +329,6 @@ private _onIconClick(icon: Icon) {
   if (lows.length)  { p2.price = Math.min(...lows);  }
   if (highs.length) { p1.price = Math.max(...highs); }
     // 3) Inline color logic: green if first open < last close, else red
-    let lineColor = defaultBoxOptions.lineColor;
-    if (raw.data.length > 0) {
-      const firstOpen = raw.data[0].open??0;
-      const lastClose = raw.data[raw.data.length - 1].close??1;
-      lineColor = firstOpen < lastClose ? 'rgba(0,255,0,1)' : 'rgba(255,0,0,1)';
-    }
   
     // 4) Draw the box with that color
     const box = new Box(
@@ -342,7 +336,7 @@ private _onIconClick(icon: Icon) {
       p2,
       {
         ...defaultBoxOptions,
-        lineColor,
+        lineColor: "rgba(0,0,0,0)",
         fillColor: 'rgba(0,0,0,0)',
         width: 0.5
       }

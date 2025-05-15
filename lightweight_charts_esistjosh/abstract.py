@@ -15,7 +15,7 @@ from .topbar import TopBar
 from .util import (
     BulkRunScript, Pane, Events, IDGen, as_enum, jbool, js_json, TIME, NUM, FLOAT,
     LINE_STYLE, MARKER_POSITION, MARKER_SHAPE, CANDLE_SHAPE, CROSSHAIR_MODE,
-    PRICE_SCALE_MODE, marker_position, marker_shape, js_data,
+    PRICE_SCALE_MODE, TOOLBOX_MODE, marker_position, marker_shape, js_data,
 )
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1217,10 +1217,10 @@ class PositionPlot(SeriesCommon):
 
         return self._convert_time(last_bar_time)
 
-
 class AbstractChart(Candlestick, Pane):
     def __init__(self, window: Window, width: float = 1.0, height: float = 1.0,
-                 scale_candles_only: bool = False, toolbox: bool = False,
+                 scale_candles_only: bool = False,
+                 toolbox: Optional[TOOLBOX_MODE] = "disabled",
                  autosize: bool = True, position: FLOAT = 'left',
                  defaults: str = '../defaults', scripts: str = '../scripts'):
         Pane.__init__(self, window)
@@ -1239,10 +1239,10 @@ class AbstractChart(Candlestick, Pane):
         self.run_script(
             f'{self.id} = new Lib.Handler("{self.id}", {width}, {height}, "{position}", {jbool(autosize)})'
         )
-
+        
         self.topbar: TopBar = TopBar(self)
-        if toolbox:
-            self.toolbox: ToolBox = ToolBox(self)
+        if toolbox != "disabled":
+            self.toolbox: ToolBox = ToolBox(self, mode=toolbox)
 
         # Set and initialize defaults directory
         self.defaults = defaults or '../defaults'

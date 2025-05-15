@@ -4,12 +4,11 @@ import multiprocessing as mp
 import typing
 import webview
 from webview.errors import JavascriptException
-
-from .util import parse_event_message, FLOAT
+from .util import parse_event_message, FLOAT, TOOLBOX_MODE
 from .abstract import AbstractChart, Window, INDEX
 import os
 import threading
-
+from typing import Optional
 
 class CallbackAPI:
     def __init__(self, emit_queue):
@@ -161,7 +160,7 @@ class Chart(AbstractChart):
         on_top: bool = False,
         maximize: bool = False,
         debug: bool = False,
-        toolbox: bool = False,
+        toolbox: str = "disabled",
         inner_width: float = 1.0,
         inner_height: float = 1.0,
         scale_candles_only: bool = False,
