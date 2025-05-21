@@ -379,7 +379,7 @@ export class ContextMenu {
         refPrice = data.close;
       }
       
-      if (refPrice !== undefined && !isNaN(refPrice)) {
+      if (refPrice !== undefined && !isNaN(refPrice) && sourceSeries) {
 
         const distance = Math.abs(refPrice - cursorPrice);
 
@@ -1641,7 +1641,7 @@ this.addMenuItem(
     }
     // Add drawing-specific menu items
     for (const optionName of Object.keys(drawing._options)) {
-      let subMenu;
+      let subMenu: any;
       if (optionName.toLowerCase().includes("color")) {
         subMenu = new ColorPicker(
           this.saveDrawings!,
@@ -1731,7 +1731,7 @@ this.addMenuItem(
     }
 
     if (drawing.points?.length >= 2 && drawing.points[0] && drawing.points[1]) {
-      let multiPointDrawing;
+      let multiPointDrawing:any;
       if (drawing.points?.length > 2) {
         multiPointDrawing = drawing as ThreePointDrawing;
       } else {

@@ -90,7 +90,7 @@ export const defaultSequenceOptions: SequenceOptions = {
     xScaleLock:false,
     yScaleLock:false,
     color: '#737375',
-    lineWidth: 1,
+    lineWidth: 1.5,
     upColor: 'rgba(0,255,0,.25)',
     downColor: 'rgba(255,0,0,.25)',
     wickVisible: true,
@@ -104,7 +104,7 @@ export const defaultSequenceOptions: SequenceOptions = {
     radius: 100,
     shape: 'Rounded' as CandleShape,
     chandelierSize: 1,
-    barSpacing: 0.8,
+    barSpacing: 0.7,
     lineStyle: 0,
     lineColor: '#ffffff',
     width: 1,
@@ -301,8 +301,9 @@ export class Sequence {
 
     if (this._options.autoScale) {
         if (scaleX > -1 && scaleX < 1) {
-            this._options.chandelierSize = Math.abs(Math.ceil(1 / scaleX));
-    } }
+            const downsample = Math.abs(Math.ceil(1 / scaleX));
+            this.applyOptions({chandelierSize: downsample})
+        } }
 
 
     const spatial: Spatial = {

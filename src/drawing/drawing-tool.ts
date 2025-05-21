@@ -6,7 +6,6 @@ import {
     SeriesType,
 } from 'lightweight-charts';
 import { Drawing } from './drawing';
-import { HorizontalLine } from '../horizontal-line/horizontal-line';
 import { TwoPointDrawing } from '../drawing/two-point-drawing';
 import { ThreePointDrawing } from '../drawing/three-point-drawing';
 import { FourPointDrawing } from '../drawing/four-point-drawing';
