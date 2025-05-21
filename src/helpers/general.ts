@@ -43,7 +43,7 @@ export function _measureLogicalRange(chart: IChartApi): { from: Logical; to: Log
 export function _measurePriceRange(chart: IChartApi, series?: ISeriesApi<SeriesType>): { max: number; min: number } | null {
   if (!chart ) return null;
   if (!series){
-    const series= chart.addSeries(LineSeries,)
+    const series = chart.addSeries(LineSeries,)
   }
   const paneSize = chart.paneSize();
   const max = series!.coordinateToPrice(0);
@@ -64,7 +64,7 @@ export function eventToLogicalPoint(
 ): LogicalPoint | null {
   if (!chart || !param.point || !param.logical) return null;
   if (!series){
-    const series= chart.addSeries(LineSeries,)
+    const series = chart.addSeries(LineSeries,)
   }
   const price = series!.coordinateToPrice(param.point.y);
   if (price === null) return null;

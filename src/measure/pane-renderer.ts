@@ -4,6 +4,8 @@ import { TwoPointDrawingPaneRenderer } from "../drawing/pane-renderer";
 import { MeasureOptions } from "./measure";
 import { setLineStyle } from "../helpers/canvas-rendering";
 import { IChartApi, ISeriesApi, SeriesOptionsMap } from "lightweight-charts";
+import { Coordinate } from "lightweight-charts";
+import { BoxOptions } from "../box/box";
 
 export class MeasurePaneRenderer extends TwoPointDrawingPaneRenderer {
     declare _options: MeasureOptions;
@@ -41,14 +43,17 @@ export class MeasurePaneRenderer extends TwoPointDrawingPaneRenderer {
 
             // Only proceed if both points have valid data
             if (this._p1 && this._p2) {
-
                 if (this._p1.y !== undefined && this._p2.y !== undefined && this._p1.x !== undefined && this._p2.x !== undefined) {
-                    const price1 = this.series.coordinateToPrice(this._p1.y);
-                    const price2 = this.series.coordinateToPrice(this._p2.y);
-                    const time1 =this.chart.timeScale().coordinateToTime(this._p1.x);
-                    const time2 =this.chart.timeScale().coordinateToTime(this._p2.x);
+                    const price1 = this.series.coordinateToPrice((this._p1.y as Coordinate));
+                    const price2 = this.series.coordinateToPrice((this._p2.y as Coordinate));
+                    const time1 =this.chart.timeScale().coordinateToTime((this._p1.x as Coordinate));
+                    const time2 =this.chart.timeScale().coordinateToTime((this._p2.x as Coordinate));
     
-
+                    if (price1!== null && price2 !== null && time1 !== null && time2 !== null) {
+                        
+                        
+                         
+                         
                     // Calculate Price Percentage Difference
                     const priceDiff = ((price2 - price1) / price1) * 100;
                     console.log(price1)
@@ -56,7 +61,7 @@ export class MeasurePaneRenderer extends TwoPointDrawingPaneRenderer {
                     const priceDiffText = `Price: ${priceDiff.toFixed(2)}%`;
 
                     // Calculate Time Difference
-                    const timeDiffMs = Math.abs(time2 - time1);
+                    const timeDiffMs = Math.abs((time2 as number) - (time1 as number));
                     const timeDiffText = `Time: ${this._formatTimeDifference(timeDiffMs)}`;
 
                     // Set text styles
@@ -77,7 +82,7 @@ export class MeasurePaneRenderer extends TwoPointDrawingPaneRenderer {
                     ctx.fillText(timeDiffText, centerX, bottomY);
                 }
             }
-
+        }
             if (!this._hovered) return;
             this._drawEndCircle(scope, mainX, mainY);
             this._drawEndCircle(scope, mainX + width, mainY);

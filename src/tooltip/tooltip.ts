@@ -16,8 +16,7 @@ import {
 import { TooltipElement, TooltipOptions } from './tooltip-element';
 import { positionsLine } from '../helpers/dimensions/positions';
 import { convertTime, formattedDateAndTime } from '../helpers/time';
-import { ISeriesApiExtended } from '../helpers/general';
-import { hasColorOption } from '../helpers/typeguards';
+import { ISeriesApiExtended } from '../helpers/series';
 class TooltipCrosshairLinePaneRenderer implements IPrimitivePaneRenderer {
 	_data: TooltipCrosshairLineData;
 
@@ -279,7 +278,7 @@ export class TooltipPrimitive implements ISeriesPrimitive<Time> {
 	
 		const price = this._options.priceExtractor(data);
 		const coordinate = chart.timeScale().logicalToCoordinate(logical);
-		const [date, time] = formattedDateAndTime(param.time ? convertTime(param.time) : undefined);
+		const [date, time] = formattedDateAndTime(param.time ? convertTime((param.time as string)) : undefined);
 	
 		if (this._tooltip) {
             const title = series.options()?.title || 'Unknown Series';

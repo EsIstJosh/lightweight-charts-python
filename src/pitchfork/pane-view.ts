@@ -1,5 +1,4 @@
-import { Coordinate, Logical, } from 'lightweight-charts';
-import { Point } from '../drawing/data-source';
+import { Coordinate } from 'lightweight-charts';
 
 import { ThreePointDrawingPaneView } from '../drawing/pane-view';
 import { PitchFork, PitchForkOptions } from './pitchfork';

@@ -1,13 +1,12 @@
 import {
   LineStyle,
   LineWidth,
-  Logical,
   MouseEventParams,
 } from "lightweight-charts";
 
 import { Point } from "../drawing/data-source";
 import { InteractionState } from "../drawing/drawing";
-import { defaultOptions, DrawingOptions } from "../drawing/options";
+import { DrawingOptions } from "../drawing/options";
 import { ThreePointDrawing } from "../drawing/three-point-drawing";
 import { PitchForkPaneView } from "./pane-view";
 export interface PitchForkOptions extends DrawingOptions {
@@ -194,7 +193,7 @@ export class PitchFork extends ThreePointDrawing {
       this._moveToState(InteractionState.DRAGGING);
     }
   }
-  protected _mouseIsOverTwoPointDrawing(
+  protected _mouseIsOverDrawing(
     param: MouseEventParams,
     tolerance = 4
   ): boolean {

@@ -21,25 +21,20 @@ import {
   HistogramSeriesOptions,
   LineSeriesOptions,
   LineStyle,
-  SeriesType,
   defaultHorzScaleBehavior,
-  PaneAttachedParameter,
   SeriesAttachedParameter
   
 } from "lightweight-charts";
 import { PluginBase } from "../plugin-base";
-import { setOpacity } from "../helpers/colors";
 import { convertPoint } from "../helpers/formatting";
 import { Handler } from "../general";
 import { ViewPoint } from "../drawing/pane-view";
-import { DrawingOptions } from "../drawing/options";
-import { CandleShape, parseCandleShape } from "../ohlc-series/data";
+import { CandleShape} from "../ohlc-series/data";
 import {
   ohlcRectangle,
   ohlcRounded,
   ohlcEllipse,
   ohlcArrow,
-  ohlc3d,
   ohlcPolygon,
   ohlcBar,
   ohlcSlanted,
@@ -62,7 +57,6 @@ import {
   Sequence,
   SequenceOptions,
   defaultSequenceOptions,
-  Spatial,
   DataPoint,
 } from "./sequence";
 
@@ -911,28 +905,18 @@ export class TrendTracePaneRenderer
     })[]
   , barSpace:number): void {
     const { context: ctx, verticalPixelRatio } = scope;
-    const inverted =
-      (this._source._sequence._originalP2.price >
-        this._source._sequence._originalP1.price &&
-        this._source._sequence.p2.price > this._source._sequence.p1.price) ||
-      (this._source._sequence._originalP2.price <
-        this._source._sequence._originalP1.price &&
-        this._source._sequence.p2.price < this._source._sequence.p1.price);
+    
 
       const flipped = 
       this._source._sequence._originalP2.price < this._source._sequence._originalP1.price && 
       this._source._sequence.p2.price < this._source._sequence.p1.price 
       || this._source._sequence._originalP2.price > this._source._sequence._originalP1.logical && 
       this._source._sequence.p2.price > this._source._sequence.p1.price    
-        const bar0 = bars[0].scaledX1
-        const bar1 = bars[bars.length - 1 ].scaledX2
-    
-        const candleWidth = (bar1 - bar0)  / bars.length 
+
         const singleWidth =Math.abs(barSpace)
         bars.forEach((bar, index) => {
           const candleBodyWidth = (this._options.barSpacing??0.8)*(singleWidth );
           const candleGap = singleWidth -candleBodyWidth 
-      const offset = .5
       let leftSide = bar.scaledX1
       let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
       if (index < bars.length - 1 && bars[index+1].scaledX1) {
@@ -1015,13 +999,10 @@ export class TrendTracePaneRenderer
     })[],
     barSpace: number
   ): void {
-    const { context: ctx, horizontalPixelRatio, verticalPixelRatio } = scope;
+    const { context: ctx, verticalPixelRatio } = scope;
 
     ctx.save();
-    const bar0 = bars[0].scaledX1
-    const bar1 = bars[bars.length - 1 ].scaledX2 
 
-    const candleWidth = (bar1 - bar0)  / bars.length 
     const singleWidth =Math.abs(barSpace)
     bars.forEach((bar, index) => {
       const candleBodyWidth = (this._options.barSpacing??0.8)*(singleWidth );
@@ -1049,7 +1030,6 @@ export class TrendTracePaneRenderer
       const barVerticalMin = Math.max(scaledOpen, scaledClose);
       const barVerticalSpan = barVerticalMax - barVerticalMin;
       const barY = (barVerticalMax + barVerticalMin) / 2;
-      const offset = .5
       let leftSide = bar.scaledX1-(0.5*singleWidth)
       let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
       if (index < bars.length - 1 && bars[index+1].scaledX1) {

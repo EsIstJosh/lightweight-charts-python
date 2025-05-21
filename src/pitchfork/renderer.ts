@@ -1,10 +1,9 @@
 import { CanvasRenderingTarget2D } from "fancy-canvas";
 import { ThreePointDrawingPaneRenderer } from "../drawing/pane-renderer";
 import { setLineStyle } from "../helpers/canvas-rendering";
-import { DrawingOptions } from "../drawing/options";
 import { ViewPoint } from "./pane-view";
 import { PitchForkOptions } from "./pitchfork";
-import { Coordinate, LineStyle } from "lightweight-charts";
+import { LineStyle } from "lightweight-charts";
 
 /**
  * Renderer class for drawing Pitch Forks.
