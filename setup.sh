@@ -12,12 +12,12 @@ else
   read -rp "No Python venv found in './venv' or './.venv'. Create one in './venv'? [Y/n]: " _ans
   if [[ "${_ans:-Y}" =~ ^[Yy]$ ]]; then
     echo "Creating virtualenv in ./venv…"
-    python3 -m venv venv
+    sudo python3 -m venv ./venv
     echo "Virtualenv created."
     VENV_PYTHON="./venv/bin/python"
   else
-    # fallback to default or external interpreter
-VENV_PYTHON="${VENV_PYTHON:-/home/linux/lightweight-charts-python/venv/bin/python}"
+    # fallback to system python3
+    VENV_PYTHON="$(command -v python3)"
     echo "Using interpreter: $VENV_PYTHON"
   fi
 fi
@@ -123,14 +123,14 @@ fi
   echo -e "${CYAN}╠══════════════════════════════════╣${NC}"
 
   if [ -d node_modules ]; then
-  echo -e "${GRAY}║ 0) npm install (-i) ${GREEN}[INSTALLED]${GRAY} ║${NC}"
+  echo -e "${GRAY}║ 0) npm install (-i) ${GREEN}[INSTALLED]${GRAY}  ║${NC}"
   else
   echo -e "${CYAN}║ 0) npm install (-i)            ║${NC}"
   fi
 
-echo -e "${CYAN}║ 1) Build (rollup) (-b)          ║${NC}"
-echo -e "${CYAN}║ 2) Package & Install (pip) (-p) ║${NC}"
-echo -e "${CYAN}║ 3) Upload to PyPI (-u)          ║${NC}"
+echo -e "${CYAN}║ 1) Build (rollup) (-b)           ║${NC}"
+echo -e "${CYAN}║ 2) Package & Install (pip) (-p)  ║${NC}"
+echo -e "${CYAN}║ 3) Upload to PyPI (-u)           ║${NC}"
   echo -e "${CYAN}╚══════════════════════════════════╝${NC}"
 
 # <-- updated prompt below -->
