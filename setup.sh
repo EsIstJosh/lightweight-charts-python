@@ -68,21 +68,42 @@ perform_package(){
 
 perform_upload(){
   echo -e "${INFO}Starting upload process…"
-  OUTPUT_DIR="./output"; rm -rf "$OUTPUT_DIR"; mkdir -p "$OUTPUT_DIR"
-  shopt -s nullglob
-  files=(dist/*.tar.gz dist/*.whl); shopt -u nullglob
+  OUTPUT_DIR="./output"
 
-  if (( ${#files[@]} == 0 )); then
-    echo -e "${WARNING}No artifacts to upload."; return 0
+  # ─── Wipe old artifacts ───────────────────────────────────────────────
+  if [ -d "$OUTPUT_DIR" ]; then
+    echo -e "${INFO}Cleaning existing $OUTPUT_DIR…"
+    # remove everything inside OUTPUT_DIR, but keep the directory itself
+    sudo rm -rf "${OUTPUT_DIR:?}/"*
+
+  else
+    echo -e "${INFO}Creating $OUTPUT_DIR…"
+    mkdir -p "$OUTPUT_DIR"
   fi
 
-  mv "${files[@]}" "$OUTPUT_DIR"/ || { echo -e "${ERROR}Move failed."; return 1; }
-  "$VENV_PYTHON" -m pip install --upgrade twine >/dev/null
+  # ─── Gather new artifacts ─────────────────────────────────────────────
+  shopt -s nullglob
+  files=(dist/*.tar.gz dist/*.whl)
+  shopt -u nullglob
 
+  if (( ${#files[@]} == 0 )); then
+    echo -e "${WARNING}No artifacts to upload."
+    return 0
+  fi
+
+  # ─── Move into cleaned folder ────────────────────────────────────────
+  echo -e "${INFO}Moving packages into $OUTPUT_DIR…"
+  mv "${files[@]}" "$OUTPUT_DIR"/ || { echo -e "${ERROR}Move failed."; return 1; }
+
+  # ─── Upload ──────────────────────────────────────────────────────────
   echo -e "${INFO}Uploading to PyPI…"
-  "$VENV_PYTHON" -m twine upload --verbose "$OUTPUT_DIR"/* || { echo -e "${ERROR}Twine upload failed."; return 1; }
+  "$VENV_PYTHON" -m pip install --upgrade twine >/dev/null
+  "$VENV_PYTHON" -m twine upload --verbose "$OUTPUT_DIR"/* \
+    || { echo -e "${ERROR}Twine upload failed."; return 1; }
+
   echo -e "${GREEN}[UPLOAD SUCCESS]${NC}"
 }
+
 
 # ── Legacy flags support ────────────────────────────────────────────────────
 if [ $# -gt 0 ]; then
@@ -176,4 +197,6 @@ echo -e "${GREEN}Done!${NC}"
 (( build_dur>0 ))   && echo "Build:   $(humanize "$build_dur")"
 (( package_dur>0 )) && echo "Package: $(humanize "$package_dur")"
 (( upload_dur>0 ))  && echo "Upload:  $(humanize "$upload_dur")"
-echo "Total:   $(humanize "$((install_dur+build_dur+package_dur+upload_dur))")"
+# compute total duration first
+total=$((install_dur + build_dur + package_dur + upload_dur))
+echo "Total:   $(humanize $total)"
