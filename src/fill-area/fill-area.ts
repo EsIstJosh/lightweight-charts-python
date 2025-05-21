@@ -1,9 +1,9 @@
-import { CanvasRenderingTarget2D } from "fancy-canvas";
-import { IPrimitivePaneRenderer, Coordinate, IPrimitivePaneView, Time, ISeriesPrimitive, SeriesAttachedParameter, DataChangedScope, SeriesDataItemTypeMap, SeriesType, Logical, AutoscaleInfo, BarData, LineData, ISeriesApi, PrimitivePaneViewZOrder } from "lightweight-charts";
+import {  Coordinate,  Time, ISeriesPrimitive, SeriesAttachedParameter, DataChangedScope, SeriesDataItemTypeMap, SeriesType, Logical, AutoscaleInfo, BarData, LineData, ISeriesApi } from "lightweight-charts";
 import { PluginBase } from "../plugin-base";
 import { setOpacity } from "../helpers/colors";
 import { ClosestTimeIndexFinder } from '../helpers/closest-index';
 import { hasColorOption } from "../helpers/typeguards";
+import { FillAreaPaneView } from "./pane-view";
 export class FillArea extends PluginBase implements ISeriesPrimitive<Time> {
     static type = "Fill Area"; // Explicitly set the type name
     
@@ -172,108 +172,6 @@ export class FillArea extends PluginBase implements ISeriesPrimitive<Time> {
         };
     }
 }
-class FillAreaPaneRenderer implements IPrimitivePaneRenderer {
-    _viewData: BandViewData;
-    _options: FillAreaOptions;
-
-    constructor(data: BandViewData) {
-        this._viewData = data;
-        this._options = data.options;
-    }
-
-    draw() {}
-    drawBackground(target: CanvasRenderingTarget2D) {
-        const points: BandRendererData[] = this._viewData.data;
-        const options = this._options;
-
-        if (points.length < 2) return; // Ensure there are enough points to draw
-
-        target.useBitmapCoordinateSpace((scope) => {
-            const ctx = scope.context;
-            ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
-
-            let currentPathStarted = false;
-            let startIndex = 0;
-
-            for (let i = 0; i < points.length - 1; i++) {
-                const current = points[i];
-                const next = points[i + 1];
-
-                if (!currentPathStarted || current.isOriginAbove !== points[i - 1]?.isOriginAbove) {
-                    if (currentPathStarted) {
-                        for (let j = i - 1; j >= startIndex; j--) {
-                            ctx.lineTo(points[j].x, points[j].destination);
-                        }
-                        ctx.closePath();
-                        ctx.fill();
-                    }
-
-                    ctx.beginPath();
-                    ctx.moveTo(current.x, current.origin);
-
-                    ctx.fillStyle = current.isOriginAbove
-                        ? options.originColor || 'rgba(0, 0, 0, 0)' // Default to transparent if null
-                        : options.destinationColor || 'rgba(0, 0, 0, 0)'; // Default to transparent if null
-
-                    startIndex = i;
-                    currentPathStarted = true;
-                }
-
-                ctx.lineTo(next.x, next.origin);
-
-                if (i === points.length - 2 || next.isOriginAbove !== current.isOriginAbove) {
-                    for (let j = i + 1; j >= startIndex; j--) {
-                        ctx.lineTo(points[j].x, points[j].destination);
-                    }
-                    ctx.closePath();
-                    ctx.fill();
-                    currentPathStarted = false;
-                }
-            }
-
-            if (options.lineWidth) {
-                ctx.lineWidth = options.lineWidth;
-                ctx.strokeStyle = options.originColor || 'rgba(0, 0, 0, 0)';
-                ctx.stroke();
-            }
-        });
-    }
-}
-
-class FillAreaPaneView implements IPrimitivePaneView {
-    _source: FillArea;
-    _data: BandViewData;
-
-    constructor(source: FillArea) {
-        this._source = source;
-        this._data = {
-            data: [],
-            options: this._source.options, // Pass the options for the renderer
-        };
-    }
-
-    update() {
-        const timeScale = this._source.chart.timeScale();
-
-        this._data.data = this._source._bandsData.map((d) => ({
-            x: timeScale.timeToCoordinate(d.time)!,
-            origin: this._source._originSeries.priceToCoordinate(d.origin)!,
-            destination: this._source._destinationSeries.priceToCoordinate(d.destination)!,
-            isOriginAbove: d.origin > d.destination,
-        }));
-
-        // Ensure options are updated in the data
-        this._data.options = this._source.options;
-    }
-
-    renderer() {
-        return new FillAreaPaneRenderer(this._data);
-    }
-    zOrder() {
-        return 'bottom' as PrimitivePaneViewZOrder;
-    }
-}
-
 
 
 export interface FillAreaOptions {
@@ -288,25 +186,25 @@ export const defaultFillAreaOptions: Required<FillAreaOptions> = {
     lineWidth: null,
 };
 
-interface BandData {
+export interface BandData {
     time: Time;
     origin: number; // Price value from the origin series
     destination: number; // Price value from the destination series
     upper: number; // The upper value for rendering
     lower: number; // The lower value for rendering
 };
-interface BandViewData {
+export interface BandViewData {
 	data: BandRendererData[];
 	options: Required<FillAreaOptions>;
 };
-interface BandRendererData {
+export interface BandRendererData {
     x: Coordinate | number;
     origin: Coordinate | number;
     destination: Coordinate | number;
     isOriginAbove: boolean; // True if the origin series is above the destination series
 }
 
-function extractPrices(
+export function extractPrices(
 	originPoint: SeriesDataItemTypeMap[SeriesType],
 	destinationPoint: SeriesDataItemTypeMap[SeriesType]
 ): {originValue: number| undefined, destinationValue: number| undefined} | undefined {

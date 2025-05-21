@@ -298,13 +298,13 @@ const baseButtonStyle = {
           option.style.padding = "5px 10px";
           option.style.cursor = "pointer";
           option.onclick = () => {
-            if (this.scripts[key] && this.scripts[key].code) {
-              this.setValue(this.scripts[key].code);
+            if (this.scripts[key] && this.scripts[key].code && this.scripts[key].code ) {
+              this.setValue(this.scripts[key].code??"");
               scriptMainButton.innerText = key;
               console.log(`Loaded script "${key}" from memory.`);
             }
             dropdown.remove();
-          };
+          }
           dropdown.appendChild(option);
         });
         // Option to open from file.

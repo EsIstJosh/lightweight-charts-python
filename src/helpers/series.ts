@@ -1,60 +1,58 @@
-import { ISeriesApi,  WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData, SeriesOptions, SeriesOptionsMap, SeriesDataItemTypeMap } from "lightweight-charts";
-import {CandleShape } from "../ohlc-series/data";
-import { isOHLCData, isSingleValueData, isWhitespaceData, SeriesTypeToDataMap } from "./typeguards";
+import { ISeriesApi, WhitespaceData, SeriesType, DeepPartial, SeriesOptionsCommon, LineStyle, LineWidth, Time, AreaData, BarData, CandlestickData, HistogramData, LineData, MouseEventParams, AreaStyleOptions, BarStyleOptions, HistogramStyleOptions, ISeriesPrimitive, LineStyleOptions, Coordinate, PriceToCoordinateConverter, OhlcData, SingleValueData, SeriesOptions, SeriesOptionsMap } from "lightweight-charts";
+import { CandleShape } from "../ohlc-series/data";
+import { isOHLCData, isSingleValueData, isWhitespaceData } from "./typeguards";
 import { ohlcSeries, ohlcSeriesOptions } from "../ohlc-series/ohlc-series";
 import { Handler, Legend } from "../general";
 import { IndicatorDefinition, IndicatorFigure } from "../indicators/indicators";
-import { DataPoint } from "../trend-trace/sequence";
 import { findColorOptions } from "./colors";
 import { PineTS } from "pinets";
-import { convertTime, formattedDateAndTime } from "./time";
-import { DefaultOptionsManager } from "../general/defaults";
+import { convertTime } from "./time";
 import { defaultSymbolSeriesOptions, SymbolSeriesOptions } from "../symbol-series/options";
 import { SymbolSeries } from "../symbol-series/symbol-series";
 import { SymbolSeriesData } from "../symbol-series/data";
 import { defaultFillAreaOptions, FillArea } from "../fill-area/fill-area";
 export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
-    primitives: {
-        [key: string]: any; // Dictionary for attached primitives
-        [index: number]: any; // Indexed access for primitives
-        length: number; // Array-like length
-      };
-    primitive: any; // Reference to the most recently attached primitive
-    applyOptions(options: any): void;
-    sync(series: ISeriesApi<any>): void;
-    attachPrimitive(primitive:ISeriesPrimitive, name?: string, replace?:boolean, addToLegend?:boolean): void; // Method to attach a primitive
-    detachPrimitive(primitive:ISeriesPrimitive): void; // Detach a primitive by type
-    detachPrimitives():void;
-    decorated: boolean; // Flag indicating if the series has been decorated
-    toJSON(): { options: SeriesOptions<any>; data: [] };
-    fromJSON(json: { options?: SeriesOptions<any>; data?: [] }): void;
-    _type: string;
-    title: string;
-    dataType(other?: ISeriesApi<any>): SingleValueData | OhlcData | boolean | null;
-    dataTransform(): Array<ConvertableData<Time>> ;
-  }
-  export function decorateSeries<T extends ISeriesApi<SeriesType>>(
-    original: T,
-    legend?: Legend // Optional Legend instance to handle primitives
-  ): T & ISeriesApiExtended {
+  primitives: {
+    [key: string]: any; // Dictionary for attached primitives
+    [index: number]: any; // Indexed access for primitives
+    length: number; // Array-like length
+  };
+  primitive: any; // Reference to the most recently attached primitive
+  applyOptions(options: any): void;
+  sync(series: ISeriesApi<any>): void;
+  attachPrimitive(primitive: ISeriesPrimitive, name?: string, replace?: boolean, addToLegend?: boolean): void; // Method to attach a primitive
+  detachPrimitive(primitive: ISeriesPrimitive): void; // Detach a primitive by type
+  detachPrimitives(): void;
+  decorated: boolean; // Flag indicating if the series has been decorated
+  toJSON(): { options: SeriesOptions<any>; data: [] };
+  fromJSON(json: { options?: SeriesOptions<any>; data?: [] }): void;
+  _type: string;
+  title: string;
+  dataType(other?: ISeriesApi<any>): SingleValueData | OhlcData | boolean | null;
+  dataTransform(): Array<ConvertableData<Time>>;
+}
+export function decorateSeries<T extends ISeriesApi<SeriesType>>(
+  original: T,
+  legend?: Legend // Optional Legend instance to handle primitives
+): T & ISeriesApiExtended {
   // Check if the series is already decorated
   if ((original as any)._isDecorated) {
     console.warn("Series is already decorated. Skipping decoration.");
-      return original as T & ISeriesApiExtended;
+    return original as T & ISeriesApiExtended;
   }
 
   // Mark the series as decorated
   (original as any)._isDecorated = true;
-    const decorated: boolean = true;
-    const originalSetData = (original as ISeriesApi<any>).setData.bind(original);
+  const decorated: boolean = true;
+  const originalSetData = (original as ISeriesApi<any>).setData.bind(original);
 
-    // Array to store attached primitives
-    const primitives: ISeriesPrimitive[] = [];
-  
-    // Reference to the most recently attached primitive
+  // Array to store attached primitives
+  const primitives: ISeriesPrimitive[] = [];
+
+  // Reference to the most recently attached primitive
   let lastAttachedPrimitive: ISeriesPrimitive | null = null;
 
-    // Hook into the original `detachPrimitive` if it exists
+  // Hook into the original `detachPrimitive` if it exists
   const originalDetachPrimitive = (original as any).detachPrimitive?.bind(original);
   const originalAttachPrimitive = (original as any).attachPrimitive?.bind(original);
   const originalData = (original as any).data?.bind(original);
@@ -79,7 +77,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       return [];
     }
     const firstData = dataArray[0];
-  
+
     // Determine target type: if original is OHLC, convert to single-value ("Line"),
     // otherwise if it's single-value, convert to OHLC ("Candlestick").
     let targetType: SupportedSeriesType;
@@ -93,7 +91,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     }
     return dataArray.map((_, index) => convertDataItem(original, targetType, index));
   }
-  
+
   function dataType(other?: ISeriesApi<any>): SingleValueData | OhlcData | boolean | null {
     // Retrieve the first data item from the decorated series.
     const firstData = original.data()[0];
@@ -106,7 +104,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     // For custom series, if it doesn't pass the standard guards,
     // check for the presence of OHLC properties directly.
     if (!ourIsSingle && !ourIsOhlc &&
-        "open" in firstData && "high" in firstData && "low" in firstData && "close" in firstData) {
+      "open" in firstData && "high" in firstData && "low" in firstData && "close" in firstData) {
       ourIsOhlc = true;
     }
 
@@ -117,7 +115,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       let otherIsSingle = isSingleValueData(otherFirst);
       let otherIsOhlc = isOHLCData(otherFirst);
       if (!otherIsSingle && !otherIsOhlc &&
-          "open" in otherFirst && "high" in otherFirst && "low" in otherFirst && "close" in otherFirst) {
+        "open" in otherFirst && "high" in otherFirst && "low" in otherFirst && "close" in otherFirst) {
         otherIsOhlc = true;
       }
       return (ourIsSingle && otherIsSingle) || (ourIsOhlc && otherIsOhlc);
@@ -127,13 +125,13 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     return (ourIsSingle || ourIsOhlc) ? firstData : null;
   }
 
-  
+
   function sync(series: ISeriesApi<SeriesType>): void {
     // 1) Determine the type from the series’ own options
     //    (Ensure "seriesType" is indeed on the options, otherwise provide fallback)
     const options = series.options() as { seriesType?: SupportedSeriesType };
     const targetType = options.seriesType ?? "Line"; // fallback to "Line" if undefined
-  
+
     // 2) Perform initial synchronization from "originalData"
     const sourceData = originalData();
     if (!sourceData) {
@@ -147,15 +145,15 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       const newItem = convertDataItem(series, targetType, i);
       if (newItem) {
         if (newItem && 'time' in newItem && 'value' in newItem) {
-            targetData.push(newItem);
+          targetData.push(newItem);
         } else {
-            console.warn('Invalid data item:', newItem);
+          console.warn('Invalid data item:', newItem);
         }
       }
     }
     series.setData(targetData);
     console.log(`Synchronized series of type ${series.seriesType}`);
-  
+
     // 3) Subscribe for future changes
     series.subscribeDataChanged(() => {
       const updatedSourceData = [...originalData()];
@@ -163,12 +161,12 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
         console.warn("Source data is missing for synchronization.");
         return;
       }
-  
+
       // Get the last bar from the target series
       const lastTargetBar = series.data().slice(-1)[0];
       // The last index from updatedSourceData
       const lastSourceIndex = updatedSourceData.length - 1;
-  
+
       // If the new item has a time >= last target bar’s time, we update/append
       if (
         !lastTargetBar ||
@@ -182,84 +180,84 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       }
     });
   }
-  
+
   // ─────────────────────────────────────────────────────────────────────────
-    // DECORATED applyOptions
-    // ─────────────────────────────────────────────────────────────────────────
-    const applyOptions = (options: any): void => {
-      // 1) Call the original applyOptions (to actually change the chart’s appearance)
-      if (originalApplyOptions) {
-          originalApplyOptions(options);
-      }
+  // DECORATED applyOptions
+  // ─────────────────────────────────────────────────────────────────────────
+  const applyOptions = (options: any): void => {
+    // 1) Call the original applyOptions (to actually change the chart’s appearance)
+    if (originalApplyOptions) {
+      originalApplyOptions(options);
+    }
 
-      // 2) If we have a Legend instance, update the legend colors accordingly
-      if (legend && typeof legend._lines !== 'undefined') {
-          const seriesType = (original as any).seriesType();
-          // Find the corresponding legend item for this series
-          const legendItem = legend._lines.find((item: any) => item.series === original);
+    // 2) If we have a Legend instance, update the legend colors accordingly
+    if (legend && typeof legend._lines !== 'undefined') {
+      const seriesType = (original as any).seriesType();
+      // Find the corresponding legend item for this series
+      const legendItem = legend._lines.find((item: any) => item.series === original);
 
-          if (legendItem) {
-              // If this is a candlestick/bar-type series
-              if (seriesType === 'Candlestick' || seriesType === 'Bar' || seriesType === 'Custom' && ('upColor' in options || 'downColor' in options)) {
-                  // Typical color properties: upColor, downColor, borderUpColor, borderDownColor, wickUpColor, wickDownColor
-                  if (options.upColor !== undefined) {
-                      // For example, store upColor in legendItem.colors[0]
-                      legendItem.colors[0] = options.upColor;
-                  }
-                  if (options.downColor !== undefined) {
-                      // Possibly store downColor in legendItem.colors[1]
-                      legendItem.colors[1] = options.downColor;
-                  }
-                  // Extend this logic to borderUpColor, borderDownColor, wickUpColor, etc. if you display them in the legend
-              }
-              // If this is a line series
-              else if (seriesType === 'Line' || seriesType === 'Histogram' || seriesType === 'Custom' && 'color' in options) {
-                  if (options.color !== undefined) {
-                      // Possibly store color in legendItem.colors[0]
-                      legendItem.colors[0] = options.color;
-                  }
-              }
-              // If this is an area, or other type you want to handle
-              else if (seriesType === 'Area') {
-                  // e.g. lineColor => legendItem.colors[0], etc.
-                  if (options.lineColor !== undefined) {
-                      legendItem.colors[0] = options.lineColor;
-                  }
-              }
-              // ...
-          
-      // Check if 'shape' is present in options and update legendSymbol accordingly.
-      if ('shape' in options) {
-        const symbol = (() => {
-          switch (options.shape) {
-            // Unicode circle
-            case 'circle':
-            case 'circles':
-              return '●'; // or '○'
-            // A cross-like symbol
-            case 'cross':
-              return '✚';
-            // Filled upward triangle
-            case 'triangleUp':
-              return '▲';
-            // Filled downward triangle
-            case 'triangleDown':
-              return '▼';
-            // Up arrow
-            case 'arrowUp':
-              return '↑';
-            // Down arrow
-            case 'arrowDown':
-              return '↓';
-            default:
-              return options.shape;
+      if (legendItem) {
+        // If this is a candlestick/bar-type series
+        if (seriesType === 'Candlestick' || seriesType === 'Bar' || seriesType === 'Custom' && ('upColor' in options || 'downColor' in options)) {
+          // Typical color properties: upColor, downColor, borderUpColor, borderDownColor, wickUpColor, wickDownColor
+          if (options.upColor !== undefined) {
+            // For example, store upColor in legendItem.colors[0]
+            legendItem.colors[0] = options.upColor;
           }
-        })();
-        legendItem.legendSymbol = symbol;
+          if (options.downColor !== undefined) {
+            // Possibly store downColor in legendItem.colors[1]
+            legendItem.colors[1] = options.downColor;
+          }
+          // Extend this logic to borderUpColor, borderDownColor, wickUpColor, etc. if you display them in the legend
+        }
+        // If this is a line series
+        else if (seriesType === 'Line' || seriesType === 'Histogram' || seriesType === 'Custom' && 'color' in options) {
+          if (options.color !== undefined) {
+            // Possibly store color in legendItem.colors[0]
+            legendItem.colors[0] = options.color;
+          }
+        }
+        // If this is an area, or other type you want to handle
+        else if (seriesType === 'Area') {
+          // e.g. lineColor => legendItem.colors[0], etc.
+          if (options.lineColor !== undefined) {
+            legendItem.colors[0] = options.lineColor;
+          }
+        }
+        // ...
+
+        // Check if 'shape' is present in options and update legendSymbol accordingly.
+        if ('shape' in options) {
+          const symbol = (() => {
+            switch (options.shape) {
+              // Unicode circle
+              case 'circle':
+              case 'circles':
+                return '●'; // or '○'
+              // A cross-like symbol
+              case 'cross':
+                return '✚';
+              // Filled upward triangle
+              case 'triangleUp':
+                return '▲';
+              // Filled downward triangle
+              case 'triangleDown':
+                return '▼';
+              // Up arrow
+              case 'arrowUp':
+                return '↑';
+              // Down arrow
+              case 'arrowDown':
+                return '↓';
+              default:
+                return options.shape;
+            }
+          })();
+          legendItem.legendSymbol = symbol;
+        }
       }
     }
-  }
-};
+  };
   function attachPrimitive(
     primitive: ISeriesPrimitive,
     name?: string,
@@ -268,26 +266,26 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
   ): void {
     const primitiveType = (primitive.constructor as any).type || primitive.constructor.name;
 
-      // Detach existing primitives if `replace` is true
-      if (replace) {
-        detachPrimitives();
-      } else {
-        // Check if a primitive of the same type is already attached
-        const existingIndex = primitives.findIndex(
-          (p) => (p.constructor as any).type === primitiveType
-        );
-        if (existingIndex !== -1) {
-          detachPrimitive(primitives[existingIndex]);
-        }
+    // Detach existing primitives if `replace` is true
+    if (replace) {
+      detachPrimitives();
+    } else {
+      // Check if a primitive of the same type is already attached
+      const existingIndex = primitives.findIndex(
+        (p) => (p.constructor as any).type === primitiveType
+      );
+      if (existingIndex !== -1) {
+        detachPrimitive(primitives[existingIndex]);
       }
-  
-      // Attach the primitive to the series
+    }
+
+    // Attach the primitive to the series
     if (originalAttachPrimitive) {
       originalAttachPrimitive(primitive);
     }
 
-      // Add the new primitive to the list
-      primitives.push(primitive);
+    // Add the new primitive to the list
+    primitives.push(primitive);
     lastAttachedPrimitive = primitive;
 
     console.log(`Primitive of type "${primitiveType}" attached.`);
@@ -297,39 +295,39 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       legend.addLegendPrimitive(original as ISeriesApi<any>, primitive, name);
     }
   }
-  
+
   function detachPrimitive(primitive: ISeriesPrimitive): void {
-      const index = primitives.indexOf(primitive);
-      if (index === -1) {
-        return;
-      }
-  
-      // Remove the primitive from the array
-      primitives.splice(index, 1);
-  
+    const index = primitives.indexOf(primitive);
+    if (index === -1) {
+      return;
+    }
+
+    // Remove the primitive from the array
+    primitives.splice(index, 1);
+
     if (lastAttachedPrimitive === primitive) {
       lastAttachedPrimitive = null;
     }
-  
-      // Detach the primitive using the original method
-      if (originalDetachPrimitive) {
-        originalDetachPrimitive(primitive);
-      }
+
+    // Detach the primitive using the original method
+    if (originalDetachPrimitive) {
+      originalDetachPrimitive(primitive);
+    }
 
     // Remove the primitive from the legend if it exists
     if (legend) {
       legend.removeLegendPrimitive(primitive);
-          console.log(`Removed primitive of type "${primitive.constructor.name}" from legend.`);
-        }
-      }
-    
+      console.log(`Removed primitive of type "${primitive.constructor.name}" from legend.`);
+    }
+  }
+
 
   function detachPrimitives(): void {
     console.log("Detaching all primitives.");
-      while (primitives.length > 0) {
-        const primitive = primitives.pop()!;
-        detachPrimitive(primitive);
-      }
+    while (primitives.length > 0) {
+      const primitive = primitives.pop()!;
+      detachPrimitive(primitive);
+    }
     console.log("All primitives detached.");
   }
   function setData(data: any[]): void {
@@ -337,15 +335,15 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
     if (!data || !Array.isArray(data)) {
       data = [...original.data()];
     }
-  
+
     if (!data || data.length === 0) {
       originalSetData(data);
       return;
     }
-  
+
     // Get the target type of the series (e.g. "Line", "Histogram", "Area", "Bar", "Candlestick", "Ohlc", etc.)
     const targetType = original.seriesType() as SupportedSeriesType;
-  
+
     // For single-value series: if the target type is one of these and the first data item has a "value" property...
     if ((targetType === "Line" || targetType === "Histogram" || targetType === "Area" || targetType == "Symbol" || targetType == "Custom") && "value" in data[0]) {
       // ...and if every data item is already SingleValueData, then no conversion is needed.
@@ -362,7 +360,7 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
         return;
       }
     }
-  
+
     // Otherwise, we need to convert the data.
     let convertedData: SingleValueData[] | OhlcData[];
     if ((targetType === "Line" || targetType === "Histogram" || targetType === "Area" || targetType === "Symbol") && "open" in data[0]) {
@@ -376,33 +374,33 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
       // Fallback: assume single-value conversion.
       convertedData = data.map((_, index) => convertDataItem(data, targetType, index)) as SingleValueData[];
     }
-  
+
     originalSetData(convertedData);
   }
-  
-    return Object.assign(original, {
-      applyOptions,
-      setData,
-      dataType,
-      dataTransform,
-      primitives,
-      sync,
-      attachPrimitive,
-      detachPrimitive,
-      detachPrimitives,
-      decorated,
-      _type,
-      title,
+
+  return Object.assign(original, {
+    applyOptions,
+    setData,
+    dataType,
+    dataTransform,
+    primitives,
+    sync,
+    attachPrimitive,
+    detachPrimitive,
+    detachPrimitives,
+    decorated,
+    _type,
+    title,
     get primitive() {
       return lastAttachedPrimitive;
     },
 
     toJSON(): { options: SeriesOptions<any>; data: [] } {
-			return {
-				options: original.options(),
-				data: originalData(),
-			};
-		},
+      return {
+        options: original.options(),
+        data: originalData(),
+      };
+    },
     fromJSON(json: { options?: SeriesOptions<any>; data?: [] }): void {
       // If data is provided, update the series' data.
       if (json.data) {
@@ -425,116 +423,116 @@ export interface ISeriesApiExtended extends ISeriesApi<SeriesType> {
 }
 
 
-    
 
-  
+
+
 export interface SeriesOptionsExtended {
-    primitives?: {
-      [key: string]: any; // Dictionary for attached primitives
-    };
-    seriesType?: string;
-    group?: string; // Group name for the series
-    legendSymbol?: string | string[]; // Legend symbol(s) for the series
-    isIndicator?: boolean; // Indicator flag
-  }
-  // Define specific options interfaces with optional `group`, `legendSymbol`, and `primitives` properties
-  export interface LineSeriesOptions
-    extends DeepPartial<LineStyleOptions & SeriesOptionsCommon>,
-      SeriesOptionsExtended {}
-  
-  export interface HistogramSeriesOptions
-    extends DeepPartial<HistogramStyleOptions & SeriesOptionsCommon>,
-      SeriesOptionsExtended {}
-  
-  export interface AreaSeriesOptions
-    extends DeepPartial<AreaStyleOptions & SeriesOptionsCommon>,
-      SeriesOptionsExtended {}
-  
-  export interface BarSeriesOptions
-    extends DeepPartial<BarStyleOptions & SeriesOptionsCommon>,
-      SeriesOptionsExtended {}
-  
-  export interface OhlcSeriesOptions
-    extends ohlcSeriesOptions,
-        DeepPartial<SeriesOptionsExtended & SeriesOptionsExtended>  {}
-    
+  primitives?: {
+    [key: string]: any; // Dictionary for attached primitives
+  };
+  seriesType?: string;
+  group?: string; // Group name for the series
+  legendSymbol?: string | string[]; // Legend symbol(s) for the series
+  isIndicator?: boolean; // Indicator flag
+}
+// Define specific options interfaces with optional `group`, `legendSymbol`, and `primitives` properties
+export interface LineSeriesOptions
+  extends DeepPartial<LineStyleOptions & SeriesOptionsCommon>,
+  SeriesOptionsExtended { }
 
-export function determineAvailableFields(series: ISeriesApi<any>|SymbolSeries<any>|ohlcSeries<any>): {
-ohlc: boolean;
-volume: boolean;
+export interface HistogramSeriesOptions
+  extends DeepPartial<HistogramStyleOptions & SeriesOptionsCommon>,
+  SeriesOptionsExtended { }
+
+export interface AreaSeriesOptions
+  extends DeepPartial<AreaStyleOptions & SeriesOptionsCommon>,
+  SeriesOptionsExtended { }
+
+export interface BarSeriesOptions
+  extends DeepPartial<BarStyleOptions & SeriesOptionsCommon>,
+  SeriesOptionsExtended { }
+
+export interface OhlcSeriesOptions
+  extends ohlcSeriesOptions,
+  DeepPartial<SeriesOptionsExtended & SeriesOptionsExtended> { }
+
+
+export function determineAvailableFields(series: ISeriesApi<any> | SymbolSeries<any> | ohlcSeries<any>): {
+  ohlc: boolean;
+  volume: boolean;
 } {
 
-const currentData = (series as ISeriesApiExtended).data();
-if (!currentData || currentData.length === 0) {
-  return { ohlc: false, volume: false };
-}
-const sample = currentData[0];
+  const currentData = (series as ISeriesApiExtended).data();
+  if (!currentData || currentData.length === 0) {
+    return { ohlc: false, volume: false };
+  }
+  const sample = currentData[0];
 
-//const hasOhlc =
-//  "open" in sample &&
-//  "high" in sample &&
-//  "low" in sample &&
-//  "close" in sample;
-const hasVolume = "volume" in sample;
+  //const hasOhlc =
+  //  "open" in sample &&
+  //  "high" in sample &&
+  //  "low" in sample &&
+  //  "close" in sample;
+  const hasVolume = "volume" in sample;
 
 
-const hasOhlc = isOHLCData(currentData)
+  const hasOhlc = isOHLCData(currentData)
 
-return { ohlc: hasOhlc, volume: hasVolume };
+  return { ohlc: hasOhlc, volume: hasVolume };
 }
 
 export function getDefaultSeriesOptions(
-    type: SupportedSeriesType //| "Ohlc" | "Trade"
-    ): DeepPartial<
-    SeriesOptionsCommon &
-    (
-        | LineSeriesOptions
-        | HistogramSeriesOptions
-        | AreaSeriesOptions
-        | BarSeriesOptions
-        | OhlcSeriesOptions
-        | SymbolSeriesOptions 
-    )
-    > {
-    const common: DeepPartial<SeriesOptionsCommon> = {
+  type: SupportedSeriesType //| "Ohlc" | "Trade"
+): DeepPartial<
+  SeriesOptionsCommon &
+  (
+    | LineSeriesOptions
+    | HistogramSeriesOptions
+    | AreaSeriesOptions
+    | BarSeriesOptions
+    | OhlcSeriesOptions
+    | SymbolSeriesOptions
+  )
+> {
+  const common: DeepPartial<SeriesOptionsCommon> = {
     // Define any common default options that apply to all series types here
-    };
+  };
 
-    switch (type) {
+  switch (type) {
     case "Line":
-        return {
+      return {
         ...common,
         title: type,
         color: "#195200",
         lineWidth: 2,
         crosshairMarkerVisible: true,
-        };
+      };
     case "Histogram":
-        return {
+      return {
         ...common,
         title: type,
         color: "#9ACF01",
         base: 0,
-        };
+      };
     case "Area":
-        return {
+      return {
         ...common,
         title: type,
         lineColor: "#021698",
         topColor: "rgba(9, 32, 210, 0.4)",
         bottomColor: "rgba(0, 0, 0, 0.5)",
-        };
+      };
     case "Bar":
-        return {
+      return {
         ...common,
         title: type,
         upColor: "#006721",
         downColor: "#6E0000",
         borderUpColor: "#006721",
         borderDownColor: "#6E0000",
-        };
+      };
     case "Candlestick":
-        return {
+      return {
         ...common,
         title: type,
         upColor: "rgba(0, 103, 33, 0.33)",
@@ -543,10 +541,10 @@ export function getDefaultSeriesOptions(
         borderDownColor: "#6E0000",
         wickUpColor: "#006721",
         wickDownColor: "#6E0000",
-        }
-    
+      }
+
     case "Ohlc":
-        return {
+      return {
         ...common,
         title: type,
         upColor: "rgba(0, 103, 33, 0.33)",
@@ -560,40 +558,40 @@ export function getDefaultSeriesOptions(
         barSpacing: 0.777,
         lineStyle: 0 as LineStyle,
         lineWidth: 1 as LineWidth,
-        };
-    case "Symbol": 
-        return {
-            ...common,
-            ...defaultSymbolSeriesOptions,
-            title: type,
+      };
+    case "Symbol":
+      return {
+        ...common,
+        ...defaultSymbolSeriesOptions,
+        title: type,
 
-        }
+      }
     default:
-        throw new Error(`Unsupported series type: ${type}`);
-    }
-    }
-    
-    
-    
-    /**
-     * Converts the last item of the input data to a different series type.
-     *
-     * @param series - The source series to convert data from.
-     * @param targetType - The target series type for conversion.
-     * @returns The converted data item for the target series type, or null if conversion is not possible.
-     */
-   /**
- * A union type for all possible data shapes we might return.
+      throw new Error(`Unsupported series type: ${type}`);
+  }
+}
+
+
+
+/**
+ * Converts the last item of the input data to a different series type.
+ *
+ * @param series - The source series to convert data from.
+ * @param targetType - The target series type for conversion.
+ * @returns The converted data item for the target series type, or null if conversion is not possible.
  */
+/**
+* A union type for all possible data shapes we might return.
+*/
 type ConvertableData<T extends Time = Time> =
-| LineData<T>
-| HistogramData<T>
-| AreaData<T>
-| BarData<T>
-| CandlestickData<T>
-| SymbolSeriesData<T>
-| WhitespaceData<T>  
-| null;
+  | LineData<T>
+  | HistogramData<T>
+  | AreaData<T>
+  | BarData<T>
+  | CandlestickData<T>
+  | SymbolSeriesData<T>
+  | WhitespaceData<T>
+  | null;
 
 
 /**
@@ -768,14 +766,14 @@ export function convertDataItem(
       }
       break;
     }
-    
+
     case "Symbol": {
       if (isOHLCData(item)) {
         return {
           time: item.time,
           value: item.close
-      } as SymbolSeriesData
-    }else if (isSingleValueData(item)) {
+        } as SymbolSeriesData
+      } else if (isSingleValueData(item)) {
         return {
           time: item.time,
           value: item.value
@@ -788,14 +786,14 @@ export function convertDataItem(
       }
       break;
     }
-    
+
     default:
       console.error(`Unsupported target type: ${targetType}`);
       return {
         time: item.time,
       } as WhitespaceData<Time>;
-    }
-  
+  }
+
 
   // If we reach here, no conversion was possible
   console.warn("Could not convert data to the target type.");
@@ -856,16 +854,16 @@ export function cloneSeriesAsType(
     // Create the new series using the handler.
     switch (type) {
       case 'Line':
-        clonedSeries = handler.createLineSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        clonedSeries = handler.createLineSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
         break;
       case 'Histogram':
-        clonedSeries = handler.createHistogramSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        clonedSeries = handler.createHistogramSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
         break;
       case 'Area':
-        clonedSeries = handler.createAreaSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        clonedSeries = handler.createAreaSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
         break;
       case 'Bar':
-        clonedSeries = handler.createBarSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        clonedSeries = handler.createBarSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
         break;
       case 'Candlestick':
         clonedSeries = {
@@ -874,7 +872,7 @@ export function cloneSeriesAsType(
         };
         break;
       case 'Ohlc':
-        clonedSeries = handler.createCustomOHLCSeries(`${name}<${type}>`,undefined,series.getPane().paneIndex());
+        clonedSeries = handler.createCustomOHLCSeries(`${name}<${type}>`, undefined, series.getPane().paneIndex());
         break;
       default:
         console.error(`Unsupported series type: ${type}`);
@@ -888,43 +886,43 @@ export function cloneSeriesAsType(
       .filter((item) => item !== null) as any[];
     clonedSeries.series.setData(transformedData);
 
-// Transfer color options iteratively.
-findColorOptions(seriesOptions, (fullPath, value) => {
-  // Only update the cloned series if the default options contain this key.
-  if (isOptionInDefaults(fullPath, defaultOptions)) {
-    if (fullPath === "LineColor" || fullPath === "color") {
-      // Handle the interchangeable case.
-      const hasLineColor = "LineColor" in defaultOptions || "LineColor" in mergedOptions;
-      const hasColor = "color" in defaultOptions || "color" in mergedOptions;
-      if (hasLineColor && hasColor) {
-        setOptionByPath(clonedSeries.series, "LineColor", value);
-        setOptionByPath(clonedSeries.series, "color", value);
-      } else if (hasLineColor) {
-        setOptionByPath(clonedSeries.series, "LineColor", value);
-      } else if (hasColor) {
-        setOptionByPath(clonedSeries.series, "color", value);
+    // Transfer color options iteratively.
+    findColorOptions(seriesOptions, (fullPath, value) => {
+      // Only update the cloned series if the default options contain this key.
+      if (isOptionInDefaults(fullPath, defaultOptions)) {
+        if (fullPath === "LineColor" || fullPath === "color") {
+          // Handle the interchangeable case.
+          const hasLineColor = "LineColor" in defaultOptions || "LineColor" in mergedOptions;
+          const hasColor = "color" in defaultOptions || "color" in mergedOptions;
+          if (hasLineColor && hasColor) {
+            setOptionByPath(clonedSeries.series, "LineColor", value);
+            setOptionByPath(clonedSeries.series, "color", value);
+          } else if (hasLineColor) {
+            setOptionByPath(clonedSeries.series, "LineColor", value);
+          } else if (hasColor) {
+            setOptionByPath(clonedSeries.series, "color", value);
+          }
+        } else {
+          // For any other color option, simply update the cloned series.
+          setOptionByPath(clonedSeries.series, fullPath, value);
+        }
       }
-    } else {
-      // For any other color option, simply update the cloned series.
-      setOptionByPath(clonedSeries.series, fullPath, value);
-    }
-  }
-});
-// Iterate over all keys of mergedOptions
-(Object.keys(mergedOptions) as (keyof typeof mergedOptions)[]).forEach((key) => {
-  // Only process keys that include "color"
-  if (key.toString().toLowerCase().includes("color")) {
-    // Create a small object containing only this key/value pair
-    const optionObj = { [key]: mergedOptions[key] };
-    // Use findColorOptions to process this object
-    findColorOptions(optionObj, (fullPath, value) => {
-      console.log(`Found color option: ${fullPath} = ${value}`);
-      // Here you could call setOptionByPath or any other function as needed.
     });
-  }
-});
+    // Iterate over all keys of mergedOptions
+    (Object.keys(mergedOptions) as (keyof typeof mergedOptions)[]).forEach((key) => {
+      // Only process keys that include "color"
+      if (key.toString().toLowerCase().includes("color")) {
+        // Create a small object containing only this key/value pair
+        const optionObj = { [key]: mergedOptions[key] };
+        // Use findColorOptions to process this object
+        findColorOptions(optionObj, (fullPath, value) => {
+          console.log(`Found color option: ${fullPath} = ${value}`);
+          // Here you could call setOptionByPath or any other function as needed.
+        });
+      }
+    });
 
-  
+
 
     // Subscribe to data changes on the original series to keep the clone updated.
     series.subscribeDataChanged(() => {
@@ -991,57 +989,57 @@ export function getProximitySeries(
 
   // 2) Basic checks
   if (!mouseEventParams) {
-      console.warn("No MouseEventParams available. Param is null/undefined.");
-      return null;
+    console.warn("No MouseEventParams available. Param is null/undefined.");
+    return null;
   }
 
   if (!mouseEventParams.seriesData) {
-      console.warn("No seriesData in MouseEventParams. Possibly not hovering over any series data.");
-      return null;
+    console.warn("No seriesData in MouseEventParams. Possibly not hovering over any series data.");
+    return null;
   }
 
   if (!mouseEventParams.point) {
-      console.warn("No 'point' (x,y) in MouseEventParams, cannot compute proximity.");
-      return null;
+    console.warn("No 'point' (x,y) in MouseEventParams, cannot compute proximity.");
+    return null;
   }
 
   // 3) Convert the cursor Y-coordinate to a price using some "source" series
   const sourceSeries = handler.series ?? handler._seriesList?.[0];
   if (!sourceSeries) {
-      console.warn("No series reference available in handler.");
-      return null;
+    console.warn("No series reference available in handler.");
+    return null;
   }
 
   const cursorY = mouseEventParams.point.y;
   const cursorPrice = sourceSeries.coordinateToPrice(cursorY);
   if (cursorPrice === null) {
-      console.warn("cursorPrice is null. Unable to determine proximity.");
-      return null;
+    console.warn("cursorPrice is null. Unable to determine proximity.");
+    return null;
   }
 
   // 4) Gather potential series within threshold
   const seriesByDistance: { distance: number; series: ISeriesApi<SeriesType> }[] = [];
 
   mouseEventParams.seriesData.forEach((data, series) => {
-      let refPrice: number | undefined;
+    let refPrice: number | undefined;
 
-      // Single-value data: { value: number }
-      if (isSingleValueData(data)) {
-          refPrice = data.value;
-      }
-      // OHLC data: { open, high, low, close }
-      else if (isOHLCData(data)) {
-          refPrice = data.close;
-      }
+    // Single-value data: { value: number }
+    if (isSingleValueData(data)) {
+      refPrice = data.value;
+    }
+    // OHLC data: { open, high, low, close }
+    else if (isOHLCData(data)) {
+      refPrice = data.close;
+    }
 
-      if (refPrice !== undefined && !isNaN(refPrice)) {
-          const distance = Math.abs(refPrice - cursorPrice);
-          const percentageDifference = (distance / cursorPrice) * 100;
+    if (refPrice !== undefined && !isNaN(refPrice)) {
+      const distance = Math.abs(refPrice - cursorPrice);
+      const percentageDifference = (distance / cursorPrice) * 100;
 
-          if (percentageDifference <= thresholdPct) {
-              seriesByDistance.push({ distance, series });
-          }
+      if (percentageDifference <= thresholdPct) {
+        seriesByDistance.push({ distance, series });
       }
+    }
   });
 
   // 5) Sort by ascending distance
@@ -1049,8 +1047,8 @@ export function getProximitySeries(
 
   // 6) Return the closest series if any
   if (seriesByDistance.length > 0) {
-      console.log("Closest series found:", seriesByDistance[0].series);
-      return seriesByDistance[0].series;
+    console.log("Closest series found:", seriesByDistance[0].series);
+    return seriesByDistance[0].series;
   }
 
   console.log("No series found within proximity threshold.");
@@ -1099,7 +1097,7 @@ export interface ISeriesIndicator extends ISeriesApi<"Line" | "Histogram" | "Are
   indicator: IndicatorDefinition;
   figures: Map<string, ISeriesApi<"Line" | "Histogram" | "Area">>;
   paramMap: Record<string, any>; // Stores the current parameters used for calculation
-  figureCount: number ;            // NEW: stores the global figure count
+  figureCount: number;            // NEW: stores the global figure count
   recalculate: (overrides?: Record<string, any>) => void;
 }
 
@@ -1127,9 +1125,10 @@ export function decorateSeriesAsIndicator(
   // Subscribe to data changes on the source series to trigger automatic recalculation.
   if (typeof sourceSeries.subscribeDataChanged === "function") {
     sourceSeries.subscribeDataChanged(() => {
-      if (sourceSeries.data()[sourceSeries.data().length-1].time > series.data()[series.data().length -1].time){ 
-      recalculateIndicator(indicatorSeries);
-    }});
+      if (sourceSeries.data()[sourceSeries.data().length - 1].time > series.data()[series.data().length - 1].time) {
+        recalculateIndicator(indicatorSeries);
+      }
+    });
   }
 
   return indicatorSeries;
@@ -1243,7 +1242,7 @@ export async function recalcIndicatorPineTS(
   const indicatorFunction = new Function("context", fullCode);
 
   // Execute the PineTS code.
-  const { result, plots} = await pineTS.run(indicatorFunction, undefined, true);
+  const { result, plots } = await pineTS.run(indicatorFunction, undefined, true);
   console.log("PineTS execution completed successfully", "Result:", result, "Plots:", plots);
 
   // Collect all calculated figures from the three categories.
@@ -1383,16 +1382,16 @@ export class BarDataAggregator {
     const lowPrice = Math.min(...bucket.map((bar) => bar.low));
 
     // Sum up the volume from the bucket.
-    startIndex = startIndex??0
-    endIndex = endIndex??0
+    startIndex = startIndex ?? 0
+    endIndex = endIndex ?? 0
     // Use the first bar's x-coordinate (alternatively, you might use an average).
     const x = bucket[0].x;
     const time = bucket[0].time
     // Optionally, you can convert prices to canvas coordinates.
-    const open = (priceToCoordinate(openPrice)??0 )as Coordinate;
-    const close = (priceToCoordinate(closePrice)??0 )as Coordinate;
-    const high = (priceToCoordinate(highPrice)??0 )as Coordinate;
-    const low = (priceToCoordinate(lowPrice)??0 )as Coordinate;
+    const open = (priceToCoordinate(openPrice) ?? 0) as Coordinate;
+    const close = (priceToCoordinate(closePrice) ?? 0) as Coordinate;
+    const high = (priceToCoordinate(highPrice) ?? 0) as Coordinate;
+    const low = (priceToCoordinate(lowPrice) ?? 0) as Coordinate;
 
     // Return the aggregated BarItem with the essential properties.
     return {
@@ -1453,8 +1452,8 @@ export function transformDataToArray(data: any[], volumeData: any[] = []): any[]
       openTime: parsedTime,
       closeTime: parsedTime + 86399, // 1 second (1000ms) before openTime.
       // Parse volume; if missing, try to use volumeData.
-      volume: item.volume !== undefined 
-        ? Number(item.volume) 
+      volume: item.volume !== undefined
+        ? Number(item.volume)
         : (volumeData[idx] !== undefined ? Number(volumeData[idx].value) : 0)
     };
   }).filter(item => item !== null);
@@ -1462,7 +1461,7 @@ export function transformDataToArray(data: any[], volumeData: any[] = []): any[]
 
 
 
-function isOHLCType(type: ISeriesApi<SeriesType>):boolean {
+export function isOHLCType(type: ISeriesApi<SeriesType>): boolean {
   return type.seriesType() === "Bar" || type.seriesType() === "Candlestick" || type.seriesType() === "Custom" && 'open' in type.data()[0]
 }
 
@@ -1474,7 +1473,7 @@ function isOHLCType(type: ISeriesApi<SeriesType>):boolean {
  * @param type - The series type (with "Ohlc" treated as "Candlestick").
  * @returns Transformed data ready for an OHLC series.
  */
-function prepareOHLCData(
+export function prepareOHLCData(
   baseData: Array<{ time: string | number }>,
   data: any[],
   type: "Line" | "Bar" | "Candlestick"
@@ -1515,7 +1514,7 @@ function prepareOHLCData(
  * @param defaultColor - Default color if none provided.
  * @returns Transformed data for a single-value series.
  */
-function prepareSingleValueData(
+export function prepareSingleValueData(
   baseData: Array<{ time: string | number }>,
   data: any[],
   defaultColor?: string
@@ -1551,7 +1550,7 @@ export function updatePlotOnHandler(
   } else {
     // If the series doesn't exist, delegate to addPlotToHandler.
     // Note: addPlotToHandler still defaults its type (e.g. "Line").
-    addPlotToHandler(handler,plotName, plotObj);
+    addPlotToHandler(handler, plotName, plotObj);
   }
 }
 
@@ -1593,17 +1592,17 @@ export function addPlotToHandler(
 
   if (existingSeries && (mode === "overwrite" || mode === "update")) {
 
-      if (mode === "update") {
-          existingSeries.update(formattedData[formattedData.length - 1]);
-          baseOptions = {...baseOptions, ...existingSeries.options()}
-      } else {
-          existingSeries.detachPrimitives()
-          existingSeries.setData(formattedData);
-      }
-      existingSeries.applyOptions(baseOptions);
-      return;
+    if (mode === "update") {
+      existingSeries.update(formattedData[formattedData.length - 1]);
+      baseOptions = { ...baseOptions, ...existingSeries.options() }
+    } else {
+      existingSeries.detachPrimitives()
+      existingSeries.setData(formattedData);
+    }
+    existingSeries.applyOptions(baseOptions);
+    return;
   }
-  
+
   // No existing series or different mode => create a new one
   let createdSeries: { name: string; series: ISeriesApiExtended } | null = null;
 
@@ -1688,12 +1687,12 @@ export interface FillOptions {
  */
 export function addFillAreaToHandler(
   handler: Handler,
-  fillObj: any, 
+  fillObj: any,
 ): void {
 
 
-  const {plot1, plot2, options } = fillObj;
-
+  const { plot1, plot2, options } = fillObj;
+  
   const fillOptions = defaultFillAreaOptions
   // Retrieve the origin and destination series from the handler's seriesMap.
   const originSeries = handler.seriesMap.get(plot1);
@@ -1727,4 +1726,4 @@ export function addFillAreaToHandler(
       true
     );
   }
-  }
+}

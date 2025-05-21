@@ -8,7 +8,6 @@ import {
 	Time,
 } from 'lightweight-charts';
 import { ensureDefined } from './helpers/assertions';
-import { PluginRegistry } from './helpers/general';
 
 //* PluginBase is a useful base to build a plugin upon which
 //* already handles creating getters for the chart and series,
