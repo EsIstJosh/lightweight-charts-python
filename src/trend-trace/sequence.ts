@@ -197,11 +197,9 @@ export class Sequence {
         const x2 = Math.max(this._originalP1.logical, this._originalP2.logical) ;
         if (pOffset && pOffset> 0){ 
         this._originalSlice = this._originalData.slice(x2, Math.min(this.series.data().length-1,x2 + 1+ pOffset));
-        console.log("Data Sliced with Offset",x1,x2,pOffset, "Offset Point:", Math.min(this.series.data().length-1,x2 + 1+ pOffset))
         } 
         else {
             this._originalSlice = this._originalData.slice(x1, x2 + 1);
-            console.log("Data Sliced:",x1,x2)
         }
             // If a pOffset is provided, adjust each bar in the slice by adding the offset to x1 and x2.
         if (pOffset && pOffset > 0) {
@@ -210,7 +208,6 @@ export class Sequence {
             x1: bar.x1 + pOffset,
             x2: bar.x2 + pOffset
             }));
-            console.log("Adjusted originalSlice with pOffset:", pOffset);
         }
 
         // Adjust this once initially
@@ -238,10 +235,8 @@ export class Sequence {
     
             if (this._originalP1 === null) {
                 this._originalP1 = { ...left };
-                console.log('First point (p1) set:', this._originalP1);
             } else if (this._originalP2 === null) {
                 this._originalP2 = { ...right };
-                console.log('Second point (p2) set:', this._originalP2);
             }
         
 
@@ -269,7 +264,6 @@ export class Sequence {
 
     private recalculateSpatial(): Spatial {
         if (!this.p1 || !this.p2 || !this._originalP1 || !this._originalP2) {
-            console.warn('Cannot recalc spatial without valid p1/p2.');
             return  {
                 scale: { x: 1, y: 1 },
                 shift: { x: 0, y: 0 }
@@ -279,7 +273,6 @@ export class Sequence {
         const dyOrig = Math.abs(this._originalP1.price - this._originalP2.price);
 
         if (dxOrig === 0 || dyOrig === 0) {
-            console.warn('Cannot recalc scale if original points are zero difference.');
             return  {
                 scale: { x: 1, y: 1 },
                 shift: { x: 0, y: 0 }
@@ -319,13 +312,7 @@ export class Sequence {
 
     this._barWidth = Math.abs(this.p1.logical - this.p2.logical) / this._originalData.length;
 
-    console.log(
-        'Spatial recalculated:',
-        'scaleX=', spatial.scale.x,
-        'scaleY=', spatial.scale.y,
-        'shiftX=', spatial.shift.x,
-        'shiftY=', spatial.shift.y
-    );
+   
 
     if (spatial.scale.x === 0 || spatial.scale.y === 0) {
         console.warn('Scale factors cannot be zero.');

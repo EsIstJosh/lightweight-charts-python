@@ -278,3 +278,114 @@ class VerticalSpan(Pane):
         Irreversibly deletes the vertical span.
         """
         self.run_script(f'{self._chart.id}.chart.removeSeries({self.id})')
+
+
+
+class TrendTrace(TwoPointDrawing):
+    """
+    Inherits from TwoPointDrawing("Box", …) to get p1/p2,
+    then looks up the series in Lib.Handler.seriesMap by name,
+    and does:
+      series.primitives["TrendTrace"] = new Lib.TrendTrace(...)
+    """
+    def __init__(
+        self,
+        chart: any,
+        series_name: str,
+        start_time: TIME,
+        start_value: NUM,
+        end_time: TIME,
+        end_value: NUM,
+        rounded: bool,
+        line_color: str = "#00000000",
+        fill_color: str = "#00000000",
+        width: float = 0.5,
+        style: LINE_STYLE = "solid",
+        js_options: str = "{}",
+        offset: Optional[int] = None,
+        func: Optional[any] = None,
+    ) -> None:
+        # 1) Draw a transparent Box to source p1/p2
+        super().__init__(
+            "Box",
+            chart,
+            start_time,
+            start_value,
+            end_time,
+            end_value,
+            rounded,
+            {
+                "lineColor": f'"{line_color}"',
+                "fillColor": f'"{fill_color}"',
+                "width": width,
+                "lineStyle": as_enum(style, LINE_STYLE),
+            },
+            func,
+        )
+
+        off = offset if offset is not None else "undefined"
+        script = f"""
+;(function() {{
+  const box    = window.{self.id};
+  const p1     = box.p1;
+  const p2     = box.p2;
+  const series = Lib.Handler.seriesMap["{series_name}"];
+  if (!series) {{
+    console.error("TrendTrace: no series '{series_name}'");
+    return;
+  }}
+
+  // overwrite the primitive with a fresh TrendTrace
+  series.primitives["TrendTrace"] = new Lib.TrendTrace(
+    Lib.Handler,
+    series,
+    p1,
+    p2,
+    {js_options},
+    {off}
+  );
+
+  series.attachPrimitive(
+    series.primitives["TrendTrace"],
+    `${{p1.logical}} ⥵ ${{p2.logical}}`,
+    false,
+    true
+  );
+
+  box.linkedObjects.push(series.primitives["TrendTrace"]);
+  window.{self.id}_trace = series.primitives["TrendTrace"];
+  }})();
+  """
+
+        self.run_script(script)
+
+    def apply_options(self, trend_options: str) -> None:
+        """
+        Update the trace’s options by calling
+        series.primitives["TrendTrace"].applyOptions(...)
+        """
+        script = f"""
+;(function() {{
+  const series = Lib.Handler.seriesMap["{self.series_name}"];
+  if (series && series.primitives["TrendTrace"]) {{
+    series.primitives["TrendTrace"].applyOptions({trend_options});
+  }}
+}})();
+"""
+        self.run_script(script)
+
+
+    def detach(self) -> None:
+        """
+        Detach (remove) the TrendTrace via
+        series.primitives["TrendTrace"].detach()
+        """
+        script = f"""
+;(function() {{
+  const series = Lib.Handler.seriesMap["{self.series_name}"];
+  if (series && series.primitives["TrendTrace"]) {{
+    series.primitives["TrendTrace"].detach();
+  }}
+}})();
+"""
+        self.run_script(script)

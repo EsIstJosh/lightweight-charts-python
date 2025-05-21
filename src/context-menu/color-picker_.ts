@@ -26,7 +26,7 @@ export class ColorPicker {
     this.container.classList.add("color-picker");
     this.container.style.display = "flex";
     this.container.style.flexDirection = "column";
-    this.container.style.width = "200px";
+    this.container.style.width = "300px";
     this.container.style.height = "350px";
     this.container.style.position = "relative"; // Ensure proper positioning for the exit button.
 
@@ -62,7 +62,7 @@ export class ColorPicker {
       
         const title = document.createElement("div");
         title.innerText = "Custom Colors";
-        title.style.fontSize = "14px";
+        title.style.fontSize = "12px";
         title.style.color = "white";
         customContainer.appendChild(title);
       
@@ -215,7 +215,7 @@ export class ColorPicker {
     
     private createColorBox(color: string): HTMLDivElement {
         const box = document.createElement("div");
-        box.style.aspectRatio = "1"; // Maintain square shape
+        box.style.aspectRatio = ".8"; // Maintain square shape
         box.style.borderRadius = "6px";
         box.style.backgroundColor = color;
         box.style.cursor = "pointer";

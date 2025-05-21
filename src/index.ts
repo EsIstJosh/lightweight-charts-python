@@ -8,3 +8,4 @@ export * from './ohlc-series/ohlc-series';
 export * from './tooltip/tooltip';
 export * from './fill-area/fill-area';
 export * from './pineTS/code-editor';
+export * from './trend-trace/trend-trace'

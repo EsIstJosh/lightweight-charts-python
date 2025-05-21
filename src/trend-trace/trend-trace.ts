@@ -497,12 +497,11 @@ public fromJSON(json: {
 
     // If no matching bar is found, return false
     if (!bar) {
-        console.warn('No matching bar found for the given parameters.');
         return false;
     }
 
     // Check if the mouse price is within the bar's price range
-    if (bar.low != null && bar.high != null) {
+    if (bar.low != null && bar.high != null && bar.low != undefined && bar.high != undefined ) {
         // Apply a small tolerance to account for minor discrepancies
         const tolerance = (bar.high - bar.low) * 0.05;
         return mousePrice >= bar.low - tolerance && mousePrice <= bar.high + tolerance;
@@ -722,7 +721,6 @@ export class TrendTracePaneRenderer
         const barSpace =
           chart.options().width /
           ((visibleRange?.to ?? data.length) - (visibleRange?.from ?? 0));
-        console.log("barSpace:", barSpace);
 
         if (!series || !timeScale || data.length === 0) {
           ctx.restore();
@@ -810,7 +808,6 @@ export class TrendTracePaneRenderer
               wickColor: string | undefined;
             } => bar !== null
           );
-        console.log("Scaled bars:", scaledBars);
 
         // Continue with drawing logic using `scaledBars`...
 
@@ -912,38 +909,47 @@ export class TrendTracePaneRenderer
       this._source._sequence.p2.price < this._source._sequence.p1.price 
       || this._source._sequence._originalP2.price > this._source._sequence._originalP1.logical && 
       this._source._sequence.p2.price > this._source._sequence.p1.price    
-
         const singleWidth =Math.abs(barSpace)
         bars.forEach((bar, index) => {
           const candleBodyWidth = (this._options.barSpacing??0.8)*(singleWidth );
           const candleGap = singleWidth -candleBodyWidth 
-      let leftSide = bar.scaledX1
-      let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
-      if (index < bars.length - 1 && bars[index+1].scaledX1) {
-        const nextBar = bars[index + 1];
-        const currentMid = bar.scaledX1;
-    
-        // If ascending
-        if (currentMid < nextBar.scaledX1) {
-            // e.g. data moves left --> right
-             leftSide = currentMid - (0.5 * singleWidth);
-
-             rightSide = nextBar.scaledX1 - singleWidth  + (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)//(0.5 * singleWidth) + (bar.x2 - bar.x1 > 1? (0.5 * singleWidth): 0) - candleGap;
-    
- 
-        } else {
-            // Descending
-
-             rightSide = currentMid + (0.5 * singleWidth);
-
-             leftSide = nextBar.scaledX1 + singleWidth  - (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)//(0.5 * singleWidth) + (bar.x2 - bar.x1 > 1? (0.5 * singleWidth): 0) - candleGap;
-    
-
-        }
-      }
-        // Example: compute the "middle" for the wick
+        let leftSide = bar.scaledX1
+        let rightSide = leftSide  + ((bar.x2 - bar.x1 + ((this._options.chandelierSize??1) > 1? 1: 0))* singleWidth) - candleGap
+        const i = 0.5
   
-      const middle = (leftSide + rightSide) / 2;      //const scaledHigh =
+        if (index < bars.length - 1 && bars[index+1].scaledX1) {
+          const nextBar = bars[index + 1];
+          const currentMid = bar.scaledX1;
+      
+          // If ascending
+          if (currentMid < nextBar.scaledX1) {
+              // e.g. data moves left --> right
+              leftSide = currentMid - (0.5 * singleWidth);
+
+              rightSide = nextBar.scaledX1 - singleWidth  + (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)
+              const i = -0.5
+  
+          } else {
+              // Descending
+
+              rightSide = currentMid + (0.5 * singleWidth);
+
+              leftSide = nextBar.scaledX1 + singleWidth  - (0.5*singleWidth*(this._options.barSpacing??0.8) - candleGap)
+              const i = 0.5
+
+
+          }
+        }
+        const rawMiddle = ((leftSide + rightSide) / 2)
+        - (i * Math.abs(leftSide - rightSide));
+  
+      // SHIFT the **last** bar’s wick half a bar to the LEFT
+      const isLast = index === bars.length - 1;
+      const middle = isLast
+        ? rawMiddle - singleWidth * 0.5
+        : rawMiddle;
+  
+      //const middle = bars.length (leftSide + rightSide) / 2;      //const scaledHigh =
       //  (this._source.series.priceToCoordinate( (inverted? bar.high??0:bar.low??0)) ?? 0) *
       //  verticalPixelRatio;
       //const scaledLow =
@@ -1067,7 +1073,6 @@ export class TrendTracePaneRenderer
       const shape = this._options?.shape 
       || CandleShape.Rounded; // Use the enum value for defaults
   
-  console.log("Selected candle shape:", shape);
   
   switch (shape) {
     case CandleShape.Rectangle:
